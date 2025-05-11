@@ -5,7 +5,7 @@ const path = require('path');
 
 // Load modules
 const Cache = require('./cache');
-const { loadConfig } = require('./config');
+const { defaultConfig } = require('./config');
 const { createAddon } = require('./addon');
 const setupApiRoutes = require('./routes/api');
 const setupAddonRoutes = require('./routes/addon');
@@ -31,8 +31,8 @@ async function initializeApp() {
     app.use(express.json());
     app.use(express.static(path.join(__dirname, '..', 'public')));
     
-    // Load configuration
-    const userConfig = loadConfig();
+    // Initialize with default configuration
+    const userConfig = { ...defaultConfig };
     
     // Initialize cache
     const cache = new Cache();

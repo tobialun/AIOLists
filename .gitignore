@@ -1,13 +1,22 @@
-node_modules/
-.DS_Store
-.env
-config.json
+# Logs
 *.log
 npm-debug.log*
-.npm
-.eslintcache
-backup/
+
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.local
+
+# Build output
 dist/
-*.swp
+build/
+
+# IDE
 .vscode/
 .idea/
+
+# OS
+.DS_Store
+Thumbs.db

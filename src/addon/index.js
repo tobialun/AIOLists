@@ -165,11 +165,16 @@ async function createAddon(userConfig) {
     id: 'org.stremio.aiolists',
     version: '1.0.0-' + Date.now(),
     name: 'AIOLists',
-    description: 'Browse AIOLists and Trakt lists in Stremio',
+    description: 'Manage all your lists in one place.',
     resources: ['catalog'],
     types: ['movie', 'series'],
     idPrefixes: ['tt'],
-    catalogs: []
+    catalogs: [],
+    logo: 'https://i.imgur.com/nyIDmcb.png',
+    "behaviorHints": {
+      "configurable": true,
+      "configurationRequired": false
+    }
   };
 
   try {

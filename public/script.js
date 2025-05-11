@@ -32,6 +32,8 @@ document.addEventListener('DOMContentLoaded', function() {
     traktPinContainer: document.getElementById('traktPinContainer'),
     traktPin: document.getElementById('traktPin'),
     submitTraktPin: document.getElementById('submitTraktPin'),
+    importedAddons: document.getElementById('importedAddons'),
+    addonsList: document.getElementById('addonsList'),
     
     // Section notifications
     apiKeysNotification: document.getElementById('apiKeysNotification'),
@@ -182,6 +184,9 @@ document.addEventListener('DOMContentLoaded', function() {
         
         elements.listItems.appendChild(fragment);
         elements.listContainer.classList.remove('hidden');
+        
+        // Update imported addons section
+        updateImportedAddons(state.addons);
         
         // Initialize sortable and visibility toggles
         initSortable();
@@ -565,6 +570,40 @@ document.addEventListener('DOMContentLoaded', function() {
       .addon-tag { background: #34495e; color: #ecf0f1; }
     `;
     document.head.appendChild(style);
+  }
+
+  // Function to update the imported addons section
+  function updateImportedAddons(addons) {
+    const addonsList = elements.addonsList;
+    const importedAddonsContainer = elements.importedAddons;
+    
+    if (!addons || Object.keys(addons).length === 0) {
+      importedAddonsContainer.classList.add('hidden');
+      return;
+    }
+    
+    addonsList.innerHTML = '';
+    importedAddonsContainer.classList.remove('hidden');
+    
+    Object.values(addons).forEach(addon => {
+      const addonElement = document.createElement('div');
+      addonElement.className = 'addon-item';
+      
+      const addonHtml = `
+        <div class="addon-info">
+          ${addon.logo ? `<img src="${addon.logo}" alt="${addon.name}" class="addon-logo">` : ''}
+          <div>
+            <span class="addon-name">${addon.name}</span>
+            <span class="addon-version">${addon.version || ''}</span>
+            <div>${addon.catalogs.length} list${addon.catalogs.length !== 1 ? 's' : ''}</div>
+          </div>
+        </div>
+        <button class="remove-addon" onclick="removeAddon('${addon.id}')">Remove</button>
+      `;
+      
+      addonElement.innerHTML = addonHtml;
+      addonsList.appendChild(addonElement);
+    });
   }
 
   // Initialize the application

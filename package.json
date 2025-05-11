@@ -1,7 +1,7 @@
 {
     "name": "stremio-mdblist-addon",
     "version": "1.0.0",
-    "description": "Stremio addon for MDBList integration",
+    "description": "Stremio addon for to manage your lists in one place.",
     "main": "src/index.js",
     "scripts": {
         "start": "node src/index.js",

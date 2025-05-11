@@ -1,11 +1,28 @@
-node_modules
-npm-debug.log
+# Git
 .git
-.github
 .gitignore
+
+# Dependencies
+node_modules/
+npm-debug.log
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# Build output
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+
 README.md
 *.md
-.DS_Store
 backup
-config.json
 *.log 

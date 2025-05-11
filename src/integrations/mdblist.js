@@ -11,41 +11,47 @@ async function fetchAllLists(apiKey) {
   try {
     let allLists = [];
     
-    // Fetch user's regular internal lists from MDBList
+    // Fetch internal lists (these use /lists/{id}/items endpoint)
     try {
-      const userListsResponse = await axios.get(`https://api.mdblist.com/lists/user?apikey=${apiKey}`);
-      const userLists = (userListsResponse.data || []).map(list => ({
-        ...list, 
-        listType: 'L',
-        isInternalList: true
-      }));
-      allLists = [...allLists, ...userLists];
-    
-      // Fetch user's external lists from MDBList
-      const externalListsResponse = await axios.get(`https://api.mdblist.com/external/lists/user?apikey=${apiKey}`);
-      const externalLists = (externalListsResponse.data || []).map(list => ({
-        ...list, 
-        listType: 'E',
-        isExternalList: true
-      }));
-      allLists = [...allLists, ...externalLists];
-    
-      // Add the MDBList watchlist
-      allLists.push({
-        id: 'watchlist',
-        user_id: 'current',
-        name: 'My Watchlist',
-        updated: new Date().toISOString(),
-        isWatchlist: true,
-        listType: 'W'
-      });
+      const internalResponse = await axios.get(`https://api.mdblist.com/lists/user?apikey=${apiKey}`);
+      if (internalResponse.data && Array.isArray(internalResponse.data)) {
+        const internalLists = internalResponse.data.map(list => ({
+          ...list,
+          listType: 'L',
+          endpoint: `/lists/${list.id}/items`
+        }));
+        allLists = [...allLists, ...internalLists];
+      }
     } catch (err) {
-      console.error('Error fetching MDBList lists:', err.message);
+      console.error('Error fetching internal lists:', err.message);
     }
-    
+
+    // Fetch external lists (these use /external/lists/{id}/items endpoint)
+    try {
+      const externalResponse = await axios.get(`https://api.mdblist.com/external/lists/user?apikey=${apiKey}`);
+      if (externalResponse.data && Array.isArray(externalResponse.data)) {
+        const externalLists = externalResponse.data.map(list => ({
+          ...list,
+          listType: 'E',
+          endpoint: `/external/lists/${list.id}/items`
+        }));
+        allLists = [...allLists, ...externalLists];
+      }
+    } catch (err) {
+      console.error('Error fetching external lists:', err.message);
+    }
+
+    // Add watchlist (uses /watchlist/items endpoint)
+    allLists.push({
+      id: 'watchlist',
+      name: 'My Watchlist',
+      listType: 'W',
+      endpoint: '/watchlist/items'
+    });
+
     return allLists;
   } catch (error) {
-    console.error('Error fetching MDBList lists:', error);
+    console.error('Error in fetchAllLists:', error);
     return [];
   }
 }
@@ -54,44 +60,48 @@ async function fetchAllLists(apiKey) {
  * Fetch items in a specific MDBList
  * @param {string} listId - List ID
  * @param {string} apiKey - MDBList API key
- * @param {Object} listsMetadata - Metadata for lists
  * @returns {Promise<Object>} Object with movies and shows
  */
-async function fetchListItems(listId, apiKey, listsMetadata = {}) {
+async function fetchListItems(listId, apiKey) {
   if (!apiKey) return null;
   
   try {
-    // Determine the appropriate URL based on list type
-    let url;
-    let listType = 'unknown';
+    // Remove aiolists- prefix if present
+    const id = listId.replace(/^aiolists-/, '');
     
-    // Check if we have list metadata
-    const listMetadata = listsMetadata[listId];
-    
-    if (listId === 'watchlist') {
-      url = `https://api.mdblist.com/watchlist/items?apikey=${apiKey}`;
-      listType = 'watchlist';
-    } else if (listMetadata && listMetadata.isExternalList) {
-      url = `https://api.mdblist.com/external/lists/${listId}/items?apikey=${apiKey}`;
-      listType = 'external';
-    } else {
-      url = `https://api.mdblist.com/lists/${listId}/items?apikey=${apiKey}`;
-      listType = 'internal';
+    // Special case for watchlist
+    if (id === 'watchlist') {
+      console.log('Fetching watchlist items');
+      const response = await axios.get(`https://api.mdblist.com/watchlist/items?apikey=${apiKey}`);
+      return processApiResponse(response.data);
     }
     
-    const response = await axios.get(url);
-    
-    if (response.status !== 200) {
-      console.error(`Failed to fetch list ${listId}: ${response.status}`);
-      return null;
+    // First try as external list
+    try {
+      console.log(`Trying external list ${id}`);
+      const externalResponse = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}`);
+      if (externalResponse.status === 200 && !externalResponse.data.error) {
+        return processApiResponse(externalResponse.data);
+      }
+    } catch (err) {
+      console.log(`List ${id} is not external, trying internal`);
     }
     
-    return processApiResponse(response.data, listId);
+    // If external fails, try as internal list
+    try {
+      console.log(`Trying internal list ${id}`);
+      const internalResponse = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}`);
+      if (internalResponse.status === 200 && !internalResponse.data.error) {
+        return processApiResponse(internalResponse.data);
+      }
+    } catch (err) {
+      console.log(`List ${id} is not internal either`);
+    }
+    
+    console.error(`Failed to fetch list ${id} from either endpoint`);
+    return null;
   } catch (error) {
-    console.error(`Error fetching list ${listId}:`, error);
-    if (error.response) {
-      console.error('API Error Response:', error.response.data);
-    }
+    console.error(`Error in fetchListItems for ${listId}:`, error);
     return null;
   }
 }
@@ -99,16 +109,15 @@ async function fetchListItems(listId, apiKey, listsMetadata = {}) {
 /**
  * Process API responses from MDBList
  * @param {Object} data - API response data
- * @param {string} listId - List ID
  * @returns {Object} Processed items with movies and shows
  */
-function processApiResponse(data, listId) {
-  if (data.error) {
-    console.error(`API error for list ${listId}: ${data.error}`);
+function processApiResponse(data) {
+  if (!data || data.error) {
+    console.error('API error:', data?.error || 'No data');
     return null;
   }
   
-  // MDBList API might directly return movies and shows properties
+  // Handle direct movies/shows response
   if (data.movies !== undefined || data.shows !== undefined) {
     return {
       movies: Array.isArray(data.movies) ? data.movies : [],
@@ -116,35 +125,19 @@ function processApiResponse(data, listId) {
     };
   }
   
-  // Attempt to find items in the response - different API endpoints might have different structures
-  let itemsArray = [];
-  
-  // Check standard format
-  if (data.items && Array.isArray(data.items)) {
-    itemsArray = data.items;
-  } 
-  // Check if data itself is an array (some APIs directly return an array)
-  else if (Array.isArray(data)) {
-    itemsArray = data;
-  }
-  // Check if data has a 'results' field (common in many APIs)
-  else if (data.results && Array.isArray(data.results)) {
-    itemsArray = data.results;
+  // Handle items array response
+  let items = [];
+  if (Array.isArray(data)) {
+    items = data;
+  } else if (Array.isArray(data.items)) {
+    items = data.items;
+  } else if (Array.isArray(data.results)) {
+    items = data.results;
   }
   
-  // If we still don't have items, return empty arrays
-  if (itemsArray.length === 0) {
-    return {
-      movies: [],
-      shows: []
-    };
-  }
-  
-  // Now we have items, filter by type (if type property exists)
-  // Some APIs use mediatype instead of type
   return {
-    movies: itemsArray.filter(item => item && (item.type === 'movie' || item.mediatype === 'movie')),
-    shows: itemsArray.filter(item => item && (item.type === 'show' || item.mediatype === 'show'))
+    movies: items.filter(item => item && (item.type === 'movie' || item.mediatype === 'movie')),
+    shows: items.filter(item => item && (item.type === 'show' || item.mediatype === 'show'))
   };
 }
 
