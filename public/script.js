@@ -1,6 +1,7 @@
 document.addEventListener('DOMContentLoaded', function() {
   // ==================== STATE MANAGEMENT ====================
   const state = {
+    configHash: null,
     userConfig: {
       listOrder: [],
       hiddenLists: new Set(),
@@ -40,7 +41,32 @@ document.addEventListener('DOMContentLoaded', function() {
   };
 
   // ==================== INITIALIZATION ====================
-  function init() {
+  async function init() {
+    // Check if we have a config hash in the URL path
+    const pathParts = window.location.pathname.split('/').filter(Boolean);
+    
+    // Only proceed with config loading if we're not at the root URL
+    if (pathParts.length === 0) {
+      // Create new configuration if at root URL
+      try {
+        const response = await fetch('/api/config/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        const data = await response.json();
+        if (data.success) {
+          state.configHash = data.configHash;
+          updateURL();
+        }
+      } catch (error) {
+        console.error('Failed to create configuration:', error);
+      }
+      return; // Exit early if at root URL
+    }
+
+    state.configHash = pathParts[0];
+
     if (state.isFirstTimeSetup) {
       showWelcomeMessage();
     }
@@ -48,13 +74,22 @@ document.addEventListener('DOMContentLoaded', function() {
     initStremioButton();
     initEventListeners();
     updateAddonStyles();
-    loadApiKeys();
+    await loadConfiguration();
+  }
+
+  function updateURL() {
+    const url = new URL(window.location.href);
+    // Remove any existing config from query params
+    url.searchParams.delete('config');
+    // Update the pathname to include the hash
+    url.pathname = `/${state.configHash}/configure`;
+    window.history.replaceState({}, '', url);
   }
 
   function initStremioButton() {
     const updateButton = () => {
       const baseUrl = `stremio://${window.location.hostname}${window.location.port ? ':' + window.location.port : ''}`;
-      elements.updateStremioBtn.href = `${baseUrl}/manifest.json?t=${Date.now()}`;
+      elements.updateStremioBtn.href = `${baseUrl}/${state.configHash}/manifest.json`;
     };
     updateButton();
     setInterval(updateButton, 3000);
@@ -67,37 +102,30 @@ document.addEventListener('DOMContentLoaded', function() {
     elements.importAddonBtn?.addEventListener('click', handleAddonImport);
   }
 
-  // ==================== API KEYS MANAGEMENT ====================
-  async function loadApiKeys() {
+  // ==================== CONFIGURATION MANAGEMENT ====================
+  async function loadConfiguration() {
+    if (!state.configHash) return;
+
     try {
-      const [apiKeyData, rpdbData, traktData, configData] = await Promise.all([
-        fetch('/api/config/apikey').then(r => r.json()),
-        fetch('/api/config/rpdbkey').then(r => r.json()),
-        fetch('/api/config/trakt').then(r => r.json()),
-        fetch('/api/config/all').then(r => r.json())
-      ]);
-
-      if (apiKeyData.apiKey) {
-        elements.apiKeyInput.value = apiKeyData.apiKey;
-        await loadLists();
+      const response = await fetch(`/${state.configHash}/config`);
+      const data = await response.json();
+      
+      if (data.success) {
+        state.userConfig = data.config;
+        elements.apiKeyInput.value = state.userConfig.apiKey || '';
+        elements.rpdbApiKeyInput.value = state.userConfig.rpdbApiKey || '';
+        
+        if (state.userConfig.apiKey) {
+          await loadLists();
+        }
       }
-
-      if (rpdbData.rpdbApiKey) {
-        elements.rpdbApiKeyInput.value = rpdbData.rpdbApiKey;
-      }
-
-      if (elements.traktLoginBtn) {
-        elements.traktLoginBtn.href = traktData.authUrl || '/api/trakt/login';
-      }
-
-      updateTraktStatus(traktData);
-      state.userConfig = configData;
-      state.userConfig.hiddenLists = new Set(configData.hiddenLists || []);
     } catch (error) {
+      console.error('Failed to load configuration:', error);
       showStatus('Failed to load configuration', 'error');
     }
   }
 
+  // ==================== API KEYS MANAGEMENT ====================
   async function saveApiKeys() {
     const apiKey = elements.apiKeyInput.value.trim();
     const rpdbApiKey = elements.rpdbApiKeyInput.value.trim();
@@ -108,116 +136,83 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     try {
-      const [apiKeyResult, rpdbResult] = await Promise.all([
-        fetch('/api/config/apikey', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ apiKey })
-        }).then(r => r.json()),
-        rpdbApiKey ? fetch('/api/config/rpdbkey', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rpdbApiKey })
-        }).then(r => r.json()) : Promise.resolve({ success: true })
-      ]);
+      const response = await fetch(`/api/config/${state.configHash}/apikey`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey, rpdbApiKey })
+      });
 
-      if (apiKeyResult.success && rpdbResult.success) {
+      const data = await response.json();
+      if (data.success) {
+        state.configHash = data.configHash;
+        updateURL();
         showSectionNotification('apiKeys', 'API keys saved successfully ✅');
         await loadLists();
-        await refreshManifest();
       } else {
-        showStatus('Failed to save one or more API keys', 'error');
+        showStatus('Failed to save API keys', 'error');
       }
     } catch (error) {
       showStatus('Failed to save API keys', 'error');
     }
   }
 
-  // ==================== LIST MANAGEMENT ====================
+  // ==================== LISTS MANAGEMENT ====================
   async function loadLists() {
-    elements.listContainer.classList.remove('hidden');
-    elements.loading.classList.remove('hidden');
-    elements.listItems.innerHTML = '';
-
     try {
-      const [configData, listsData] = await Promise.all([
-        fetch('/api/config/all').then(r => r.json()),
-        fetch('/api/lists').then(r => r.json())
-      ]);
-
-      state.userConfig = configData;
-      state.userConfig.hiddenLists = new Set(configData.hiddenLists || []);
+      showSectionNotification('lists', 'Loading lists...', true);
       
-      if (listsData.importedAddons) {
-        state.addons = listsData.importedAddons;
-      }
-
-      if (listsData.lists?.length) {
-        state.currentLists = listsData.lists;
-        renderLists(listsData.lists);
-        renderImportedAddons(listsData.importedAddons);
+      const response = await fetch(`/${state.configHash}/lists`);
+      const data = await response.json();
+      
+      if (data.success) {
+        state.currentLists = data.lists;
+        state.addons = data.importedAddons;
+        
+        // Convert hiddenLists to Set for easier lookup
+        state.userConfig.hiddenLists = new Set(state.userConfig.hiddenLists || []);
+        
+        // Update list items
+        elements.listItems.innerHTML = '';
+        const fragment = document.createDocumentFragment();
+        
+        state.currentLists.forEach(list => {
+          const li = createListItem(list);
+          fragment.appendChild(li);
+        });
+        
+        elements.listItems.appendChild(fragment);
+        elements.listContainer.classList.remove('hidden');
+        
+        // Initialize sortable and visibility toggles
+        initSortable();
+        initVisibilityToggles();
+        
+        showSectionNotification('lists', 'Lists loaded successfully ✅');
       } else {
-        elements.listItems.innerHTML = '<p>No lists found. Make sure your API key is correct.</p>';
+        throw new Error(data.error || 'Failed to load lists');
       }
     } catch (error) {
-      elements.listItems.innerHTML = '<p>Failed to load lists</p>';
-    } finally {
-        elements.loading.classList.add('hidden');
+      console.error('Error loading lists:', error);
+      showSectionNotification('lists', 'Failed to load lists ❌', false, 'error');
     }
-  }
-
-  function renderLists(lists) {
-    elements.listItems.innerHTML = '';
-    const fragment = document.createDocumentFragment();
-    
-    lists.forEach(list => {
-      const li = createListItem(list);
-      fragment.appendChild(li);
-    });
-
-    elements.listItems.appendChild(fragment);
-
-    initSortable();
-    initVisibilityToggles();
   }
 
   function createListItem(list) {
     const listId = String(list.id);
+    const isHidden = state.userConfig.hiddenLists.has(listId);
     
     const li = document.createElement('li');
     li.className = 'list-item';
     li.setAttribute('data-id', listId);
+    if (isHidden) li.classList.add('hidden');
     
-    if (list.addonId) {
-      li.setAttribute('data-addon-id', list.addonId);
-      li.setAttribute('data-original-id', list.originalId || '');
-    }
-
-    const dragHandle = createDragHandle();
-    const nameContainer = createNameContainer(list);
-    const badge = createBadge(list);
-    const visibilityToggle = createVisibilityToggle(listId);
-
-    li.append(dragHandle, nameContainer, badge, visibilityToggle);
-
-    if (state.userConfig.hiddenLists.has(listId)) {
-      li.classList.add('hidden');
-    }
-
-    return li;
-  }
-
-  function createDragHandle() {
-    const handle = document.createElement('span');
-    handle.className = 'drag-handle';
-    handle.innerHTML = '☰';
-    return handle;
-  }
-
-  function createNameContainer(list) {
-    const container = document.createElement('div');
-    container.className = 'list-name';
-
+    const dragHandle = document.createElement('span');
+    dragHandle.className = 'drag-handle';
+    dragHandle.innerHTML = '☰';
+    
+    const nameContainer = document.createElement('div');
+    nameContainer.className = 'list-name';
+    
     const nameSpan = document.createElement('span');
     nameSpan.textContent = list.customName || list.name;
     
@@ -225,52 +220,38 @@ document.addEventListener('DOMContentLoaded', function() {
     editBtn.className = 'edit-name-btn';
     editBtn.innerHTML = '✏️';
     editBtn.title = 'Edit list name';
-    editBtn.onclick = () => startEditingName(container, list);
-
-    container.append(nameSpan, editBtn);
-    return container;
-  }
-
-  function createBadge(list) {
+    editBtn.onclick = () => startEditingName(nameContainer, list);
+    
+    nameContainer.append(nameSpan, editBtn);
+    
     const badge = document.createElement('span');
+    badge.className = `badge badge-${list.listType || 'L'}`;
+    badge.textContent = list.listType || 'L';
     
-    if (list.listType === 'A' && list.tagImage) {
-      badge.className = 'badge';
-      const img = document.createElement('img');
-      img.src = list.tagImage;
-      img.alt = list.addonName || 'Addon';
-      img.width = 16;
-      img.height = 16;
-      img.onerror = () => {
-        badge.textContent = 'A';
-        badge.className = 'badge badge-A';
-      };
-      badge.appendChild(img);
-    } else {
-      badge.className = `badge badge-${list.listType}`;
-      badge.textContent = list.listType || 'L';
-    }
-    
-    return badge;
-  }
-
-  function createVisibilityToggle(listId) {
-    const toggle = document.createElement('button');
-    toggle.className = 'visibility-toggle';
-    toggle.setAttribute('data-id', listId);
-    toggle.innerHTML = state.userConfig.hiddenLists.has(listId) ? 
+    const visibilityToggle = document.createElement('button');
+    visibilityToggle.className = 'visibility-toggle';
+    visibilityToggle.setAttribute('data-id', listId);
+    visibilityToggle.innerHTML = isHidden ? 
       '<span class="eye-icon eye-closed"></span>' : 
       '<span class="eye-icon eye-open"></span>';
-    return toggle;
+    
+    li.append(dragHandle, nameContainer, badge, visibilityToggle);
+    return li;
   }
 
   function initSortable() {
-    Sortable.create(elements.listItems, {
-      animation: 150,
-      handle: '.drag-handle',
-      ghostClass: 'sortable-ghost',
-      onEnd: saveListOrder
-    });
+    if (window.Sortable) {
+      Sortable.create(elements.listItems, {
+        animation: 150,
+        handle: '.drag-handle',
+        ghostClass: 'sortable-ghost',
+        onEnd: async (evt) => {
+          const items = elements.listItems.querySelectorAll('.list-item');
+          const order = Array.from(items).map(item => item.dataset.id);
+          await saveListOrder(order);
+        }
+      });
+    }
   }
     
   function initVisibilityToggles() {
@@ -280,6 +261,41 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   // ==================== LIST OPERATIONS ====================
+  async function updateListName(listId, newName) {
+    try {
+      const response = await fetch(`/api/config/${state.configHash}/lists/names`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ listId, customName: newName })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        state.configHash = data.configHash;
+        updateURL();
+        
+        // Update local state
+        if (!state.userConfig.customListNames) {
+          state.userConfig.customListNames = {};
+        }
+        
+        if (newName?.trim()) {
+          state.userConfig.customListNames[String(listId)] = newName.trim();
+        } else {
+          delete state.userConfig.customListNames[String(listId)];
+        }
+        
+        showStatus('List name updated successfully', 'success');
+        return true;
+      } else {
+        throw new Error(data.error || 'Unknown error');
+      }
+    } catch (error) {
+      showStatus(`Failed to update list name: ${error.message}`, 'error');
+      return false;
+    }
+  }
+
   async function startEditingName(container, list) {
     const currentName = list.customName || list.name;
     const originalContent = container.innerHTML;
@@ -299,12 +315,12 @@ document.addEventListener('DOMContentLoaded', function() {
     cancelBtn.className = 'cancel-name-btn';
     cancelBtn.textContent = '✕';
     
-    saveBtn.onclick = async () => {
+    const handleSave = async () => {
       const newName = input.value.trim();
       const success = await updateListName(list.id, newName);
       if (success) {
         const nameSpan = document.createElement('span');
-        nameSpan.textContent = newName;
+        nameSpan.textContent = newName || list.name;
         
         const editBtn = document.createElement('button');
         editBtn.className = 'edit-name-btn';
@@ -314,14 +330,12 @@ document.addEventListener('DOMContentLoaded', function() {
         
         container.innerHTML = '';
         container.append(nameSpan, editBtn);
-        
-        await loadLists();
       } else {
         container.innerHTML = originalContent;
       }
     };
     
-    cancelBtn.onclick = () => {
+    const handleCancel = () => {
       container.innerHTML = originalContent;
       const editBtn = container.querySelector('.edit-name-btn');
       if (editBtn) {
@@ -329,36 +343,23 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     };
     
+    saveBtn.onclick = handleSave;
+    cancelBtn.onclick = handleCancel;
+    
+    // Handle Enter and Escape keys
+    input.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        await handleSave();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        handleCancel();
+      }
+    });
+    
     container.append(input, saveBtn, cancelBtn);
     input.focus();
     input.select();
-  }
-
-  async function updateListName(listId, newName) {
-    try {
-      const response = await fetch('/api/lists/names', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          listId: String(listId), 
-          customName: newName 
-        })
-      });
-      
-      if (!response.ok) throw new Error('Failed to update list name');
-      
-      showSectionNotification('lists', 'List name updated successfully ✅');
-      
-      const listIndex = state.currentLists.findIndex(list => String(list.id) === String(listId));
-      if (listIndex !== -1) {
-        state.currentLists[listIndex].customName = newName;
-      }
-      
-      return true;
-    } catch (error) {
-      showStatus('Failed to update list name', 'error');
-      return false;
-    }
   }
 
   async function toggleListVisibility(event) {
@@ -387,24 +388,22 @@ document.addEventListener('DOMContentLoaded', function() {
     
     try {
       const hiddenLists = Array.from(state.userConfig.hiddenLists).map(String);
-      const response = await fetch('/api/lists/visibility', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hiddenLists })
+      const response = await fetch(`/api/config/${state.configHash}/lists/visibility`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hiddenLists })
       });
 
-      if (!response.ok) throw new Error('Failed to save visibility settings');
-      
       const data = await response.json();
       if (data.success) {
+        state.configHash = data.configHash;
+        updateURL();
         showSectionNotification('lists', 'Visibility Changes Saved ✅');
         
         state.currentLists.forEach(list => {
           const id = String(list.id);
           list.isHidden = state.userConfig.hiddenLists.has(id);
         });
-        
-        await refreshManifest();
       } else {
         throw new Error(data.error || 'Unknown error');
       }
@@ -413,151 +412,26 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   }
 
-  async function saveListOrder() {
-    const items = elements.listItems.querySelectorAll('.list-item');
-    const order = Array.from(items).map(item => String(item.dataset.id));
-    
+  async function saveListOrder(order) {
     showSectionNotification('lists', 'Saving order changes...', true);
     
     try {
-      const response = await fetch('/api/lists/order', {
+      const response = await fetch(`/api/config/${state.configHash}/lists/order`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ order })
       });
 
-      if (!response.ok) throw new Error('Failed to save list order');
-      
       const data = await response.json();
       if (data.success) {
+        state.configHash = data.configHash;
+        updateURL();
         showSectionNotification('lists', 'Order Changes Saved ✅');
-        
-        const newOrder = {};
-        order.forEach((id, index) => {
-          newOrder[id] = index;
-        });
-        
-        state.currentLists.sort((a, b) => {
-          const aOrder = newOrder[String(a.id)] ?? Number.MAX_SAFE_INTEGER;
-          const bOrder = newOrder[String(b.id)] ?? Number.MAX_SAFE_INTEGER;
-          return aOrder - bOrder;
-        });
-        
-        // Re-render the lists with the new order
-        renderLists(state.currentLists);
-        
-        // Refresh the manifest to apply changes
-        await refreshManifest();
       } else {
         throw new Error(data.error || 'Unknown error');
       }
     } catch (error) {
-      showStatus(`Failed to save list order: ${error.message}`, 'error');
-    }
-  }
-
-  // ==================== ADDON MANAGEMENT ====================
-  async function handleAddonImport() {
-    const manifestUrl = elements.manifestUrlInput.value.trim();
-    
-    if (!manifestUrl) {
-      showStatus('Please enter a manifest URL', 'error');
-      return;
-    }
-
-    elements.importStatus.textContent = 'Importing addon...';
-    elements.importStatus.className = 'status info';
-    elements.importStatus.classList.remove('hidden');
-
-    try {
-      const response = await fetch('/api/import-addon', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ manifestUrl })
-      });
-
-      const data = await response.json();
-      if (response.ok) {
-        showSectionNotification('import', data.message || 'Addon imported successfully ✅');
-        elements.manifestUrlInput.value = '';
-        await loadLists();
-      } else {
-        throw new Error(data.error || 'Failed to import addon');
-      }
-    } catch (error) {
-      showStatus(error.message, 'error');
-    } finally {
-      elements.importStatus.classList.add('hidden');
-    }
-  }
-
-  function renderImportedAddons(addons) {
-    const addonsContainer = document.getElementById('importedAddons');
-    const addonsList = document.getElementById('addonsList');
-    
-    if (!addons || Object.keys(addons).length === 0) {
-      addonsContainer.classList.add('hidden');
-      return;
-    }
-
-    addonsContainer.classList.remove('hidden');
-    addonsList.innerHTML = '';
-
-    Object.values(addons).forEach(addon => {
-      const addonElement = createAddonElement(addon);
-      addonsList.appendChild(addonElement);
-    });
-
-    initAddonRemoveButtons();
-  }
-
-  function createAddonElement(addon) {
-    const element = document.createElement('div');
-    element.className = 'addon-item';
-    
-    const logoUrl = addon.logo || 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM2Yzc1N2QiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMjEgMTZWOGE0IDQgMCAwIDAtNC00SDdhNCA0IDAgMCAwLTQgNHY4YTQgNCAwIDAgMCA0IDRoMTBhNCA0IDAgMCAwIDQtNHoiPjwvcGF0aD48bGluZSB4MT0iMTIiIHkxPSI5IiB4Mj0iMTIiIHkyPSIxNSI+PC9saW5lPjxsaW5lIHgxPSI5IiB5MT0iMTIiIHgyPSIxNSIgeTI9IjEyIj48L2xpbmU+PC9zdmc+';
-    
-    element.innerHTML = `
-      <img src="${logoUrl}" alt="${addon.name}" class="addon-logo" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM2Yzc1N2QiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMjEgMTZWOGE0IDQgMCAwIDAtNC00SDdhNCA0IDAgMCAwLTQgNHY4YTQgNCAwIDAgMCA0IDRoMTBhNCA0IDAgMCAwIDQtNHoiPjwvcGF0aD48bGluZSB4MT0iMTIiIHkxPSI5IiB4Mj0iMTIiIHkyPSIxNSI+PC9saW5lPjxsaW5lIHgxPSI5IiB5MT0iMTIiIHgyPSIxNSIgeTI9IjEyIj48L2xpbmU+PC9zdmc+'" />
-      <div class="addon-info">
-        <div style="display: flex; align-items: center;">
-          <span class="addon-name" style="font-weight: bold; margin-right: 8px;">
-            ${addon.name}
-          </span>
-          <small style="color:#666; font-size:0.9em;">${addon.catalogs.length} catalog${addon.catalogs.length !== 1 ? 's' : ''}</small>
-        </div>
-      </div>
-      <button class="remove-addon" data-addon-id="${addon.id}" style="background:#f44336; color:white; border:none; border-radius:4px; padding:4px 8px; cursor:pointer;">Remove</button>
-    `;
-
-    return element;
-  }
-
-  function initAddonRemoveButtons() {
-    document.querySelectorAll('.remove-addon').forEach(button => {
-      button.addEventListener('click', handleAddonRemoval);
-    });
-  }
-
-  async function handleAddonRemoval(event) {
-    const addonId = event.target.dataset.addonId;
-    
-    try {
-      const response = await fetch('/api/remove-addon', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ addonId })
-      });
-
-      const data = await response.json();
-      if (data.success) {
-        showSectionNotification('import', 'Addon removed successfully ✅');
-        await loadLists();
-      } else {
-        throw new Error(data.error || 'Failed to remove addon');
-      }
-    } catch (error) {
-      showStatus(error.message, 'error');
+      showStatus(`Failed to save order: ${error.message}`, 'error');
     }
   }
 
@@ -565,12 +439,12 @@ document.addEventListener('DOMContentLoaded', function() {
   async function handleTraktPinSubmission() {
     const pin = elements.traktPin.value.trim();
     if (!pin) {
-      showStatus('Please enter the Trakt PIN', 'error');
+      showStatus('Please enter your Trakt PIN', 'error');
       return;
     }
 
     try {
-      const response = await fetch('/api/config/trakt/auth', {
+      const response = await fetch(`/api/config/${state.configHash}/trakt/auth`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: pin })
@@ -578,195 +452,121 @@ document.addEventListener('DOMContentLoaded', function() {
 
       const data = await response.json();
       if (data.success) {
-        showSectionNotification('connections', 'Successfully connected to Trakt! ✅');
+        state.configHash = data.configHash;
+        updateURL();
         elements.traktPinContainer.style.display = 'none';
-        
-        // Immediately update UI with the connected button
-        if (elements.traktLoginBtn) {
-          const connectedBtn = document.createElement('span');
-          connectedBtn.className = 'trakt-connected-btn';
-          connectedBtn.textContent = 'Connected to Trakt.tv';
-          elements.traktLoginBtn.parentNode.replaceChild(connectedBtn, elements.traktLoginBtn);
-        }
-        
-        elements.traktStatus.innerHTML = '';
+        showSectionNotification('connections', 'Successfully connected to Trakt ✅');
         await loadLists();
       } else {
-        throw new Error(data.error || 'Failed to connect to Trakt');
+        throw new Error(data.error || 'Failed to authenticate with Trakt');
       }
     } catch (error) {
-      showStatus(error.message, 'error');
+      showStatus(`Failed to authenticate with Trakt: ${error.message}`, 'error');
     }
   }
 
-  function updateTraktStatus(traktData) {
-    if (!elements.traktStatus) return;
-
-    if (traktData.hasAccessToken) {
-      // Replace the login button with a connected button
-      if (elements.traktLoginBtn) {
-        const connectedBtn = document.createElement('span');
-        connectedBtn.className = 'trakt-connected-btn';
-        connectedBtn.textContent = 'Connected to Trakt.tv';
-        elements.traktLoginBtn.parentNode.replaceChild(connectedBtn, elements.traktLoginBtn);
-      }
-      
-      // Hide the PIN container if visible
-      if (elements.traktPinContainer) {
-        elements.traktPinContainer.style.display = 'none';
-      }
-      
-      // Show expiration info if available
-      let expirationInfo = '';
-      if (traktData.expiresAt) {
-        const expiresDate = new Date(traktData.expiresAt);
-        const today = new Date();
-        const daysLeft = Math.round((expiresDate - today) / (1000 * 60 * 60 * 24));
-        expirationInfo = `<small style="color:#666">Token expires in ${daysLeft} days</small>`;
-      }
-
-      elements.traktStatus.innerHTML = expirationInfo;
+  // ==================== ADDON MANAGEMENT ====================
+  async function handleAddonImport() {
+    const manifestUrl = elements.manifestUrlInput.value.trim();
+    if (!manifestUrl) {
+      showStatus('Please enter a manifest URL', 'error');
+      return;
     }
-  }
 
-  // ==================== MANIFEST MANAGEMENT ====================
-  async function refreshManifest() {
     try {
-      await fetch('/api/rebuild-addon', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
+      const response = await fetch(`/api/config/${state.configHash}/import-addon`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ manifestUrl })
       });
 
-      await fetch('/manifest.json?force=true&t=' + Date.now(), {
-          headers: { 
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-          }
-      });
+      const data = await response.json();
+      if (data.success) {
+        state.configHash = data.configHash;
+        updateURL();
+        elements.manifestUrlInput.value = '';
+        showSectionNotification('import', `Successfully imported ${data.addon.name} ✅`);
+        await loadLists();
+      } else {
+        throw new Error(data.error || 'Failed to import addon');
+      }
     } catch (error) {
-      showStatus('Failed to refresh manifest', 'error');
+      showStatus(`Failed to import addon: ${error.message}`, 'error');
+    }
+  }
+
+  async function removeAddon(addonId) {
+    try {
+      const response = await fetch(`/api/config/${state.configHash}/remove-addon`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ addonId })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        state.configHash = data.configHash;
+        updateURL();
+        showSectionNotification('import', 'Addon removed successfully ✅');
+        await loadLists();
+      } else {
+        throw new Error(data.error || 'Failed to remove addon');
+      }
+    } catch (error) {
+      showStatus(`Failed to remove addon: ${error.message}`, 'error');
     }
   }
 
   // ==================== UI HELPERS ====================
-  function showWelcomeMessage() {
-    const welcomeBanner = document.createElement('div');
-    welcomeBanner.className = 'welcome-banner';
-    welcomeBanner.innerHTML = `
-      <h2>Welcome to AIOLists Stremio Addon!</h2>
-      <p>This is your first time setting up the addon. To get started:</p>
-      <ol>
-        <li>Enter your <strong>MDBList API key</strong> above (required)</li>
-        <li>Optionally add a <strong>RPDB API key</strong> for better posters</li>
-        <li>Click "Login to Trakt.tv" to connect your Trakt account</li>
-        <li>Click "Save API Keys" to configure your addon</li>
-      </ol>
-      <p>Once configured, you can:</p>
-      <ul>
-        <li>Drag and drop to reorder your lists</li>
-        <li>Click the eye icon to show/hide lists</li>
-        <li>Use the "Install in Stremio" button to add the addon to Stremio</li>
-      </ul>
-    `;
-    
-    const container = document.querySelector('.container');
-    container.insertBefore(welcomeBanner, elements.statusDiv.nextSibling);
-    
-    elements.apiKeyInput.focus();
-    elements.apiKeyInput.classList.add('highlight');
-    setTimeout(() => elements.apiKeyInput.classList.remove('highlight'), 2000);
-  }
-
-  function showSectionNotification(section, message, isLoading = false) {
-    let notificationElement;
-    
-    switch(section) {
-      case 'apiKeys':
-        notificationElement = elements.apiKeysNotification;
-        break;
-      case 'connections':
-        notificationElement = elements.connectionsNotification;
-        break;
-      case 'import':
-        notificationElement = elements.importNotification;
-        break;
-      case 'lists':
-        notificationElement = elements.listsNotification;
-        break;
-      default:
-        return; // No valid section
-    }
-    
-    if (notificationElement) {
-      notificationElement.textContent = message;
-      notificationElement.classList.add('visible');
-      
-      if (section === 'lists') {
-        if (isLoading) {
-          notificationElement.classList.add('saving');
-        } else {
-          notificationElement.classList.remove('saving');
-          setTimeout(() => notificationElement.classList.remove('visible'), 3000);
-        }
-      } else {
-        setTimeout(() => notificationElement.classList.remove('visible'), 3000);
-      }
-    }
-  }
-
-  function showStatus(message, type) {
+  function showStatus(message, type = 'info') {
     elements.statusDiv.textContent = message;
     elements.statusDiv.className = `status ${type}`;
-    elements.statusDiv.classList.remove('hidden');
-    
-    setTimeout(() => elements.statusDiv.classList.add('hidden'), 5000);
+    elements.statusDiv.style.display = 'block';
+    setTimeout(() => {
+      elements.statusDiv.style.display = 'none';
+    }, 3000);
   }
 
-  // Update styles for addon management
-  function updateAddonStyles() {
-    // Add or update CSS style
-    let style = document.getElementById('addon-styles');
-    if (!style) {
-      style = document.createElement('style');
-      style.id = 'addon-styles';
-      document.head.appendChild(style);
+  function showSectionNotification(section, message, loading = false, type = 'info') {
+    const element = elements[`${section}Notification`];
+    if (element) {
+      element.textContent = message;
+      element.className = `notification ${type} ${loading ? 'loading' : ''}`;
+      element.style.display = 'block';
+      if (!loading) {
+        setTimeout(() => {
+          element.style.display = 'none';
+        }, 3000);
+      }
     }
-    
-    // Updated compact styling
-    style.innerHTML = `
-      .imported-addons {
-        margin-top: 15px;
-      }
-      .imported-addons h3 {
-        margin-bottom: 10px;
-        font-size: 16px;
-      }
-      .addons-list {
-        margin-top: 0;
-      }
-      .addon-item {
-        padding: 10px 12px;
-        margin-bottom: 8px;
-        background: #f5f5f5;
-        border-radius: 4px;
-        display: flex;
-        align-items: center;
-      }
-      .addon-logo {
-        width: 32px;
-        height: 32px;
-        object-fit: contain;
-      }
-      .badge-A {
-        background-color: #607D8B;
-      }
-      #traktPinContainer {
-        display: none;
-        align-items: center;
-      }
-    `;
   }
 
-  // Start the application
+  function showWelcomeMessage() {
+    const welcomeMessage = document.createElement('div');
+    welcomeMessage.className = 'welcome-message';
+    welcomeMessage.innerHTML = `
+      <h2>Welcome to AIOLists! 🎉</h2>
+      <p>To get started, you'll need to:</p>
+      <ol>
+        <li>Enter your MDBList API key</li>
+        <li>Optionally add your RPDB API key for better poster support</li>
+        <li>Connect your Trakt account if you want to include your Trakt lists</li>
+      </ol>
+      <button onclick="this.parentElement.remove()">Got it!</button>
+    `;
+    document.body.insertBefore(welcomeMessage, document.body.firstChild);
+  }
+
+  function updateAddonStyles() {
+    const style = document.createElement('style');
+    style.textContent = `
+      .addon-list { background: #2c3e50; }
+      .addon-list .list-name { color: #ecf0f1; }
+      .addon-tag { background: #34495e; color: #ecf0f1; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  // Initialize the application
   init();
 });

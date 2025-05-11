@@ -158,10 +158,9 @@ async function fetchListContent(listId, userConfig, importedAddons) {
 /**
  * Create the Stremio addon
  * @param {Object} userConfig - User configuration
- * @param {Object} cache - Cache instance
  * @returns {Promise<Object>} Stremio addon interface
  */
-async function createAddon(userConfig, cache) {
+async function createAddon(userConfig) {
   const manifest = {
     id: 'org.stremio.aiolists',
     version: '1.0.0-' + Date.now(),
@@ -336,11 +335,6 @@ async function createAddon(userConfig, cache) {
       
       try {
         const skip = extra?.skip ? parseInt(extra.skip) : 0;
-        const cacheKey = `${id}_${type}_${skip}`;
-        
-        if (cache.has(cacheKey)) {
-          return cache.get(cacheKey);
-        }
         
         const items = await fetchListContent(id, userConfig, userConfig.importedAddons);
         if (!items) {
@@ -356,14 +350,10 @@ async function createAddon(userConfig, cache) {
           filteredMetas = allMetas.filter(item => item.type === 'series');
         }
         
-        const response = {
+        return {
           metas: filteredMetas,
           cacheMaxAge: 3600 * 24
         };
-        
-        cache.set(cacheKey, response, 3600 * 24 * 1000);
-        
-        return response;
       } catch (error) {
         console.error(`Error in catalog handler: ${error.message}`);
         return { metas: [] };
@@ -380,17 +370,11 @@ async function createAddon(userConfig, cache) {
 /**
  * Force rebuild the addon
  * @param {Object} userConfig - User configuration
- * @param {Object} cache - Cache instance
  * @returns {Promise<Object>} Stremio addon interface
  */
-async function rebuildAddon(userConfig, cache) {
-  // Clear all caches to ensure fresh data
-  cache.clear();
-  
+async function rebuildAddon(userConfig) {
   // Completely rebuild the addon interface
-  const addonInterface = await createAddon(userConfig, cache);
-  
-  return addonInterface;
+  return await createAddon(userConfig);
 }
 
 module.exports = {

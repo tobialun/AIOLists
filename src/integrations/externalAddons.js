@@ -26,43 +26,21 @@ async function importExternalAddon(manifestUrl) {
       throw new Error('Invalid manifest format - missing catalogs');
     }
 
-    // Extract the base URL from the manifest URL
-    const parsedUrl = parseUrl(cleanUrl);
-    const baseUrl = `${parsedUrl.protocol}//${parsedUrl.host}`;
-    
-    // Extract the path part which might contain configuration in URL format
-    const pathParts = parsedUrl.pathname.split('/');
-    const configPart = pathParts.length > 2 ? pathParts[1] : null;
-    
-    // Create addon metadata
+    // Create addon metadata - store minimal information needed for direct URL access
     const addonId = manifest.id || `imported_${Date.now()}`;
-    
-    // Process catalogs based on addon type
-    let catalogs = [];
     
     // Check if this is an anime catalogs addon
     const isAnimeCatalogs = manifest.name?.includes('Anime Catalogs') || 
-                           configPart?.includes('myanimelist') || 
-                           configPart?.includes('anilist') || 
-                           configPart?.includes('anidb');
-    
-    if (isAnimeCatalogs) {
-      // Parse configuration from URL if available
-      let config = {};
-      if (configPart && configPart.startsWith('%7B')) {
-        try {
-          config = JSON.parse(decodeURIComponent(configPart));
-        } catch (e) {
-          console.warn('Failed to parse anime catalog config:', e);
-        }
-      }
-      
-      // Process anime catalog format
-      catalogs = processAnimeCatalogFormat(manifest, config);
-    } else {
-      // Process standard Stremio addon format
-      catalogs = processStandardAddonFormat(manifest);
-    }
+                           cleanUrl.includes('myanimelist') || 
+                           cleanUrl.includes('anilist') || 
+                           cleanUrl.includes('anidb');
+
+    // Store only essential catalog information
+    const catalogs = manifest.catalogs.map(catalog => ({
+      id: catalog.id,
+      name: catalog.name,
+      type: isAnimeCatalogs ? 'anime' : (catalog.type || 'movie')
+    }));
 
     return {
       id: addonId,
@@ -70,11 +48,8 @@ async function importExternalAddon(manifestUrl) {
       version: manifest.version || '0.0.0',
       description: manifest.description || '',
       logo: manifest.logo || null,
-      url: cleanUrl,
-      baseUrl,
-      configPath: configPart ? `/${configPart}` : '',
+      url: cleanUrl,  // Store the complete URL for direct access
       catalogs,
-      resources: manifest.resources || [],
       types: manifest.types || [],
       isAnimeCatalogs
     };
@@ -189,48 +164,42 @@ async function fetchExternalAddonItems(catalogId, addon, skip = 0) {
       console.log('No addon provided');
       return { movies: [], shows: [] };
     }
-    
-    // First try to find by direct ID match
-    let catalog = addon.catalogs.find(c => c.id === catalogId);
-    
-    // If not found, try by original ID
-    if (!catalog) {
-      catalog = addon.catalogs.find(c => c.originalId === catalogId);
-    }
-    
-    // If still not found, check if the catalogId has a prefix
-    if (!catalog && catalogId.includes('_')) {
-      const simpleCatalogId = catalogId.split('_').pop();
-      catalog = addon.catalogs.find(c => c.id === simpleCatalogId || c.originalId === simpleCatalogId);
-    }
-    
-    if (!catalog) {
-      console.log(`Catalog ${catalogId} not found in addon ${addon.name}`);
+
+    // For external addons, we'll use their direct URL instead of proxying through our service
+    const directUrl = addon.url;
+    if (!directUrl) {
+      console.log('No direct URL available for addon');
       return { movies: [], shows: [] };
     }
-    
-    console.log(`Found catalog: ${catalog.name} (${catalog.id})`);
-    
+
+    // Parse the URL to get the base and config parts
+    const urlParts = directUrl.split('/');
+    const baseUrl = urlParts.slice(0, 3).join('/');
+    const configPath = urlParts.length > 3 ? '/' + urlParts[3] : '';
+
+    // Construct the catalog URL based on the original addon URL structure
     let catalogUrl;
-    const originalId = catalog.originalId || catalog.id;
-    
-    if (addon.isAnimeCatalogs || catalog.type === 'anime') {
-      // For anime catalogs, format is /catalog/anime/{catalogId}.json
-      catalogUrl = `${addon.baseUrl}${addon.configPath}/catalog/anime/${originalId}.json`;
+    if (addon.isAnimeCatalogs) {
+      // For anime catalogs, maintain the original URL structure
+      catalogUrl = `${baseUrl}${configPath}/catalog/anime/${catalogId}.json`;
     } else {
-      // For standard catalogs, format is /catalog/{type}/{catalogId}/skip={skip}.json
-      catalogUrl = `${addon.baseUrl}/catalog/${catalog.type}/${originalId}/skip=${skip}.json`;
+      // For standard Stremio addons
+      catalogUrl = `${baseUrl}/catalog/${addon.types[0] || 'movie'}/${catalogId}/skip=${skip}.json`;
     }
-    
-    console.log(`Fetching from external addon: ${catalogUrl}`);
-    
+
+    console.log(`Fetching directly from external addon: ${catalogUrl}`);
+
     const response = await axios.get(catalogUrl);
     if (!response.data || !response.data.metas) {
       console.log('No metas found in response');
       return { movies: [], shows: [] };
     }
-    
-    return processMetasToInternalFormat(response.data.metas);
+
+    // Return the metas directly without processing since we'll use them as-is
+    return {
+      movies: response.data.metas.filter(m => m.type === 'movie'),
+      shows: response.data.metas.filter(m => m.type === 'series')
+    };
   } catch (error) {
     console.error(`Error fetching from external addon: ${error.message}`);
     if (error.response) {
@@ -238,59 +207,6 @@ async function fetchExternalAddonItems(catalogId, addon, skip = 0) {
     }
     return { movies: [], shows: [] };
   }
-}
-
-/**
- * Process metas from external addons to our internal format
- * @param {Array} metas - Metadata items from external addon
- * @returns {Object} Object with movies and shows
- */
-function processMetasToInternalFormat(metas) {
-  // Ensure metas is an array
-  if (!Array.isArray(metas)) {
-    return { movies: [], shows: [] };
-  }
-  
-  const processedItems = {
-    movies: [],
-    shows: []
-  };
-  
-  metas.forEach(item => {
-    // Extract the ID - different addons might use different formats
-    const imdbId = item.imdb_id || item.id || (item.ids ? item.ids.imdb : null);
-    
-    // Skip items without valid ID
-    if (!imdbId) return;
-    
-    // Ensure the ID has the correct format
-    const formattedId = imdbId.startsWith('tt') ? imdbId : `tt${imdbId}`;
-    
-    // Common properties for all types
-    const processedItem = {
-      imdb_id: formattedId,
-      title: item.name || item.title,
-      year: item.year || (item.releaseInfo ? parseInt(item.releaseInfo) : null),
-      type: item.type === 'series' ? 'show' : item.type,
-      poster: item.poster,
-      background: item.background,
-      description: item.description || item.overview,
-      runtime: item.runtime,
-      genres: Array.isArray(item.genres) ? item.genres : 
-              (typeof item.genres === 'string' ? item.genres.split(',').map(g => g.trim()) : []),
-      imdbRating: item.imdbRating
-    };
-    
-    // Add to appropriate array based on type
-    if (item.type === 'movie') {
-      processedItems.movies.push(processedItem);
-    } else if (item.type === 'series') {
-      processedItems.shows.push(processedItem);
-    }
-  });
-  
-  console.log(`Processed ${processedItems.movies.length} movies and ${processedItems.shows.length} shows`);
-  return processedItems;
 }
 
 /**
