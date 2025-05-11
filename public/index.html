@@ -22,6 +22,30 @@
     .form-group input[type="password"] {
       flex-grow: 1;
       max-width: 500px;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      transition: all 0.3s ease;
+    }
+    
+    .form-group input[type="text"]:focus,
+    .form-group input[type="password"]:focus {
+      outline: none;
+      border-color: #8E5AF7;
+      box-shadow: 0 0 0 2px rgba(142, 90, 247, 0.2);
+    }
+
+    .form-group input[readonly] {
+      background-color: rgba(76, 175, 80, 0.1);
+      border-color: #4CAF50;
+      color: #2e7d32;
+      cursor: not-allowed;
+    }
+
+    .form-group input.invalid {
+      background-color: rgba(244, 67, 54, 0.1);
+      border-color: #f44336;
+      color: #d32f2f;
     }
     
     .api-section h2, 
@@ -319,6 +343,42 @@
       color: #0277bd;
       background-color: rgba(3, 169, 244, 0.1);
     }
+
+    .input-container {
+      flex-grow: 1;
+      max-width: 500px;
+      position: relative;
+    }
+    
+    .connected-state {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px;
+      background-color: rgba(76, 175, 80, 0.1);
+      border: 1px solid #4CAF50;
+      border-radius: 4px;
+      color: #2e7d32;
+    }
+    
+    .connected-text {
+      font-weight: 500;
+    }
+    
+    .disconnect-btn {
+      padding: 4px 8px;
+      background-color: #f44336;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: background-color 0.3s;
+    }
+    
+    .disconnect-btn:hover {
+      background-color: #d32f2f;
+    }
   </style>
 </head>
 <body>
@@ -335,13 +395,24 @@
       </div>
       <div class="form-group">
         <label for="apiKey">MDBList:</label>
-        <input type="password" id="apiKey" placeholder="Enter your MDBList API key">
+        <div class="input-container">
+          <input type="password" id="apiKey" placeholder="Enter your MDBList API key">
+          <div id="mdblistConnected" class="connected-state" style="display: none;">
+            <span class="connected-text"></span>
+            <button type="button" class="disconnect-btn" onclick="window.disconnectMDBList()">Disconnect</button>
+          </div>
+        </div>
       </div>
       <div class="form-group">
-        <label for="rpdbApiKey">RPDB (optional):</label>
-        <input type="password" id="rpdbApiKey" placeholder="Enter your RPDB API key">
+        <label for="rpdbApiKey">RPDB:</label>
+        <div class="input-container">
+          <input type="password" id="rpdbApiKey" placeholder="Enter your RPDB API key">
+          <div id="rpdbConnected" class="connected-state" style="display: none;">
+            <span class="connected-text"></span>
+            <button type="button" class="disconnect-btn" onclick="window.disconnectRPDB()">Disconnect</button>
+          </div>
+        </div>
       </div>
-      <button id="saveApiKeys">Save API Keys</button>
     </div>
 
     <!-- Connections Section -->

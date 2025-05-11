@@ -1,6 +1,29 @@
 const axios = require('axios');
 
 /**
+ * Validate MDBList API key
+ * @param {string} apiKey - MDBList API key
+ * @returns {Promise<Object|null>} User info if valid, null if invalid
+ */
+async function validateMDBListKey(apiKey) {
+  if (!apiKey) return null;
+  
+  try {
+    const response = await axios.get(`https://api.mdblist.com/user?apikey=${apiKey}`, {
+      timeout: 5000 // 5 second timeout
+    });
+    
+    if (response.status === 200 && response.data) {
+      return response.data;
+    }
+    return null;
+  } catch (error) {
+    console.error('MDBList key validation error:', error.message);
+    return null;
+  }
+}
+
+/**
  * Fetch all user lists from MDBList API
  * @param {string} apiKey - MDBList API key
  * @returns {Promise<Array>} Array of lists
@@ -143,5 +166,6 @@ function processApiResponse(data) {
 
 module.exports = {
   fetchAllLists,
-  fetchListItems
+  fetchListItems,
+  validateMDBListKey
 }; 

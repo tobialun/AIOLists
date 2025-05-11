@@ -39,7 +39,11 @@ document.addEventListener('DOMContentLoaded', function() {
     apiKeysNotification: document.getElementById('apiKeysNotification'),
     connectionsNotification: document.getElementById('connectionsNotification'),
     importNotification: document.getElementById('importNotification'),
-    listsNotification: document.getElementById('listsNotification')
+    listsNotification: document.getElementById('listsNotification'),
+    mdblistConnected: document.getElementById('mdblistConnected'),
+    mdblistConnectedText: document.getElementById('mdblistConnected').querySelector('.connected-text'),
+    rpdbConnected: document.getElementById('rpdbConnected'),
+    rpdbConnectedText: document.getElementById('rpdbConnected').querySelector('.connected-text')
   };
 
   // ==================== INITIALIZATION ====================
@@ -98,7 +102,6 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   function initEventListeners() {
-    elements.saveButton.addEventListener('click', saveApiKeys);
     elements.traktLoginBtn?.addEventListener('click', () => elements.traktPinContainer.style.display = 'block');
     elements.submitTraktPin?.addEventListener('click', handleTraktPinSubmission);
     elements.importAddonBtn?.addEventListener('click', handleAddonImport);
@@ -114,8 +117,20 @@ document.addEventListener('DOMContentLoaded', function() {
       
       if (data.success) {
         state.userConfig = data.config;
-        elements.apiKeyInput.value = state.userConfig.apiKey || '';
-        elements.rpdbApiKeyInput.value = state.userConfig.rpdbApiKey || '';
+        
+        // Handle MDBList key
+        if (state.userConfig.apiKey) {
+          elements.apiKeyInput.value = state.userConfig.apiKey;
+          await validateApiKeys(state.userConfig.apiKey, state.userConfig.rpdbApiKey);
+        }
+        
+        // Handle RPDB key
+        if (state.userConfig.rpdbApiKey) {
+          elements.rpdbApiKeyInput.value = state.userConfig.rpdbApiKey;
+          if (!state.userConfig.apiKey) {
+            await validateApiKeys('', state.userConfig.rpdbApiKey);
+          }
+        }
         
         if (state.userConfig.apiKey) {
           await loadLists();
@@ -128,33 +143,92 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   // ==================== API KEYS MANAGEMENT ====================
-  async function saveApiKeys() {
-    const apiKey = elements.apiKeyInput.value.trim();
-    const rpdbApiKey = elements.rpdbApiKeyInput.value.trim();
+  // Add validation state
+  const validationState = {
+    mdblist: false,
+    rpdb: false,
+    validating: false
+  };
 
-    if (!apiKey) {
-      showStatus('Please enter your MDBList API key', 'error');
-      return;
-    }
+  // Add validation timeout
+  let validationTimeout = null;
+
+  // Add validation function
+  async function validateApiKeys(apiKey, rpdbApiKey) {
+    if (validationState.validating) return;
+    validationState.validating = true;
 
     try {
-      const response = await fetch(`/api/config/${state.configHash}/apikey`, {
+      // First validate the keys
+      const validationResponse = await fetch('/api/validate-keys', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiKey, rpdbApiKey })
       });
 
-      const data = await response.json();
-      if (data.success) {
-        state.configHash = data.configHash;
-        updateURL();
-        showSectionNotification('apiKeys', 'API keys saved successfully ✅');
-        await loadLists();
-      } else {
-        showStatus('Failed to save API keys', 'error');
+      const results = await validationResponse.json();
+      
+      // Handle MDBList validation
+      if (results.mdblist) {
+        validationState.mdblist = true;
+        elements.apiKeyInput.style.display = 'none';
+        elements.mdblistConnected.style.display = 'flex';
+        elements.mdblistConnectedText.textContent = `Connected as ${results.mdblist.username}`;
+        
+        // Automatically save the valid API keys
+        const saveResponse = await fetch(`/api/config/${state.configHash}/apikey`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ apiKey, rpdbApiKey })
+        });
+
+        const saveData = await saveResponse.json();
+        if (saveData.success) {
+          state.configHash = saveData.configHash;
+          updateURL();
+          showSectionNotification('apiKeys', 'API keys saved successfully ✅');
+          await loadLists();
+        }
+      } else if (apiKey) {
+        validationState.mdblist = false;
+        elements.apiKeyInput.style.display = 'block';
+        elements.mdblistConnected.style.display = 'none';
+        elements.apiKeyInput.style.backgroundColor = 'rgba(244, 67, 54, 0.1)';
+      }
+
+      // Handle RPDB validation
+      if (results.rpdb && results.rpdb.valid) {
+        validationState.rpdb = true;
+        elements.rpdbApiKeyInput.style.display = 'none';
+        elements.rpdbConnected.style.display = 'flex';
+        elements.rpdbConnectedText.textContent = 'RPDB Key is Valid';
+        
+        // If MDBList is not connected, save just the RPDB key
+        if (!validationState.mdblist && rpdbApiKey) {
+          const saveResponse = await fetch(`/api/config/${state.configHash}/apikey`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ apiKey: '', rpdbApiKey })
+          });
+
+          const saveData = await saveResponse.json();
+          if (saveData.success) {
+            state.configHash = saveData.configHash;
+            updateURL();
+            showSectionNotification('apiKeys', 'RPDB key saved successfully ✅');
+          }
+        }
+      } else if (rpdbApiKey) {
+        validationState.rpdb = false;
+        elements.rpdbApiKeyInput.style.display = 'block';
+        elements.rpdbConnected.style.display = 'none';
+        elements.rpdbApiKeyInput.style.backgroundColor = 'rgba(244, 67, 54, 0.1)';
       }
     } catch (error) {
-      showStatus('Failed to save API keys', 'error');
+      console.error('Validation error:', error);
+      showStatus('Failed to validate or save API keys', 'error');
+    } finally {
+      validationState.validating = false;
     }
   }
 
@@ -605,6 +679,127 @@ document.addEventListener('DOMContentLoaded', function() {
       addonsList.appendChild(addonElement);
     });
   }
+
+  // Add disconnect functions to window scope
+  window.disconnectMDBList = async function() {
+    try {
+      // First clear the API key from config
+      const response = await fetch(`/api/config/${state.configHash}/apikey`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          apiKey: '', 
+          rpdbApiKey: elements.rpdbApiKeyInput?.value?.trim() || '' 
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to disconnect');
+      }
+
+      const data = await response.json();
+      if (data.success) {
+        state.configHash = data.configHash;
+        updateURL();
+        
+        // Reset MDBList UI elements
+        elements.apiKeyInput.value = '';
+        elements.apiKeyInput.style.display = 'block';
+        elements.apiKeyInput.style.backgroundColor = '';
+        elements.mdblistConnected.style.display = 'none';
+        validationState.mdblist = false;
+        
+        // Update state
+        state.userConfig.apiKey = '';
+        
+        // Reload lists to show remaining ones (Trakt, imported addons, etc.)
+        await loadLists();
+        
+        showSectionNotification('apiKeys', 'Disconnected from MDBList ✅');
+      }
+    } catch (error) {
+      console.error('Failed to disconnect from MDBList:', error);
+      showStatus('Failed to disconnect from MDBList', 'error');
+    }
+  };
+
+  window.disconnectRPDB = async function() {
+    try {
+      const response = await fetch(`/api/config/${state.configHash}/apikey`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          apiKey: elements.apiKeyInput.value.trim(), 
+          rpdbApiKey: '' 
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        state.configHash = data.configHash;
+        updateURL();
+        
+        // Reset UI
+        elements.rpdbApiKeyInput.value = '';
+        elements.rpdbApiKeyInput.style.display = 'block';
+        elements.rpdbApiKeyInput.style.backgroundColor = '';
+        elements.rpdbConnected.style.display = 'none';
+        validationState.rpdb = false;
+        
+        // Update state
+        state.userConfig.rpdbApiKey = '';
+        
+        showSectionNotification('apiKeys', 'Disconnected from RPDB ✓');
+      }
+    } catch (error) {
+      console.error('Failed to disconnect from RPDB:', error);
+      showStatus('Failed to disconnect from RPDB', 'error');
+    }
+  };
+
+  // Add input event listeners for validation
+  elements.apiKeyInput.addEventListener('input', function() {
+    const apiKey = this.value.trim();
+    const rpdbApiKey = elements.rpdbApiKeyInput.value.trim();
+    
+    // Reset validation state
+    this.style.backgroundColor = '';
+    validationState.mdblist = false;
+
+    // Clear previous timeout
+    if (validationTimeout) {
+      clearTimeout(validationTimeout);
+    }
+
+    // Set new timeout for validation
+    if (apiKey) {
+      validationTimeout = setTimeout(() => {
+        validateApiKeys(apiKey, rpdbApiKey);
+      }, 500);
+    }
+  });
+
+  elements.rpdbApiKeyInput.addEventListener('input', function() {
+    const rpdbApiKey = this.value.trim();
+    const apiKey = elements.apiKeyInput.value.trim();
+    
+    // Reset validation state
+    this.style.backgroundColor = '';
+    validationState.rpdb = false;
+
+    // Clear previous timeout
+    if (validationTimeout) {
+      clearTimeout(validationTimeout);
+    }
+
+    // Set new timeout for validation
+    if (rpdbApiKey) {
+      validationTimeout = setTimeout(() => {
+        validateApiKeys(apiKey, rpdbApiKey);
+      }, 500);
+    }
+  });
 
   // Initialize the application
   init();

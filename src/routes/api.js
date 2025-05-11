@@ -1,6 +1,6 @@
 const { validateRPDBKey, testRPDBKey } = require('../utils/posters');
 const { authenticateTrakt, getTraktAuthUrl, fetchTraktLists, fetchTraktListItems } = require('../integrations/trakt');
-const { fetchAllLists, fetchListItems } = require('../integrations/mdblist');
+const { fetchAllLists, fetchListItems, validateMDBListKey } = require('../integrations/mdblist');
 const { importExternalAddon, fetchExternalAddonItems } = require('../integrations/externalAddons');
 const { rebuildAddon, convertToStremioFormat } = require('../addon');
 const { compressConfig, decompressConfig, defaultConfig } = require('../utils/urlConfig');
@@ -262,14 +262,11 @@ function setupApiRoutes(app) {
       const { configHash } = req.params;
       const { apiKey, rpdbApiKey } = req.body;
       
-      if (!apiKey) {
-        return res.status(400).json({ error: 'API key is required' });
-      }
-
+      // Remove validation check to allow empty API key for disconnection
       const config = await decompressConfig(configHash);
       const updatedConfig = {
         ...config,
-        apiKey,
+        apiKey: apiKey || '', // Ensure empty string if apiKey is null/undefined
         rpdbApiKey: rpdbApiKey || '',
         lastUpdated: new Date().toISOString()
       };
@@ -535,6 +532,38 @@ function setupApiRoutes(app) {
     } catch (error) {
       console.error('Error removing addon:', error);
       res.status(500).json({ error: 'Failed to remove addon' });
+    }
+  });
+
+  // Validate API keys
+  app.post('/api/validate-keys', async (req, res) => {
+    try {
+      const { apiKey, rpdbApiKey } = req.body;
+      const results = { mdblist: null, rpdb: null };
+      
+      // Validate MDBList key
+      if (apiKey) {
+        const mdblistResult = await validateMDBListKey(apiKey);
+        if (mdblistResult) {
+          results.mdblist = {
+            valid: true,
+            username: mdblistResult.username
+          };
+        }
+      }
+      
+      // Validate RPDB key
+      if (rpdbApiKey) {
+        const rpdbValid = await validateRPDBKey(rpdbApiKey);
+        results.rpdb = {
+          valid: rpdbValid
+        };
+      }
+      
+      res.json(results);
+    } catch (error) {
+      console.error('Error validating keys:', error);
+      res.status(500).json({ error: 'Failed to validate keys' });
     }
   });
 
