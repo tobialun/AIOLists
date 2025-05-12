@@ -34,6 +34,40 @@ function setupAddonRoutes(app, userConfig, cache, addonInterface) {
     }
   });
 
+  app.get('/catalog/:type/:id/:extra?.json', async (req, res) => {
+    try {
+      const { type, id } = req.params;
+      const extra = req.params.extra || '';
+      
+      // Parse skip parameter from extra
+      const skipMatch = extra.match(/skip=(\d+)/);
+      const skip = skipMatch ? parseInt(skipMatch[1]) : 0;
+      
+      // Fetch list content
+      const listContent = await fetchListContent(id, userConfig, importedAddons, skip);
+      if (!listContent) {
+        return res.json({ metas: [] });
+      }
+      
+      // Convert to Stremio format
+      const metas = await convertToStremioFormat(listContent, skip, 100, userConfig.rpdbApiKey);
+      
+      // Sort metas based on catalogOrder if available
+      if (listContent.catalogOrder !== undefined) {
+        metas.sort((a, b) => {
+          const orderA = a.catalogOrder || 0;
+          const orderB = b.catalogOrder || 0;
+          return orderA - orderB;
+        });
+      }
+      
+      res.json({ metas });
+    } catch (error) {
+      console.error('Error in catalog endpoint:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   return app;
 }
 

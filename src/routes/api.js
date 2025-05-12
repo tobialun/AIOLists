@@ -66,11 +66,6 @@ function setupApiRoutes(app) {
     try {
       const { configHash, type, id, extra } = req.params;
       let { skip = 0 } = req.query;
-
-      // Debug full URL and query
-      console.log(`FULL URL: ${req.originalUrl}`);
-      console.log(`QUERY PARAMS:`, req.query);
-      console.log(`PATH PARAMS:`, req.params);
       
       if (!configHash || !type || !id) {
         return res.status(400).json({ error: 'Config hash, type, and ID are required' });

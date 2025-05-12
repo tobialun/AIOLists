@@ -19,6 +19,9 @@ async function convertToStremioFormat(items, skip = 0, limit = 100, rpdbApiKey =
   // Check if we have a valid RPDB API key
   const useRPDB = !!rpdbApiKey;
   
+  // Preserve the catalog order if it exists
+  const catalogOrder = items.catalogOrder;
+  
   // Prepare all items first without posters
   let allItems = [];
   
@@ -49,6 +52,7 @@ async function convertToStremioFormat(items, skip = 0, limit = 100, rpdbApiKey =
         imdbRating: movie.imdbrating ? movie.imdbrating.toFixed(1) : undefined,
         runtime: movie.runtime ? `${movie.runtime} min` : undefined,
         genres: movie.genres ? (typeof movie.genres === 'string' ? movie.genres.split(',').map(g => g.trim()) : movie.genres) : undefined,
+        catalogOrder: catalogOrder, // Preserve the catalog order
         originalItem: movie // Store original item for reference
       });
     }
@@ -83,6 +87,7 @@ async function convertToStremioFormat(items, skip = 0, limit = 100, rpdbApiKey =
         genres: show.genres ? (typeof show.genres === 'string' ? show.genres.split(',').map(g => g.trim()) : show.genres) : undefined,
         status: show.status,
         videos: [],
+        catalogOrder: catalogOrder, // Preserve the catalog order
         originalItem: show // Store original item for reference
       });
     }
@@ -138,7 +143,8 @@ async function fetchListContent(listId, userConfig, importedAddons, skip = 0) {
       // If we found a matching catalog, fetch its items
       if (catalog) {
         console.log(`Found external catalog: ${catalog.name} (${catalog.id}) in addon: ${addon.name}`);
-        return fetchExternalAddonItems(catalog.id, addon, skip);
+        const items = await fetchExternalAddonItems(catalog.id, addon, skip);
+        return items;
       }
     }
   }
@@ -358,11 +364,18 @@ async function createAddon(userConfig) {
         
         // Ensure skip is a valid number
         const skipValue = isNaN(skip) ? 0 : skip;
+
+        // Find the catalog's position in the manifest
+        const catalogIndex = manifest.catalogs.findIndex(c => c.id === id && c.type === type);
+        console.log(`Catalog ${id} found at index ${catalogIndex} in manifest`);
         
         const items = await fetchListContent(id, userConfig, userConfig.importedAddons, skipValue);
         if (!items) {
           return { metas: [] };
         }
+        
+        // Add manifest order to items
+        items.catalogOrder = catalogIndex;
         
         // Log how many items we got back
         const totalMovies = items.movies?.length || 0;
@@ -379,6 +392,13 @@ async function createAddon(userConfig) {
         } else if (type === 'series') {
           filteredMetas = allMetas.filter(item => item.type === 'series');
         }
+        
+        // Sort by manifest order
+        filteredMetas.sort((a, b) => {
+          const orderA = a.catalogOrder !== undefined ? a.catalogOrder : Number.MAX_SAFE_INTEGER;
+          const orderB = b.catalogOrder !== undefined ? b.catalogOrder : Number.MAX_SAFE_INTEGER;
+          return orderA - orderB;
+        });
         
         console.log(`Returning ${filteredMetas.length} items after filtering for type=${type}`);
         
