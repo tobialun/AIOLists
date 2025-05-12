@@ -181,10 +181,19 @@ async function fetchExternalAddonItems(catalogId, addon, skip = 0) {
     let catalogUrl;
     if (addon.isAnimeCatalogs) {
       // For anime catalogs, maintain the original URL structure
-      catalogUrl = `${baseUrl}${configPath}/catalog/anime/${catalogId}.json`;
+      // Add skip parameter for pagination if applicable
+      catalogUrl = `${baseUrl}${configPath}/catalog/anime/${catalogId}/skip=${skip}.json`;
     } else {
       // For standard Stremio addons
-      catalogUrl = `${baseUrl}/catalog/${addon.types[0] || 'movie'}/${catalogId}/skip=${skip}.json`;
+      const catalogType = catalogId.includes('_') 
+        ? catalogId.split('_').pop() // Extract type from composite ID (e.g., "top_movie" → "movie")
+        : (addon.types[0] || 'movie');
+        
+      // Use the original ID if it's a composite ID
+      const originalId = addon.catalogs.find(c => c.id === catalogId)?.originalId || catalogId;
+      
+      // Build the URL with skip parameter for pagination
+      catalogUrl = `${baseUrl}/catalog/${catalogType}/${originalId}/skip=${skip}.json`;
     }
 
     console.log(`Fetching directly from external addon: ${catalogUrl}`);

@@ -9,11 +9,11 @@ const { storeListsMetadata } = require('../config');
  * Convert API items to Stremio format
  * @param {Object} items - Items from API
  * @param {number} skip - Number of items to skip
- * @param {number} limit - Number of items to return
+ * @param {number} limit - Number of items to return (default 100 for pagination)
  * @param {string} rpdbApiKey - RPDB API key
  * @returns {Promise<Array>} Array of Stremio meta objects
  */
-async function convertToStremioFormat(items, skip = 0, limit = 10, rpdbApiKey = null) {
+async function convertToStremioFormat(items, skip = 0, limit = 100, rpdbApiKey = null) {
   const metas = [];
   
   // Check if we have a valid RPDB API key
@@ -120,9 +120,10 @@ async function convertToStremioFormat(items, skip = 0, limit = 10, rpdbApiKey = 
  * @param {string} listId - List ID
  * @param {Object} userConfig - User configuration
  * @param {Object} importedAddons - Imported addons
+ * @param {number} skip - Number of items to skip
  * @returns {Promise<Object>} List items
  */
-async function fetchListContent(listId, userConfig, importedAddons) {
+async function fetchListContent(listId, userConfig, importedAddons, skip = 0) {
   // Check if this is an imported addon catalog
   if (importedAddons) {
     for (const addon of Object.values(importedAddons)) {
@@ -137,7 +138,7 @@ async function fetchListContent(listId, userConfig, importedAddons) {
       // If we found a matching catalog, fetch its items
       if (catalog) {
         console.log(`Found external catalog: ${catalog.name} (${catalog.id}) in addon: ${addon.name}`);
-        return fetchExternalAddonItems(catalog.id, addon);
+        return fetchExternalAddonItems(catalog.id, addon, skip);
       }
     }
   }
@@ -148,11 +149,11 @@ async function fetchListContent(listId, userConfig, importedAddons) {
     if (!userConfig.traktAccessToken) {
       return null;
     }
-    return fetchTraktListItems(listId, userConfig);
+    return fetchTraktListItems(listId, userConfig, skip);
   }
   
   // Otherwise, assume it's an MDBList list
-  return fetchMDBListItems(listId, userConfig.apiKey, userConfig.listsMetadata);
+  return fetchMDBListItems(listId, userConfig.apiKey, userConfig.listsMetadata, skip);
 }
 
 /**
@@ -225,7 +226,10 @@ async function createAddon(userConfig) {
             type: type,
             id: catalogId,
             name: `${safeName}`,
-            extra: [{ name: 'skip' }]
+            extra: [
+              { name: "skip" }
+            ],
+            extraSupported: ["skip"]
           });
         });
       });
@@ -263,7 +267,10 @@ async function createAddon(userConfig) {
               type: catalogType,
               id: catalogId,
               name: displayName,
-              extra: [{ name: 'skip' }]
+              extra: [
+                { name: "skip" }
+              ],
+              extraSupported: ["skip"]
             });
           });
       }
@@ -339,14 +346,32 @@ async function createAddon(userConfig) {
       }
       
       try {
-        const skip = extra?.skip ? parseInt(extra.skip) : 0;
+        // Extract skip value - could be in different formats
+        let skip = 0;
+        if (extra && extra.skip) {
+          skip = parseInt(extra.skip) || 0;
+        }
         
-        const items = await fetchListContent(id, userConfig, userConfig.importedAddons);
+        // Log the pagination request
+        console.log(`Handling catalog request for ${id} with type=${type} and skip=${skip}`);
+        console.log(`Extra params:`, JSON.stringify(extra));
+        
+        // Ensure skip is a valid number
+        const skipValue = isNaN(skip) ? 0 : skip;
+        
+        const items = await fetchListContent(id, userConfig, userConfig.importedAddons, skipValue);
         if (!items) {
           return { metas: [] };
         }
         
-        const allMetas = await convertToStremioFormat(items, skip, 10, userConfig.rpdbApiKey);
+        // Log how many items we got back
+        const totalMovies = items.movies?.length || 0;
+        const totalShows = items.shows?.length || 0;
+        console.log(`Fetched ${totalMovies} movies and ${totalShows} shows for ${id}`);
+        
+        // When we fetch items with skip parameter, we don't need to skip again in convertToStremioFormat
+        const allMetas = await convertToStremioFormat(items, 0, 100, userConfig.rpdbApiKey);
+        console.log(`Converted ${allMetas.length} items to Stremio format`);
         
         let filteredMetas = allMetas;
         if (type === 'movie') {
@@ -354,6 +379,12 @@ async function createAddon(userConfig) {
         } else if (type === 'series') {
           filteredMetas = allMetas.filter(item => item.type === 'series');
         }
+        
+        console.log(`Returning ${filteredMetas.length} items after filtering for type=${type}`);
+        
+        // If we have a full page of results, indicate that there might be more
+        const hasMore = filteredMetas.length >= 100;
+        console.log(`Has more pages: ${hasMore}`);
         
         return {
           metas: filteredMetas,

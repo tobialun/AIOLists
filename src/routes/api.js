@@ -62,19 +62,44 @@ function setupApiRoutes(app) {
   });
 
   // Serve catalog content
-  app.get('/:configHash/catalog/:type/:id.json', async (req, res) => {
+  app.get('/:configHash/catalog/:type/:id/:extra?.json', async (req, res) => {
     try {
-      const { configHash, type, id } = req.params;
-      const { skip = 0 } = req.query;
+      const { configHash, type, id, extra } = req.params;
+      let { skip = 0 } = req.query;
 
+      // Debug full URL and query
+      console.log(`FULL URL: ${req.originalUrl}`);
+      console.log(`QUERY PARAMS:`, req.query);
+      console.log(`PATH PARAMS:`, req.params);
+      
       if (!configHash || !type || !id) {
         return res.status(400).json({ error: 'Config hash, type, and ID are required' });
+      }
+
+      // Check if skip is in the URL path (e.g., "skip=100")
+      if (extra && extra.includes('skip=')) {
+        const skipMatch = extra.match(/skip=(\d+)/);
+        if (skipMatch && skipMatch[1]) {
+          skip = parseInt(skipMatch[1]);
+          console.log(`Found skip in URL path: ${skip}`);
+        }
       }
 
       // Extract the list ID - handle both aiolists and trakt prefixes
       let listId = id;
       if (id.startsWith('aiolists_') || id.startsWith('aiolists-')) {
         listId = id.substring(9);
+      }
+
+      // Check if ID contains skip parameter (e.g., "aiolists-12345/skip=100")
+      if (listId.includes('/skip=')) {
+        const parts = listId.split('/');
+        listId = parts[0];
+        const skipMatch = parts[1]?.match(/skip=(\d+)/);
+        if (skipMatch && skipMatch[1]) {
+          skip = parseInt(skipMatch[1]);
+          console.log(`Found skip in ID: ${skip}`);
+        }
       }
 
       // Validate the list ID format
@@ -84,6 +109,12 @@ function setupApiRoutes(app) {
 
       const config = await decompressConfig(configHash);
 
+      console.log(`Catalog request with skip=${skip} for listId=${listId}`);
+
+      // Parse skip to ensure it's a number
+      const skipInt = isNaN(parseInt(skip)) ? 0 : parseInt(skip);
+      console.log(`Using skipInt=${skipInt}`);
+
       // Check if this list is hidden
       const hiddenLists = new Set((config.hiddenLists || []).map(String));
       if (hiddenLists.has(String(listId))) {
@@ -92,13 +123,15 @@ function setupApiRoutes(app) {
 
       // Fetch items based on list type
       let items;
+      console.log(`Fetching items for catalog ${listId} with skip=${skipInt}`);
 
       // Check if this is an imported addon catalog
       if (config.importedAddons) {
         for (const addon of Object.values(config.importedAddons)) {
           const catalog = addon.catalogs.find(c => c.id === listId);
           if (catalog) {
-            items = await fetchExternalAddonItems(listId, addon);
+            console.log(`Fetching from external addon with skip=${skipInt}`);
+            items = await fetchExternalAddonItems(listId, addon, skipInt);
             break;
           }
         }
@@ -111,13 +144,15 @@ function setupApiRoutes(app) {
           if (!config.traktAccessToken) {
             return res.status(500).json({ error: 'No Trakt access token configured' });
           }
-          items = await fetchTraktListItems(listId, config);
+          console.log(`Fetching from Trakt with skip=${skipInt}`);
+          items = await fetchTraktListItems(listId, config, skipInt);
         } else {
           // For MDBList items, check API key
           if (!config.apiKey) {
             return res.status(500).json({ error: 'No AIOLists API key configured' });
           }
-          items = await fetchListItems(listId, config.apiKey, config.listsMetadata);
+          console.log(`Fetching from MDBList with skip=${skipInt}`);
+          items = await fetchListItems(listId, config.apiKey, config.listsMetadata, skipInt);
         }
       }
 
@@ -125,9 +160,10 @@ function setupApiRoutes(app) {
         return res.status(500).json({ error: 'Failed to fetch list items' });
       }
 
-      // Convert to Stremio format with pagination
-      const skipInt = parseInt(skip);
-      const metas = await convertToStremioFormat(items, skipInt, 10, config.rpdbApiKey);
+      // Convert to Stremio format without applying skip again
+      // Skip is already applied in the API requests to fetch only the needed page
+      const metas = await convertToStremioFormat(items, 0, 100, config.rpdbApiKey);
+      console.log(`Converted ${metas.length} items to Stremio format`);
 
       // Filter by type
       let filteredMetas = metas;
@@ -140,7 +176,11 @@ function setupApiRoutes(app) {
       // Set cache headers
       res.setHeader('Cache-Control', `max-age=${3600 * 24}`);
 
-      // Return response
+      // Check if we likely have more items
+      const hasMore = filteredMetas.length >= 100;
+      console.log(`Has more pages: ${hasMore} (returned ${filteredMetas.length} items)`);
+
+      // Return response with explicit pagination format
       res.json({
         metas: filteredMetas,
         cacheMaxAge: 3600 * 24

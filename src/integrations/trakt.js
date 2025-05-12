@@ -236,9 +236,10 @@ async function fetchTraktLists(userConfig) {
  * Fetch items from a Trakt list
  * @param {string} listId - Trakt list ID
  * @param {Object} userConfig - User configuration
+ * @param {number} skip - Number of items to skip
  * @returns {Promise<Object>} Object with movies and shows
  */
-async function fetchTraktListItems(listId, userConfig) {
+async function fetchTraktListItems(listId, userConfig, skip = 0) {
   try {
     if (!userConfig.traktAccessToken) {
       return null;
@@ -250,9 +251,17 @@ async function fetchTraktListItems(listId, userConfig) {
       return null;
     }
     
+    // Set a higher limit for fetching more items
+    const limit = 100;
+    
+    // Calculate the page number based on skip value
+    // Trakt API uses pagination with page numbers rather than skip/offset
+    const page = Math.floor(skip / limit) + 1;
+    console.log(`Fetching from Trakt with skip=${skip}, converted to page=${page}`);
+    
     // Handle special Trakt lists
     if (listId === 'trakt_watchlist') {
-      const movies = await axios.get(`${TRAKT_API_URL}/users/me/watchlist/movies`, {
+      const movies = await axios.get(`${TRAKT_API_URL}/users/me/watchlist/movies?limit=${limit}&page=${page}`, {
         headers: {
           'Content-Type': 'application/json',
           'trakt-api-version': '2',
@@ -261,7 +270,7 @@ async function fetchTraktListItems(listId, userConfig) {
         }
       });
       
-      const shows = await axios.get(`${TRAKT_API_URL}/users/me/watchlist/shows`, {
+      const shows = await axios.get(`${TRAKT_API_URL}/users/me/watchlist/shows?limit=${limit}&page=${page}`, {
         headers: {
           'Content-Type': 'application/json',
           'trakt-api-version': '2',
@@ -287,7 +296,7 @@ async function fetchTraktListItems(listId, userConfig) {
     }
     
     if (listId === 'trakt_trending_movies') {
-      const response = await axios.get(`${TRAKT_API_URL}/movies/trending`, {
+      const response = await axios.get(`${TRAKT_API_URL}/movies/trending?limit=${limit}&page=${page}`, {
         headers: {
           'Content-Type': 'application/json',
           'trakt-api-version': '2',
@@ -307,7 +316,7 @@ async function fetchTraktListItems(listId, userConfig) {
     }
     
     if (listId === 'trakt_trending_shows') {
-      const response = await axios.get(`${TRAKT_API_URL}/shows/trending`, {
+      const response = await axios.get(`${TRAKT_API_URL}/shows/trending?limit=${limit}&page=${page}`, {
         headers: {
           'Content-Type': 'application/json',
           'trakt-api-version': '2',
@@ -327,7 +336,7 @@ async function fetchTraktListItems(listId, userConfig) {
     }
     
     if (listId === 'trakt_popular_movies') {
-      const response = await axios.get(`${TRAKT_API_URL}/movies/popular`, {
+      const response = await axios.get(`${TRAKT_API_URL}/movies/popular?limit=${limit}&page=${page}`, {
         headers: {
           'Content-Type': 'application/json',
           'trakt-api-version': '2',
@@ -347,7 +356,7 @@ async function fetchTraktListItems(listId, userConfig) {
     }
     
     if (listId === 'trakt_popular_shows') {
-      const response = await axios.get(`${TRAKT_API_URL}/shows/popular`, {
+      const response = await axios.get(`${TRAKT_API_URL}/shows/popular?limit=${limit}&page=${page}`, {
         headers: {
           'Content-Type': 'application/json',
           'trakt-api-version': '2',
@@ -367,7 +376,7 @@ async function fetchTraktListItems(listId, userConfig) {
     }
     
     if (listId === 'trakt_recommendations_movies') {
-      const response = await axios.get(`${TRAKT_API_URL}/recommendations/movies`, {
+      const response = await axios.get(`${TRAKT_API_URL}/recommendations/movies?limit=${limit}&page=${page}`, {
         headers: {
           'Content-Type': 'application/json',
           'trakt-api-version': '2',
@@ -388,7 +397,7 @@ async function fetchTraktListItems(listId, userConfig) {
     }
     
     if (listId === 'trakt_recommendations_shows') {
-      const response = await axios.get(`${TRAKT_API_URL}/recommendations/shows`, {
+      const response = await axios.get(`${TRAKT_API_URL}/recommendations/shows?limit=${limit}&page=${page}`, {
         headers: {
           'Content-Type': 'application/json',
           'trakt-api-version': '2',
@@ -410,7 +419,7 @@ async function fetchTraktListItems(listId, userConfig) {
     
     // For regular Trakt lists
     const listSlug = listId.replace('trakt_', '');
-    const response = await axios.get(`${TRAKT_API_URL}/users/me/lists/${listSlug}/items`, {
+    const response = await axios.get(`${TRAKT_API_URL}/users/me/lists/${listSlug}/items?limit=${limit}&page=${page}`, {
       headers: {
         'Content-Type': 'application/json',
         'trakt-api-version': '2',

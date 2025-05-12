@@ -83,9 +83,11 @@ async function fetchAllLists(apiKey) {
  * Fetch items in a specific MDBList
  * @param {string} listId - List ID
  * @param {string} apiKey - MDBList API key
+ * @param {Object} listsMetadata - Metadata for all lists
+ * @param {number} skip - Number of items to skip for pagination
  * @returns {Promise<Object>} Object with movies and shows
  */
-async function fetchListItems(listId, apiKey) {
+async function fetchListItems(listId, apiKey, listsMetadata, skip = 0) {
   if (!apiKey) return null;
   
   try {
@@ -94,15 +96,15 @@ async function fetchListItems(listId, apiKey) {
     
     // Special case for watchlist
     if (id === 'watchlist') {
-      console.log('Fetching watchlist items');
-      const response = await axios.get(`https://api.mdblist.com/watchlist/items?apikey=${apiKey}`);
+      console.log(`Fetching watchlist items with skip=${skip}`);
+      const response = await axios.get(`https://api.mdblist.com/watchlist/items?apikey=${apiKey}&limit=100&offset=${skip}`);
       return processApiResponse(response.data);
     }
     
     // First try as external list
     try {
-      console.log(`Trying external list ${id}`);
-      const externalResponse = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}`);
+      console.log(`Trying external list ${id} with skip=${skip}`);
+      const externalResponse = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
       if (externalResponse.status === 200 && !externalResponse.data.error) {
         return processApiResponse(externalResponse.data);
       }
@@ -112,8 +114,8 @@ async function fetchListItems(listId, apiKey) {
     
     // If external fails, try as internal list
     try {
-      console.log(`Trying internal list ${id}`);
-      const internalResponse = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}`);
+      console.log(`Trying internal list ${id} with skip=${skip}`);
+      const internalResponse = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
       if (internalResponse.status === 200 && !internalResponse.data.error) {
         return processApiResponse(internalResponse.data);
       }
