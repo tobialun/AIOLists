@@ -1,4 +1,8 @@
 const axios = require('axios');
+const Cache = require('../cache');
+
+// Create a cache instance for posters with 24 hour TTL
+const posterCache = new Cache({ defaultTTL: 24 * 3600 * 1000 });
 
 /**
  * Test RPDB key with a validation endpoint
@@ -34,6 +38,13 @@ async function fetchPosterFromRPDB(imdbId, rpdbApiKey) {
     return null;
   }
   
+  // Check cache first
+  const cacheKey = `poster_${imdbId}`;
+  const cachedPoster = posterCache.get(cacheKey);
+  if (cachedPoster) {
+    return cachedPoster;
+  }
+  
   try {
     const url = `https://api.ratingposterdb.com/${rpdbApiKey}/imdb/poster-default/${imdbId}.jpg`;
     
@@ -42,6 +53,8 @@ async function fetchPosterFromRPDB(imdbId, rpdbApiKey) {
     });
     
     if (response.status === 200) {
+      // Cache the poster URL
+      posterCache.set(cacheKey, url);
       return url;
     }
     return null;
@@ -77,5 +90,6 @@ function testRPDBKey(rpdbApiKey) {
 module.exports = {
   validateRPDBKey,
   fetchPosterFromRPDB,
-  testRPDBKey
+  testRPDBKey,
+  posterCache
 }; 

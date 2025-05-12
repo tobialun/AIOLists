@@ -6,6 +6,31 @@ const { rebuildAddon, convertToStremioFormat } = require('../addon');
 const { compressConfig, decompressConfig, defaultConfig } = require('../utils/urlConfig');
 const path = require('path');
 const { ITEMS_PER_PAGE } = require('../config');
+const Cache = require('../cache');
+
+// Create cache instances
+const listsCache = new Cache({ defaultTTL: 30 * 60 * 1000 }); // 30 minutes
+const metadataCache = new Cache({ defaultTTL: 60 * 60 * 1000 }); // 1 hour
+
+/**
+ * Generate cache key for lists
+ * @param {string} configHash - Configuration hash
+ * @returns {string} Cache key
+ */
+function getListsCacheKey(configHash) {
+  return `lists_${configHash}`;
+}
+
+/**
+ * Generate cache key for metadata
+ * @param {string} listId - List ID
+ * @param {number} skip - Skip value
+ * @param {string} type - Content type
+ * @returns {string} Cache key
+ */
+function getMetadataCacheKey(listId, skip, type) {
+  return `metadata_${listId}_${skip}_${type}`;
+}
 
 /**
  * Rebuild the addon interface with the given configuration
@@ -177,10 +202,16 @@ function setupApiRoutes(app) {
       console.log(`Has more pages: ${hasMore} (returned ${filteredMetas.length} items)`);
 
       // Return response with explicit pagination format
-      res.json({
+      const result = {
         metas: filteredMetas,
         cacheMaxAge: 3600 * 24
-      });
+      };
+
+      // Cache the result
+      const cacheKey = getMetadataCacheKey(listId, skip, type);
+      metadataCache.set(cacheKey, result);
+
+      res.json(result);
     } catch (error) {
       console.error('Error serving catalog:', error);
       res.status(500).json({ error: 'Failed to serve catalog' });
@@ -285,6 +316,11 @@ function setupApiRoutes(app) {
       const updatedConfig = { ...currentConfig, ...req.body };
       updatedConfig.lastUpdated = new Date().toISOString();
       const newConfigHash = await compressConfig(updatedConfig);
+      
+      // Clear caches when config is updated
+      listsCache.clear();
+      metadataCache.clear();
+      
       res.json({ success: true, configHash: newConfigHash });
     } catch (error) {
       console.error('Error updating configuration:', error);
@@ -321,8 +357,15 @@ function setupApiRoutes(app) {
   app.get('/:configHash/lists', async (req, res) => {
     try {
       const { configHash } = req.params;
-      const config = await decompressConfig(configHash);
       
+      // Check cache first
+      const cacheKey = getListsCacheKey(configHash);
+      const cachedLists = listsCache.get(cacheKey);
+      if (cachedLists) {
+        return res.json(cachedLists);
+      }
+      
+      const config = await decompressConfig(configHash);
       let allLists = [];
       
       // Fetch MDBList lists if API key is provided
@@ -384,11 +427,16 @@ function setupApiRoutes(app) {
         });
       }
       
-      res.json({
+      const result = {
         success: true,
         lists,
         importedAddons: config.importedAddons || {}
-      });
+      };
+      
+      // Cache the result
+      listsCache.set(cacheKey, result);
+      
+      res.json(result);
     } catch (error) {
       console.error('Error fetching lists:', error);
       res.status(500).json({ error: 'Failed to fetch lists' });

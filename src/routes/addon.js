@@ -5,6 +5,21 @@ const { fetchTraktListItems } = require('../integrations/trakt');
 const { fetchListItems } = require('../integrations/mdblist');
 const { fetchExternalAddonItems } = require('../integrations/externalAddons');
 const { ITEMS_PER_PAGE } = require('../config');
+const Cache = require('../cache');
+
+// Create cache instance for addon data
+const addonCache = new Cache({ defaultTTL: 60 * 60 * 1000 }); // 1 hour
+
+/**
+ * Generate cache key for catalog content
+ * @param {string} type - Content type
+ * @param {string} id - Catalog ID
+ * @param {number} skip - Skip value
+ * @returns {string} Cache key
+ */
+function getCatalogCacheKey(type, id, skip) {
+  return `catalog_${type}_${id}_${skip}`;
+}
 
 function setupAddonRoutes(app, userConfig, cache, addonInterface) {
   // Home page and configuration
@@ -44,8 +59,15 @@ function setupAddonRoutes(app, userConfig, cache, addonInterface) {
       const skipMatch = extra.match(/skip=(\d+)/);
       const skip = skipMatch ? parseInt(skipMatch[1]) : 0;
       
+      // Check cache first
+      const cacheKey = getCatalogCacheKey(type, id, skip);
+      const cachedContent = addonCache.get(cacheKey);
+      if (cachedContent) {
+        return res.json(cachedContent);
+      }
+      
       // Fetch list content
-      const listContent = await fetchListContent(id, userConfig, importedAddons, skip);
+      const listContent = await fetchListContent(id, userConfig, userConfig.importedAddons, skip);
       if (!listContent) {
         return res.json({ metas: [] });
       }
@@ -62,7 +84,12 @@ function setupAddonRoutes(app, userConfig, cache, addonInterface) {
         });
       }
       
-      res.json({ metas });
+      const result = { metas };
+      
+      // Cache the result
+      addonCache.set(cacheKey, result);
+      
+      res.json(result);
     } catch (error) {
       console.error('Error in catalog endpoint:', error);
       res.status(500).json({ error: 'Internal server error' });
