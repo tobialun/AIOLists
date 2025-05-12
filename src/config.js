@@ -1,4 +1,4 @@
-const ITEMS_PER_PAGE = 32;
+const ITEMS_PER_PAGE = 100;
 
 // Default config structure
 const defaultConfig = {
