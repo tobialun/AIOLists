@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { ITEMS_PER_PAGE } = require('../config');
 
 const TRAKT_API_URL = 'https://api.trakt.tv';
 const TRAKT_CLIENT_ID = '490414ec03fe9a33b2d0c16d58261ebbbd9cf0eee23f213fa0e3eb1d6126d05c';
@@ -251,8 +252,8 @@ async function fetchTraktListItems(listId, userConfig, skip = 0) {
       return null;
     }
     
-    // Set a higher limit for fetching more items
-    const limit = 100;
+    // Replace hardcoded limit
+    const limit = ITEMS_PER_PAGE;
     
     // Calculate the page number based on skip value
     // Trakt API uses pagination with page numbers rather than skip/offset

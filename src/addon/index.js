@@ -3,7 +3,7 @@ const { fetchPosterFromRPDB } = require('../utils/posters');
 const { fetchTraktListItems, fetchTraktLists } = require('../integrations/trakt');
 const { fetchListItems: fetchMDBListItems, fetchAllLists } = require('../integrations/mdblist');
 const { fetchExternalAddonItems } = require('../integrations/externalAddons');
-const { storeListsMetadata } = require('../config');
+const { storeListsMetadata, ITEMS_PER_PAGE } = require('../config');
 
 /**
  * Convert API items to Stremio format
@@ -13,7 +13,7 @@ const { storeListsMetadata } = require('../config');
  * @param {string} rpdbApiKey - RPDB API key
  * @returns {Promise<Array>} Array of Stremio meta objects
  */
-async function convertToStremioFormat(items, skip = 0, limit = 100, rpdbApiKey = null) {
+async function convertToStremioFormat(items, skip = 0, limit = ITEMS_PER_PAGE, rpdbApiKey = null) {
   const metas = [];
   
   // Check if we have a valid RPDB API key
@@ -383,7 +383,7 @@ async function createAddon(userConfig) {
         console.log(`Fetched ${totalMovies} movies and ${totalShows} shows for ${id}`);
         
         // When we fetch items with skip parameter, we don't need to skip again in convertToStremioFormat
-        const allMetas = await convertToStremioFormat(items, 0, 100, userConfig.rpdbApiKey);
+        const allMetas = await convertToStremioFormat(items, 0, ITEMS_PER_PAGE, userConfig.rpdbApiKey);
         console.log(`Converted ${allMetas.length} items to Stremio format`);
         
         let filteredMetas = allMetas;
@@ -403,7 +403,7 @@ async function createAddon(userConfig) {
         console.log(`Returning ${filteredMetas.length} items after filtering for type=${type}`);
         
         // If we have a full page of results, indicate that there might be more
-        const hasMore = filteredMetas.length >= 100;
+        const hasMore = filteredMetas.length >= ITEMS_PER_PAGE;
         console.log(`Has more pages: ${hasMore}`);
         
         return {

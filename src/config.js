@@ -1,3 +1,5 @@
+const ITEMS_PER_PAGE = 32;
+
 // Default config structure
 const defaultConfig = {
   apiKey: '',            // MDBList API key
@@ -40,5 +42,6 @@ function storeListsMetadata(lists, config) {
 
 module.exports = {
   defaultConfig,
-  storeListsMetadata
+  storeListsMetadata,
+  ITEMS_PER_PAGE
 }; 

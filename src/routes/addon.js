@@ -4,6 +4,7 @@ const { convertToStremioFormat } = require('../addon');
 const { fetchTraktListItems } = require('../integrations/trakt');
 const { fetchListItems } = require('../integrations/mdblist');
 const { fetchExternalAddonItems } = require('../integrations/externalAddons');
+const { ITEMS_PER_PAGE } = require('../config');
 
 function setupAddonRoutes(app, userConfig, cache, addonInterface) {
   // Home page and configuration
@@ -50,7 +51,7 @@ function setupAddonRoutes(app, userConfig, cache, addonInterface) {
       }
       
       // Convert to Stremio format
-      const metas = await convertToStremioFormat(listContent, skip, 100, userConfig.rpdbApiKey);
+      const metas = await convertToStremioFormat(listContent, skip, ITEMS_PER_PAGE, userConfig.rpdbApiKey);
       
       // Sort metas based on catalogOrder if available
       if (listContent.catalogOrder !== undefined) {

@@ -5,6 +5,7 @@ const { importExternalAddon, fetchExternalAddonItems } = require('../integration
 const { rebuildAddon, convertToStremioFormat } = require('../addon');
 const { compressConfig, decompressConfig, defaultConfig } = require('../utils/urlConfig');
 const path = require('path');
+const { ITEMS_PER_PAGE } = require('../config');
 
 /**
  * Rebuild the addon interface with the given configuration
@@ -157,7 +158,7 @@ function setupApiRoutes(app) {
 
       // Convert to Stremio format without applying skip again
       // Skip is already applied in the API requests to fetch only the needed page
-      const metas = await convertToStremioFormat(items, 0, 100, config.rpdbApiKey);
+      const metas = await convertToStremioFormat(items, 0, ITEMS_PER_PAGE, config.rpdbApiKey);
       console.log(`Converted ${metas.length} items to Stremio format`);
 
       // Filter by type
@@ -172,7 +173,7 @@ function setupApiRoutes(app) {
       res.setHeader('Cache-Control', `max-age=${3600 * 24}`);
 
       // Check if we likely have more items
-      const hasMore = filteredMetas.length >= 100;
+      const hasMore = filteredMetas.length >= ITEMS_PER_PAGE;
       console.log(`Has more pages: ${hasMore} (returned ${filteredMetas.length} items)`);
 
       // Return response with explicit pagination format
