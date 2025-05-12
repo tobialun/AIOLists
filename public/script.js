@@ -43,7 +43,9 @@ document.addEventListener('DOMContentLoaded', function() {
     mdblistConnected: document.getElementById('mdblistConnected'),
     mdblistConnectedText: document.getElementById('mdblistConnected').querySelector('.connected-text'),
     rpdbConnected: document.getElementById('rpdbConnected'),
-    rpdbConnectedText: document.getElementById('rpdbConnected').querySelector('.connected-text')
+    rpdbConnectedText: document.getElementById('rpdbConnected').querySelector('.connected-text'),
+    importMDBListBtn: document.getElementById('importMDBListBtn'),
+    mdblistUrl: document.getElementById('mdblistUrl')
   };
 
   // ==================== INITIALIZATION ====================
@@ -105,6 +107,41 @@ document.addEventListener('DOMContentLoaded', function() {
     elements.traktLoginBtn?.addEventListener('click', () => elements.traktPinContainer.style.display = 'block');
     elements.submitTraktPin?.addEventListener('click', handleTraktPinSubmission);
     elements.importAddonBtn?.addEventListener('click', handleAddonImport);
+    elements.importMDBListBtn?.addEventListener('click', async function() {
+      const mdblistUrl = elements.mdblistUrl.value.trim();
+      if (!mdblistUrl) {
+        showStatus('Please enter a MDBList URL', 'error');
+        return;
+      }
+      
+      try {
+        showStatus('Importing MDBList...', 'info');
+        
+        // Import both movie and series catalogs
+        const response = await fetch(`/api/config/${state.configHash}/import-mdblist-url`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            url: mdblistUrl,
+            types: ['movie', 'series']
+          })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+          state.configHash = data.configHash;
+          updateURL();
+          showSectionNotification('import', data.message);
+          elements.mdblistUrl.value = '';
+          await loadLists();
+        } else {
+          throw new Error(data.error || data.details || 'Failed to import MDBList');
+        }
+      } catch (error) {
+        console.error('Error importing MDBList:', error);
+        showStatus(error.message, 'error');
+      }
+    });
   }
 
   // ==================== CONFIGURATION MANAGEMENT ====================

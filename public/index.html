@@ -359,6 +359,8 @@
       border: 1px solid #4CAF50;
       border-radius: 4px;
       color: #2e7d32;
+      width: 100%;
+      max-width: 500px;
     }
     
     .connected-text {
@@ -374,10 +376,53 @@
       cursor: pointer;
       font-size: 12px;
       transition: background-color 0.3s;
+      margin-left: 10px;
+      white-space: nowrap;
     }
     
     .disconnect-btn:hover {
       background-color: #d32f2f;
+    }
+
+    .input-container {
+      display: flex;
+      gap: 8px;
+      width: 100%;
+      max-width: 500px;
+    }
+
+    .action-btn {
+      padding: 8px 16px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .action-btn:hover {
+      background-color: #45a049;
+    }
+
+    .status-message {
+      margin-top: 8px;
+      padding: 8px;
+      border-radius: 4px;
+    }
+
+    .status-message.error {
+      background-color: #ffebee;
+      color: #c62828;
+    }
+
+    .status-message.success {
+      background-color: #e8f5e9;
+      color: #2e7d32;
+    }
+
+    .status-message.info {
+      background-color: #e3f2fd;
+      color: #1565c0;
     }
   </style>
 </head>
@@ -433,21 +478,36 @@
       <div id="traktStatus" style="margin-top: 10px;"></div>
     </div>
 
-    <!-- Import Lists Section -->
-    <div class="api-section">
+    <!-- Import Section -->
+    <div class="import-section">
       <div class="section-header">
-        <h2>Import Lists from Addons</h2>
-        <span id="importNotification" class="section-notification">Addon imported successfully ✅</span>
+        <h2>Import Lists</h2>
+        <span id="importNotification" class="section-notification"></span>
       </div>
-      <p>Import lists from other Stremio addons by pasting their manifest URL</p>
-      <div class="form-group">
-        <input type="text" id="manifestUrl" placeholder="Paste addon manifest URL (e.g. https://example.com/manifest.json)">
-        <button id="importAddon" class="import-btn">Import Lists</button>
-      </div>
-      <div id="importStatus" class="status hidden"></div>
       
-      <div id="importedAddons" class="imported-addons hidden">
-        <h3>Imported Addons</h3>
+      <!-- MDBList URL Import -->
+      <div class="form-group">
+        <label for="mdblistUrl">Import MDBList:</label>
+        <div class="input-container">
+          <input type="text" id="mdblistUrl" placeholder="Enter MDBList URL (e.g., https://mdblist.com/lists/username/list-name)">
+          <button type="button" id="importMDBListBtn" class="action-btn">Import</button>
+        </div>
+      </div>
+      
+      <!-- External Addon Import -->
+      <div class="form-group">
+        <label for="manifestUrl">Import Lists Addon:</label>
+        <div class="input-container">
+          <input type="text" id="manifestUrl" placeholder="Enter manifest URL">
+          <button type="button" id="importAddonBtn" class="action-btn">Import</button>
+        </div>
+      </div>
+      
+      <div id="importStatus" class="status-message"></div>
+      
+      <!-- Imported Addons List -->
+      <div id="importedAddons" class="imported-addons">
+        <h3>Imported Lists</h3>
         <div id="addonsList" class="addons-list"></div>
       </div>
     </div>

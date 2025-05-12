@@ -4,6 +4,7 @@ const { fetchAllLists, fetchListItems, validateMDBListKey } = require('../integr
 const { importExternalAddon, fetchExternalAddonItems } = require('../integrations/externalAddons');
 const { rebuildAddon, convertToStremioFormat } = require('../addon');
 const { compressConfig, decompressConfig, defaultConfig } = require('../utils/urlConfig');
+const { extractMDBListId, buildManifestUrl } = require('../utils/mdblistUrl');
 const path = require('path');
 const { ITEMS_PER_PAGE } = require('../config');
 const Cache = require('../cache');
@@ -97,6 +98,21 @@ function setupApiRoutes(app) {
         return res.status(400).json({ error: 'Config hash, type, and ID are required' });
       }
 
+      const config = await decompressConfig(configHash);
+
+      // Check if this is a MDBList catalog
+      if (config.importedAddons) {
+        for (const addon of Object.values(config.importedAddons)) {
+          if (addon.id.startsWith('mdblist_')) {
+            const catalog = addon.catalogs.find(c => c.id === id && c.type === type);
+            if (catalog && catalog.url) {
+              console.log(`Redirecting to MDBList URL: ${catalog.url}`);
+              return res.redirect(catalog.url);
+            }
+          }
+        }
+      }
+
       // Check if skip is in the URL path (e.g., "skip=100")
       if (extra && extra.includes('skip=')) {
         const skipMatch = extra.match(/skip=(\d+)/);
@@ -127,8 +143,6 @@ function setupApiRoutes(app) {
       if (!listId.match(/^[a-zA-Z0-9_-]+$/)) {
         return res.status(400).json({ error: 'Invalid catalog ID format' });
       }
-
-      const config = await decompressConfig(configHash);
 
       console.log(`Catalog request with skip=${skip} for listId=${listId}`);
 
@@ -648,6 +662,70 @@ function setupApiRoutes(app) {
     } catch (error) {
       console.error('Error validating keys:', error);
       res.status(500).json({ error: 'Failed to validate keys' });
+    }
+  });
+
+  // Import MDBList URL
+  app.post('/api/config/:configHash/import-mdblist-url', async (req, res) => {
+    try {
+      const { configHash } = req.params;
+      const { url, types = ['movie', 'series'] } = req.body;
+      
+      if (!url) {
+        return res.status(400).json({ error: 'MDBList URL is required' });
+      }
+      
+      const config = await decompressConfig(configHash);
+      
+      // Check if MDBList API key is configured
+      if (!config.apiKey) {
+        return res.status(400).json({ error: 'MDBList API key is required' });
+      }
+      
+      // Extract list ID and name from URL
+      const { listId, listName } = await extractMDBListId(url);
+      
+      // Create a manifest for the MDBList
+      const manifest = {
+        id: `mdblist_${listId}`,
+        name: `MDBList - ${listName}`,
+        version: '1.0.0',
+        description: `Imported from MDBList: ${url}`,
+        catalogs: types.map(type => {
+          const catalogId = `${listId}_${type}`;
+          return {
+            type,
+            id: catalogId,
+            name: `${listName} (${type})`,
+            url: buildManifestUrl(listId, listName, config.apiKey, type),
+            extra: [{ name: 'skip' }]
+          };
+        }),
+        resources: ['catalog'],
+        types: types
+      };
+
+      // Add the manifest to the config
+      const updatedConfig = {
+        ...config,
+        importedAddons: {
+          ...(config.importedAddons || {}),
+          [`mdblist_${listId}`]: manifest
+        },
+        lastUpdated: new Date().toISOString()
+      };
+      
+      const newConfigHash = await compressConfig(updatedConfig);
+      await rebuildAddonWithConfig(updatedConfig);
+      
+      res.json({
+        success: true,
+        configHash: newConfigHash,
+        addon: manifest
+      });
+    } catch (error) {
+      console.error('Error importing MDBList URL:', error);
+      res.status(500).json({ error: error.message });
     }
   });
 

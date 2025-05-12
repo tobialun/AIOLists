@@ -78,29 +78,8 @@ async function fetchPosterFromRPDB(imdbId, rpdbApiKey) {
   }
 }
 
-/**
- * Test RPDB key with known IMDb IDs
- * @param {string} rpdbApiKey - RPDB API key
- */
-function testRPDBKey(rpdbApiKey) {
-  if (!rpdbApiKey) return;
-  
-  const testIds = ['tt0111161', 'tt0068646', 'tt0468569'];
-  
-  testIds.forEach(id => {
-    fetchPosterFromRPDB(id, rpdbApiKey)
-      .then(url => {
-        // Success, do nothing
-      })
-      .catch(err => {
-        console.error(`RPDB test error for ${id}: ${err.message}`);
-      });
-  });
-}
-
 module.exports = {
   validateRPDBKey,
   fetchPosterFromRPDB,
-  testRPDBKey,
   posterCache
 }; 

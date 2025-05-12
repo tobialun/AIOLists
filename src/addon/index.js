@@ -4,6 +4,8 @@ const { fetchTraktListItems, fetchTraktLists } = require('../integrations/trakt'
 const { fetchListItems: fetchMDBListItems, fetchAllLists } = require('../integrations/mdblist');
 const { fetchExternalAddonItems } = require('../integrations/externalAddons');
 const { storeListsMetadata, ITEMS_PER_PAGE } = require('../config');
+const { buildManifestUrl } = require('../utils/mdblistUrl');
+const axios = require('axios');
 
 /**
  * Convert API items to Stremio format
@@ -14,6 +16,12 @@ const { storeListsMetadata, ITEMS_PER_PAGE } = require('../config');
  * @returns {Promise<Array>} Array of Stremio meta objects
  */
 async function convertToStremioFormat(items, skip = 0, limit = ITEMS_PER_PAGE, rpdbApiKey = null) {
+  // If the response is already in Stremio format (has metas array)
+  if (items.metas && Array.isArray(items.metas)) {
+    // Just return the slice we need
+    return items.metas.slice(skip, skip + limit);
+  }
+
   const metas = [];
   
   // Check if we have a valid RPDB API key
@@ -41,20 +49,44 @@ async function convertToStremioFormat(items, skip = 0, limit = ITEMS_PER_PAGE, r
         continue;
       }
       
-      allItems.push({
+      const meta = {
         id: imdbId,
         type: 'movie',
-        name: movie.title,
+        name: movie.title || movie.name,
         poster: movie.poster,
-        background: movie.backdrop,
-        description: movie.overview,
-        releaseInfo: movie.release_year || (movie.release_date ? movie.release_date.split('-')[0] : undefined),
-        imdbRating: movie.imdbrating ? movie.imdbrating.toFixed(1) : undefined,
-        runtime: movie.runtime ? `${movie.runtime} min` : undefined,
-        genres: movie.genres ? (typeof movie.genres === 'string' ? movie.genres.split(',').map(g => g.trim()) : movie.genres) : undefined,
-        catalogOrder: catalogOrder, // Preserve the catalog order
-        originalItem: movie // Store original item for reference
-      });
+        background: movie.backdrop || movie.background,
+        description: movie.overview || movie.description,
+        releaseInfo: movie.year || movie.release_year || (movie.release_date ? movie.release_date.split('-')[0] : undefined),
+        imdbRating: movie.imdbRating || (movie.imdbrating ? movie.imdbrating.toFixed(1) : undefined),
+        runtime: movie.runtime ? `${movie.runtime}`.includes(' min') ? movie.runtime : `${movie.runtime} min` : undefined,
+        genres: movie.genres || movie.genre,
+        cast: movie.cast,
+        director: movie.director,
+        writer: movie.writer,
+        awards: movie.awards,
+        country: movie.country,
+        trailers: movie.trailers,
+        trailerStreams: movie.trailerStreams,
+        dvdRelease: movie.dvdRelease,
+        links: movie.links,
+        popularity: movie.popularity,
+        slug: movie.slug,
+        behaviorHints: movie.behaviorHints || {
+          defaultVideoId: imdbId,
+          hasScheduledVideos: false
+        },
+        catalogOrder: catalogOrder
+      };
+
+      // Clean up undefined values
+      Object.keys(meta).forEach(key => meta[key] === undefined && delete meta[key]);
+      
+      // Ensure genres is an array
+      if (meta.genres && typeof meta.genres === 'string') {
+        meta.genres = meta.genres.split(',').map(g => g.trim());
+      }
+
+      allItems.push(meta);
     }
   }
   
@@ -74,22 +106,46 @@ async function convertToStremioFormat(items, skip = 0, limit = ITEMS_PER_PAGE, r
         continue;
       }
       
-      allItems.push({
+      const meta = {
         id: imdbId,
         type: 'series',
-        name: show.title,
+        name: show.title || show.name,
         poster: show.poster,
-        background: show.backdrop,
-        description: show.overview,
-        releaseInfo: show.release_year || (show.first_air_date ? show.first_air_date.split('-')[0] : undefined),
-        imdbRating: show.imdbrating ? show.imdbrating.toFixed(1) : undefined,
-        runtime: show.runtime ? `${show.runtime} min` : undefined,
-        genres: show.genres ? (typeof show.genres === 'string' ? show.genres.split(',').map(g => g.trim()) : show.genres) : undefined,
+        background: show.backdrop || show.background,
+        description: show.overview || show.description,
+        releaseInfo: show.year || show.release_year || (show.first_air_date ? show.first_air_date.split('-')[0] : undefined),
+        imdbRating: show.imdbRating || (show.imdbrating ? show.imdbrating.toFixed(1) : undefined),
+        runtime: show.runtime ? `${show.runtime}`.includes(' min') ? show.runtime : `${show.runtime} min` : undefined,
+        genres: show.genres || show.genre,
+        cast: show.cast,
+        director: show.director,
+        writer: show.writer,
+        awards: show.awards,
+        country: show.country,
+        trailers: show.trailers,
+        trailerStreams: show.trailerStreams,
+        dvdRelease: show.dvdRelease,
+        links: show.links,
+        popularity: show.popularity,
+        slug: show.slug,
         status: show.status,
-        videos: [],
-        catalogOrder: catalogOrder, // Preserve the catalog order
-        originalItem: show // Store original item for reference
-      });
+        videos: show.videos || [],
+        behaviorHints: show.behaviorHints || {
+          defaultVideoId: imdbId,
+          hasScheduledVideos: false
+        },
+        catalogOrder: catalogOrder
+      };
+
+      // Clean up undefined values
+      Object.keys(meta).forEach(key => meta[key] === undefined && delete meta[key]);
+      
+      // Ensure genres is an array
+      if (meta.genres && typeof meta.genres === 'string') {
+        meta.genres = meta.genres.split(',').map(g => g.trim());
+      }
+
+      allItems.push(meta);
     }
   }
   
@@ -104,19 +160,14 @@ async function convertToStremioFormat(items, skip = 0, limit = ITEMS_PER_PAGE, r
       if (rpdbPoster) {
         item.poster = rpdbPoster;
       }
-      // Return the item without originalItem property
-      const { originalItem, ...meta } = item;
-      return meta;
+      return item;
     });
     
     // Wait for all poster fetches to complete
     metas.push(...(await Promise.all(posterPromises)));
   } else {
     // If not using RPDB, just add items without fetching posters
-    for (const item of pageItems) {
-      const { originalItem, ...meta } = item;
-      metas.push(meta);
-    }
+    metas.push(...pageItems);
   }
   
   return metas;
@@ -145,6 +196,20 @@ async function fetchListContent(listId, userConfig, importedAddons, skip = 0) {
       // If we found a matching catalog, fetch its items
       if (catalog) {
         console.log(`Found external catalog: ${catalog.name} (${catalog.id}) in addon: ${addon.name}`);
+        
+        // If this is a MDBList catalog with a direct URL
+        if (catalog.url && addon.id.startsWith('mdblist_')) {
+          try {
+            console.log(`Fetching MDBList catalog from URL: ${catalog.url}`);
+            const response = await axios.get(catalog.url);
+            return response.data;
+          } catch (error) {
+            console.error(`Error fetching MDBList catalog: ${error.message}`);
+            return null;
+          }
+        }
+        
+        // Otherwise use the regular external addon fetching
         const items = await fetchExternalAddonItems(catalog.id, addon, skip);
         return items;
       }
@@ -271,7 +336,7 @@ async function createAddon(userConfig) {
             
             console.log(`Adding catalog to manifest: ${displayName} (${catalogId}) type=${catalogType}`);
             
-            manifest.catalogs.push({
+            const catalogEntry = {
               type: catalogType,
               id: catalogId,
               name: displayName,
@@ -279,7 +344,14 @@ async function createAddon(userConfig) {
                 { name: "skip" }
               ],
               extraSupported: ["skip"]
-            });
+            };
+
+            // Add redirectUrl for MDBList catalogs
+            if (addon.id.startsWith('mdblist_') && catalog.url) {
+              catalogEntry.redirectUrl = catalog.url;
+            }
+            
+            manifest.catalogs.push(catalogEntry);
           });
       }
     }
