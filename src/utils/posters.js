@@ -42,25 +42,36 @@ async function fetchPosterFromRPDB(imdbId, rpdbApiKey) {
   const cacheKey = `poster_${imdbId}`;
   const cachedPoster = posterCache.get(cacheKey);
   if (cachedPoster) {
-    return cachedPoster;
+    return cachedPoster === 'null' ? null : cachedPoster; // Handle cached null values
   }
   
   try {
     const url = `https://api.ratingposterdb.com/${rpdbApiKey}/imdb/poster-default/${imdbId}.jpg`;
     
-    const response = await axios.head(url, { 
-      timeout: 3000 // 3 second timeout
-    });
+    const response = await Promise.race([
+      axios.head(url, { 
+        timeout: 2000, // Reduced timeout to 2 seconds
+        validateStatus: status => status === 200 // Only accept 200 status
+      }),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout')), 2000)
+      )
+    ]);
     
-    if (response.status === 200) {
-      // Cache the poster URL
-      posterCache.set(cacheKey, url);
-      return url;
-    }
-    return null;
+    // Cache the poster URL
+    posterCache.set(cacheKey, url);
+    return url;
   } catch (error) {
-    // Don't log 404s as they're expected
-    if (error.response && error.response.status !== 404) {
+    // Cache negative results to avoid repeated requests
+    if (error.response && error.response.status === 404) {
+      posterCache.set(cacheKey, 'null', 3600 * 1000); // Cache 404s for 1 hour
+    } else if (!error.response) {
+      // For network errors, cache for a shorter time
+      posterCache.set(cacheKey, 'null', 300 * 1000); // Cache for 5 minutes
+    }
+    
+    // Don't log 404s or timeouts as they're expected
+    if (error.response && error.response.status !== 404 && error.message !== 'Timeout') {
       console.error(`RPDB error for ${imdbId}:`, error.message);
     }
     return null;

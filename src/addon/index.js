@@ -98,17 +98,19 @@ async function convertToStremioFormat(items, skip = 0, limit = ITEMS_PER_PAGE, r
   
   // Process RPDB posters only for the current page of items
   if (useRPDB && pageItems.length > 0) {
-    for (const item of pageItems) {
-      // Try to get RPDB poster if we have a valid API key
+    // Fetch all posters in parallel using Promise.all
+    const posterPromises = pageItems.map(async (item) => {
       const rpdbPoster = await fetchPosterFromRPDB(item.id, rpdbApiKey);
       if (rpdbPoster) {
         item.poster = rpdbPoster;
       }
-      
-      // Add to metas without the originalItem property
+      // Return the item without originalItem property
       const { originalItem, ...meta } = item;
-      metas.push(meta);
-    }
+      return meta;
+    });
+    
+    // Wait for all poster fetches to complete
+    metas.push(...(await Promise.all(posterPromises)));
   } else {
     // If not using RPDB, just add items without fetching posters
     for (const item of pageItems) {
