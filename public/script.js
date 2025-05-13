@@ -53,24 +53,16 @@ document.addEventListener('DOMContentLoaded', function() {
     // Check if we have a config hash in the URL path
     const pathParts = window.location.pathname.split('/').filter(Boolean);
     
-    // Only proceed with config loading if we're not at the root URL
-    if (pathParts.length === 0) {
-      // Create new configuration if at root URL
-      try {
-        const response = await fetch('/api/config/create', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({})
-        });
-        const data = await response.json();
-        if (data.success) {
-          state.configHash = data.configHash;
-          updateURL();
-        }
-      } catch (error) {
-        console.error('Failed to create configuration:', error);
+    // If we're at the root URL or /configure, don't try to create a new configuration
+    if (pathParts.length === 0 || pathParts[0] === 'configure') {
+      if (window.location.pathname === '/') {
+        // Simply redirect to /configure if at root
+        window.location.href = '/configure';
+        return;
       }
-      return; // Exit early if at root URL
+      // For /configure path, just initialize normally
+      await loadConfiguration();
+      return;
     }
 
     state.configHash = pathParts[0];

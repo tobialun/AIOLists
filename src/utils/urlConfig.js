@@ -31,6 +31,7 @@ async function compressConfig(config) {
  */
 async function decompressConfig(compressed) {
   try {
+    // If no compressed data or invalid input, return default config
     if (!compressed || typeof compressed !== 'string') {
       return { ...defaultConfig };
     }
@@ -38,6 +39,11 @@ async function decompressConfig(compressed) {
     // Clean the input string
     const cleanCompressed = compressed.trim();
     if (!cleanCompressed) {
+      return { ...defaultConfig };
+    }
+
+    // Handle direct access to /configure without config hash
+    if (cleanCompressed === 'configure') {
       return { ...defaultConfig };
     }
 
@@ -64,6 +70,7 @@ async function decompressConfig(compressed) {
         return { ...defaultConfig };
       }
     } catch (decompressError) {
+      // If decompression fails, return default config instead of throwing
       console.error('Error decompressing config:', decompressError);
       return { ...defaultConfig };
     }
