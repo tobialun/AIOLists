@@ -55,10 +55,6 @@ function setupApiRoutes(app) {
   });
 
   // Serve UI for configure endpoint
-  app.get('/configure', (req, res) => {
-    res.sendFile(path.join(__dirname, '..', '..', 'public', 'index.html'));
-  });
-
   app.get('/:configHash/configure', (req, res) => {
     res.sendFile(path.join(__dirname, '..', '..', 'public', 'index.html'));
   });
