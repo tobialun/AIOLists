@@ -58,9 +58,8 @@ function buildManifestUrl(listId, listName, mdblistApiKey, type) {
   const baseUrl = '1fe84bc728af-stremio-mdblist.baby-beamup.club';
   // Remove any special characters from the list name
   const safeName = listName.replace(/[^\w\s-]/g, '');
-  // Create a unique catalog ID based on type
-  const catalogId = `${listId}-${type}`;
-  return `https://${baseUrl}/${catalogId}/${mdblistApiKey}/catalog/${type}/${safeName}.json`;
+  // Use listId directly without type suffix
+  return `https://${baseUrl}/${listId}/${mdblistApiKey}/catalog/${type}/${safeName}.json`;
 }
 
 module.exports = {

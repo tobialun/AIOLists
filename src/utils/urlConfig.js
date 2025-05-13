@@ -32,14 +32,12 @@ async function compressConfig(config) {
 async function decompressConfig(compressed) {
   try {
     if (!compressed || typeof compressed !== 'string') {
-      console.log('No config hash provided, returning default config');
       return { ...defaultConfig };
     }
 
     // Clean the input string
     const cleanCompressed = compressed.trim();
     if (!cleanCompressed) {
-      console.log('Empty config hash, returning default config');
       return { ...defaultConfig };
     }
 
