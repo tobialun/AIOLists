@@ -343,9 +343,21 @@ document.addEventListener('DOMContentLoaded', function() {
     
     nameContainer.append(nameSpan, editBtn);
     
+    // Create badge/tag based on list type
     const badge = document.createElement('span');
-    badge.className = `badge badge-${list.listType || 'L'}`;
-    badge.textContent = list.listType || 'L';
+    if (list.addonId?.startsWith('mdblist_')) {
+      // For MDBList items, use the logo
+      badge.className = 'badge badge-mdblist';
+      const img = document.createElement('img');
+      img.src = 'https://mdblist.com/static/mdblist_logo.png';
+      img.alt = 'MDBList';
+      img.className = 'mdblist-logo';
+      badge.appendChild(img);
+    } else {
+      // For other items, use the regular badge
+      badge.className = `badge badge-${list.listType || 'L'}`;
+      badge.textContent = list.listType || 'L';
+    }
     
     const visibilityToggle = document.createElement('button');
     visibilityToggle.className = 'visibility-toggle';
@@ -614,7 +626,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   }
 
-  async function removeAddon(addonId) {
+  window.removeAddon = async function(addonId) {
     try {
       const response = await fetch(`/api/config/${state.configHash}/remove-addon`, {
         method: 'POST',
@@ -626,15 +638,34 @@ document.addEventListener('DOMContentLoaded', function() {
       if (data.success) {
         state.configHash = data.configHash;
         updateURL();
+        
+        // Remove the addon from state
+        if (state.addons[addonId]) {
+          delete state.addons[addonId];
+        }
+        
+        // Remove the addon element from UI
+        const addonElement = document.querySelector(`.addon-item button[data-addon-id="${addonId}"]`)?.closest('.addon-item');
+        if (addonElement) {
+          addonElement.remove();
+          
+          // If no more addons, hide the container
+          const addonsList = elements.addonsList;
+          if (!addonsList.children.length) {
+            elements.importedAddons.classList.add('hidden');
+          }
+        }
+        
         showSectionNotification('import', 'Addon removed successfully ✅');
-        await loadLists();
+        await loadLists(); // Reload lists to update the UI
       } else {
         throw new Error(data.error || 'Failed to remove addon');
       }
     } catch (error) {
-      showStatus(`Failed to remove addon: ${error.message}`, 'error');
+      console.error('Failed to remove addon:', error);
+      showStatus('Failed to remove addon', 'error');
     }
-  }
+  };
 
   // ==================== UI HELPERS ====================
   function showStatus(message, type = 'info') {
@@ -679,9 +710,103 @@ document.addEventListener('DOMContentLoaded', function() {
   function updateAddonStyles() {
     const style = document.createElement('style');
     style.textContent = `
-      .addon-list { background: #2c3e50; }
+      .addon-list { 
+        background: #2c3e50; 
+        padding: 8px 0;
+      }
       .addon-list .list-name { color: #ecf0f1; }
       .addon-tag { background: #34495e; color: #ecf0f1; }
+      .addon-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 3px 12px;
+        border-bottom: 1px solid #eee;
+        min-height: 36px;
+        background: #fff;
+      }
+      .addon-info {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 1;
+        flex-direction: row;
+      }
+      .addon-logo {
+        width: 20px;
+        height: 20px;
+        object-fit: contain;
+        flex-shrink: 0;
+      }
+      .addon-details {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+        flex: 1;
+        min-width: 0;
+      }
+      .addon-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #000;
+      }
+      .addon-name {
+        font-weight: 500;
+      }
+      .addon-version {
+        font-size: 0.8em;
+        color: #666;
+      }
+      .list-count {
+        font-size: 0.8em;
+        color: #666;
+      }
+      .remove-addon {
+        padding: 4px 8px;
+        border-radius: 4px;
+        background: #e74c3c;
+        color: white;
+        border: none;
+        cursor: pointer;
+        transition: background 0.2s;
+        font-size: 0.9em;
+      }
+      .remove-addon:hover {
+        background: #c0392b;
+      }
+      .badge-mdblist {
+        display: flex;
+        align-items: center;
+        padding: 2px;
+        margin-right: 3px;
+        background: transparent;
+      }
+        
+      .mdblist-logo {
+        width: 16px;
+        height: 16px;
+        object-fit: contain;
+      }
+      #importedAddons {
+        margin-top: 8px;
+        background: #f5f5f5;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      #importedAddons h3 {
+        color: #000;
+        margin: 0;
+        padding: 6px 12px;
+        font-size: 1.1em;
+        background: #e0e0e0;
+        border-bottom: 1px solid #ddd;
+      }
+      /* Remove the top gray bar by setting the background to white */
+      #addonsList {
+        background: #fff;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -703,16 +828,22 @@ document.addEventListener('DOMContentLoaded', function() {
       const addonElement = document.createElement('div');
       addonElement.className = 'addon-item';
       
+      // Determine if this is a MDBList addon
+      const isMDBList = addon.id.startsWith('mdblist_');
+      
       const addonHtml = `
         <div class="addon-info">
-          ${addon.logo ? `<img src="${addon.logo}" alt="${addon.name}" class="addon-logo">` : ''}
-          <div>
-            <span class="addon-name">${addon.name}</span>
-            <span class="addon-version">${addon.version || ''}</span>
-            <div>${addon.catalogs.length} list${addon.catalogs.length !== 1 ? 's' : ''}</div>
+          ${isMDBList ? 
+            `<img src="https://mdblist.com/static/mdblist_logo.png" alt="MDBList" class="addon-logo">` : 
+            (addon.logo ? `<img src="${addon.logo}" alt="${addon.name}" class="addon-logo">` : '')
+          }
+          <div class="addon-details">
+            <span class="addon-name">${addon.name.split(' - ')[1] || addon.name}</span>
+            <span class="addon-version">${addon.version}</span>
+            <span class="list-count">${addon.catalogs.length} list${addon.catalogs.length !== 1 ? 's' : ''}</span>
           </div>
         </div>
-        <button class="remove-addon" onclick="removeAddon('${addon.id}')">Remove</button>
+        <button class="remove-addon" data-addon-id="${addon.id}" onclick="removeAddon('${addon.id}')">Remove</button>
       `;
       
       addonElement.innerHTML = addonHtml;
