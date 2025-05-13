@@ -619,98 +619,51 @@ function setupApiRoutes(app) {
       
       // Extract list ID and name from URL
       const { listId, listName } = await extractMDBListId(url);
+      
+      // Create a manifest for the MDBList with a single catalog
+      const manifest = {
+        id: `mdblist_${listId}`,
+        name: `MDBList - ${listName}`,
+        version: '1.0.0',
+        description: `Imported from MDBList: ${url}`,
+        catalogs: [{
+          id: listId,
+          name: listName,
+          // The type will be determined by the content when fetching
+          type: 'movie', // Default to movie, will be filtered based on actual content
+          url: buildManifestUrl(listId, listName, config.apiKey, 'movie'),
+          extra: [{ name: 'skip' }]
+        }],
+        resources: ['catalog'],
+        types: ['movie', 'series']
+      };
 
-      // Fetch list details to determine content types
-      try {
-        const response = await axios.get(`https://api.mdblist.com/lists/${listId}/items/?apikey=${config.apiKey}`);
-        const data = response.data;
-        
-        // Check what types of content are in the list
-        const hasMovies = data.movies && data.movies.length > 0;
-        const hasShows = data.shows && data.shows.length > 0;
-        
-        // Create catalogs based on content types
-        const catalogs = [];
-        
-        if (hasMovies) {
-          catalogs.push({
-            id: `${listId}-movie`,
-            name: listName,
-            type: 'movie',
-            url: buildManifestUrl(listId, listName, config.apiKey, 'movie'),
-            extra: [{ name: 'skip' }]
-          });
-        }
-        
-        if (hasShows) {
-          catalogs.push({
-            id: `${listId}-series`,
-            name: listName,
-            type: 'series',
-            url: buildManifestUrl(listId, listName, config.apiKey, 'series'),
-            extra: [{ name: 'skip' }]
-          });
-        }
-        
-        // If no specific content type is found, default to both
-        if (!hasMovies && !hasShows) {
-          catalogs.push({
-            id: `${listId}-movie`,
-            name: listName,
-            type: 'movie',
-            url: buildManifestUrl(listId, listName, config.apiKey, 'movie'),
-            extra: [{ name: 'skip' }]
-          });
-          catalogs.push({
-            id: `${listId}-series`,
-            name: listName,
-            type: 'series',
-            url: buildManifestUrl(listId, listName, config.apiKey, 'series'),
-            extra: [{ name: 'skip' }]
-          });
-        }
+      // Get existing MDBList imports
+      const existingMDBLists = Object.entries(config.importedAddons || {})
+        .filter(([key]) => key.startsWith('mdblist_'))
+        .reduce((acc, [key, value]) => ({ ...acc, [key]: value }), {});
 
-        // Create manifest for the MDBList
-        const manifest = {
-          id: `mdblist_${listId}`,
-          name: `MDBList - ${listName}`,
-          version: '1.0.0',
-          description: `Imported from MDBList: ${url}`,
-          catalogs: catalogs,
-          resources: ['catalog'],
-          types: ['movie', 'series']
-        };
-
-        // Get existing MDBList imports
-        const existingMDBLists = Object.entries(config.importedAddons || {})
-          .filter(([key]) => key.startsWith('mdblist_'))
-          .reduce((acc, [key, value]) => ({ ...acc, [key]: value }), {});
-
-        // Update the config with RPDB key if provided and preserve existing MDBList imports
-        const updatedConfig = {
-          ...config,
-          rpdbApiKey: rpdbApiKey || config.rpdbApiKey,
-          importedAddons: {
-            ...config.importedAddons,
-            ...existingMDBLists,
-            [`mdblist_${listId}`]: manifest
-          },
-          lastUpdated: new Date().toISOString()
-        };
-        
-        const newConfigHash = await compressConfig(updatedConfig);
-        await rebuildAddonWithConfig(updatedConfig);
-        
-        res.json({
-          success: true,
-          configHash: newConfigHash,
-          addon: manifest,
-          message: `Successfully imported ${listName}`
-        });
-      } catch (error) {
-        console.error('Error fetching list details:', error);
-        return res.status(500).json({ error: 'Failed to fetch list details from MDBList' });
-      }
+      // Update the config with RPDB key if provided and preserve existing MDBList imports
+      const updatedConfig = {
+        ...config,
+        rpdbApiKey: rpdbApiKey || config.rpdbApiKey,
+        importedAddons: {
+          ...config.importedAddons,
+          ...existingMDBLists,
+          [`mdblist_${listId}`]: manifest
+        },
+        lastUpdated: new Date().toISOString()
+      };
+      
+      const newConfigHash = await compressConfig(updatedConfig);
+      await rebuildAddonWithConfig(updatedConfig);
+      
+      res.json({
+        success: true,
+        configHash: newConfigHash,
+        addon: manifest,
+        message: `Successfully imported ${listName}`
+      });
     } catch (error) {
       console.error('Error importing MDBList URL:', error);
       res.status(500).json({ error: error.message });
