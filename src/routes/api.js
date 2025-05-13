@@ -171,7 +171,7 @@ function setupApiRoutes(app) {
         }
 
         // For other external addons, fetch from their API
-        const items = await fetchExternalAddonItems(listId, addonCatalog, skip);
+        const items = await fetchExternalAddonItems(listId, addonCatalog, skip, config.rpdbApiKey);
         
         // Set cache headers
         res.setHeader('Cache-Control', `max-age=${3600 * 24}`);

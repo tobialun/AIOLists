@@ -258,7 +258,6 @@ async function fetchTraktListItems(listId, userConfig, skip = 0) {
     // Calculate the page number based on skip value
     // Trakt API uses pagination with page numbers rather than skip/offset
     const page = Math.floor(skip / limit) + 1;
-    console.log(`Fetching from Trakt with skip=${skip}, converted to page=${page}`);
     
     // Handle special Trakt lists
     if (listId === 'trakt_watchlist') {

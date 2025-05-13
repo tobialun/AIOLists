@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { fetchPosterFromRPDB } = require('../utils/posters');
 
 /**
  * Represents an external addon with its manifest and metadata endpoints
@@ -221,7 +222,7 @@ async function importExternalAddon(manifestUrl) {
 /**
  * Fetch items from an external addon catalog
  */
-async function fetchExternalAddonItems(catalogId, addon, skip = 0) {
+async function fetchExternalAddonItems(catalogId, addon, skip = 0, rpdbApiKey = null) {
   try {
     if (!addon || !addon.url) {
       console.error('Invalid addon configuration');
@@ -248,6 +249,24 @@ async function fetchExternalAddonItems(catalogId, addon, skip = 0) {
     if (!response.data || !response.data.metas) {
       console.error('Invalid metadata response:', response.data);
       return [];
+    }
+
+    // If we have RPDB API key, update posters
+    if (rpdbApiKey) {
+      const metas = response.data.metas;
+      const posterPromises = metas.map(async (item) => {
+        // Ensure we have a valid IMDb ID
+        const imdbId = item.imdb_id || item.id;
+        if (!imdbId || !imdbId.startsWith('tt')) return item;
+        
+        const rpdbPoster = await fetchPosterFromRPDB(imdbId, rpdbApiKey);
+        if (rpdbPoster) {
+          return { ...item, poster: rpdbPoster };
+        }
+        return item;
+      });
+      
+      return await Promise.all(posterPromises);
     }
 
     return response.data.metas;

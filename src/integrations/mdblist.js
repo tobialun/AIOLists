@@ -97,7 +97,6 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0) {
     
     // Special case for watchlist
     if (id === 'watchlist') {
-      console.log(`Fetching watchlist items with skip=${skip}`);
       const response = await axios.get(`https://api.mdblist.com/watchlist/items?apikey=${apiKey}&limit=100&offset=${skip}`);
       return processApiResponse(response.data);
     }
