@@ -41,7 +41,6 @@ function getMetadataCacheKey(listId, skip, type) {
  */
 async function rebuildAddonWithConfig(config) {
   try {
-    console.log('Rebuilding addon with config');
     return await rebuildAddon(config);
   } catch (error) {
     console.error('Error rebuilding addon:', error);
@@ -617,8 +616,8 @@ function setupApiRoutes(app) {
         return res.status(400).json({ error: 'MDBList API key is required' });
       }
       
-      // Extract list ID and name from URL
-      const { listId, listName } = await extractMDBListId(url);
+      // Extract list ID, name and type from URL, passing the API key
+      const { listId, listName, type } = await extractMDBListId(url, config.apiKey);
       
       // Create a manifest for the MDBList with a single catalog
       const manifest = {
@@ -629,9 +628,8 @@ function setupApiRoutes(app) {
         catalogs: [{
           id: listId,
           name: listName,
-          // The type will be determined by the content when fetching
-          type: 'movie', // Default to movie, will be filtered based on actual content
-          url: buildManifestUrl(listId, listName, config.apiKey, 'movie'),
+          type: type, // Use detected type from MDBList API
+          url: buildManifestUrl(listId, listName, config.apiKey, type),
           extra: [{ name: 'skip' }]
         }],
         resources: ['catalog'],

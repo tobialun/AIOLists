@@ -216,7 +216,6 @@ async function fetchListContent(listId, userConfig, importedAddons, skip = 0) {
       
       // If we found a matching catalog, fetch its items
       if (catalog) {
-        console.log(`Found external catalog: ${catalog.name} (${catalog.id}) in addon: ${addon.name}`);
         
         // If this is a MDBList catalog with a direct URL
         if (catalog.url && addon.id.startsWith('mdblist_')) {
@@ -332,14 +331,12 @@ async function createAddon(userConfig) {
     // Add imported lists
     if (userConfig.importedAddons) {
       for (const addon of Object.values(userConfig.importedAddons)) {
-        console.log(`Adding ${addon.catalogs.length} catalogs from ${addon.name} to manifest`);
         
         addon.catalogs
           .filter(catalog => {
             // Ensure consistent handling of string IDs
             const catalogId = String(catalog.id);
             const isHidden = hiddenLists.has(catalogId);
-            console.log(`Checking catalog ${catalog.name} (${catalogId}): Hidden = ${isHidden}`);
             return !isHidden;
           })
           .forEach(catalog => {
@@ -349,13 +346,11 @@ async function createAddon(userConfig) {
             
             if (userConfig.customListNames && userConfig.customListNames[catalogId]) {
               displayName = userConfig.customListNames[catalogId];
-              console.log(`Using custom name for ${catalogId}: "${displayName}"`);
             }
             
             // Determine catalog type
             const catalogType = catalog.type === 'anime' ? 'series' : catalog.type;
             
-            console.log(`Adding catalog to manifest: ${displayName} (${catalogId}) type=${catalogType}`);
             
             const catalogEntry = {
               type: catalogType,
@@ -379,17 +374,10 @@ async function createAddon(userConfig) {
     
     // Apply list ordering from config if available
     if (userConfig.listOrder && userConfig.listOrder.length > 0) {
-      console.log(`Applying list order to ${manifest.catalogs.length} catalogs using order: ${userConfig.listOrder.join(', ')}`);
       
       // Convert to a Map for faster lookup
       const orderMap = new Map(userConfig.listOrder.map((id, index) => [String(id), index]));
-      
-      // Log the original catalogs for debugging
-      console.log("Catalogs before sorting:");
-      manifest.catalogs.forEach((catalog, idx) => {
-        console.log(`  [${idx}] ${catalog.name} (${catalog.id}) type=${catalog.type}`);
-      });
-      
+            
       // Sort catalogs based on list order
       manifest.catalogs.sort((a, b) => {
         // Get the clean IDs for comparison
@@ -399,12 +387,10 @@ async function createAddon(userConfig) {
         // Handle aiolists prefix for MDBList items
         if (aId.startsWith('aiolists-')) {
           aId = aId.replace('aiolists-', '');
-          console.log(`Stripped prefix from: ${a.id} -> ${aId}`);
         }
         
         if (bId.startsWith('aiolists-')) {
           bId = bId.replace('aiolists-', '');
-          console.log(`Stripped prefix from: ${b.id} -> ${bId}`);
         }
         
         // Check direct match first
@@ -424,19 +410,12 @@ async function createAddon(userConfig) {
           const baseId = bId.split('_')[0];
           if (orderMap.has(baseId)) {
             bOrder = orderMap.get(baseId);
-            console.log(`Using base ID for ordering: ${bId} -> ${baseId} (order: ${bOrder})`);
           }
         }
         
-        console.log(`Comparing for sort: ${a.id} (${aOrder}) vs ${b.id} (${bOrder})`);
         return aOrder - bOrder;
       });
       
-      // Log the sorted catalogs
-      console.log("Catalogs after sorting:");
-      manifest.catalogs.forEach((catalog, idx) => {
-        console.log(`  [${idx}] ${catalog.name} (${catalog.id}) type=${catalog.type}`);
-      });
     }
 
     const builder = new addonBuilder(manifest);

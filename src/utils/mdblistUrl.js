@@ -2,12 +2,13 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 
 /**
- * Extract list ID from MDBList URL
+ * Extract list ID and type from MDBList URL
  * @param {string} url - MDBList URL (e.g., https://mdblist.com/lists/username/list-name)
- * @returns {Promise<{listId: string, listName: string}>} List ID and name
+ * @param {string} apiKey - MDBList API key
+ * @returns {Promise<{listId: string, listName: string, type: string}>} List ID, name and content type
  * @throws {Error} If list ID cannot be extracted
  */
-async function extractMDBListId(url) {
+async function extractMDBListId(url, apiKey) {
   try {
     // Validate URL format
     const urlPattern = /^https?:\/\/mdblist\.com\/lists\/([\w-]+)\/([\w-]+)$/;
@@ -18,7 +19,7 @@ async function extractMDBListId(url) {
 
     const [, username, listName] = urlMatch;
 
-    // Fetch the page content
+    // Fetch the page content to get the list ID
     const response = await axios.get(url);
     const $ = cheerio.load(response.data);
 
@@ -34,9 +35,19 @@ async function extractMDBListId(url) {
       throw new Error('Could not extract list ID from image URL');
     }
 
+    const listId = idMatch[1];
+
+    // Fetch list details from MDBList API
+    const apiResponse = await axios.get(`https://api.mdblist.com/lists/${listId}?apikey=${apiKey}`);
+    const listData = apiResponse.data[0];
+
+    // Determine content type from mediatype field
+    const type = listData.mediatype === 'show' ? 'series' : 'movie';
+
     return {
-      listId: idMatch[1],
-      listName: listName
+      listId: listId,
+      listName: listName,
+      type: type
     };
   } catch (error) {
     if (error.response?.status === 404) {
@@ -65,4 +76,4 @@ function buildManifestUrl(listId, listName, mdblistApiKey, type) {
 module.exports = {
   extractMDBListId,
   buildManifestUrl
-}; 
+};

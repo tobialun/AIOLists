@@ -100,30 +100,34 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0) {
       const response = await axios.get(`https://api.mdblist.com/watchlist/items?apikey=${apiKey}&limit=100&offset=${skip}`);
       return processApiResponse(response.data);
     }
-    
-    // First try as external list
-    try {
-      console.log(`Trying external list ${id} with skip=${skip}`);
-      const externalResponse = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
-      if (externalResponse.status === 200 && !externalResponse.data.error) {
-        return processApiResponse(externalResponse.data);
+
+    // Check if this is an internal or external list using metadata
+    const metadata = listsMetadata?.[id];
+    const isExternal = metadata?.isExternalList;
+
+    if (isExternal) {
+      // Try external list endpoint
+      try {
+        const response = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
+        if (response.status === 200 && !response.data.error) {
+          return processApiResponse(response.data);
+        }
+      } catch (err) {
+        console.error(`Error fetching external list ${id}:`, err.message);
       }
-    } catch (err) {
-      console.log(`List ${id} is not external, trying internal`);
-    }
-    
-    // If external fails, try as internal list
-    try {
-      console.log(`Trying internal list ${id} with skip=${skip}`);
-      const internalResponse = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
-      if (internalResponse.status === 200 && !internalResponse.data.error) {
-        return processApiResponse(internalResponse.data);
+    } else {
+      // Try internal list endpoint
+      try {
+        const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
+        if (response.status === 200 && !response.data.error) {
+          return processApiResponse(response.data);
+        }
+      } catch (err) {
+        console.error(`Error fetching internal list ${id}:`, err.message);
       }
-    } catch (err) {
-      console.log(`List ${id} is not internal either`);
     }
-    
-    console.error(`Failed to fetch list ${id} from either endpoint`);
+
+    console.error(`Failed to fetch list ${id}`);
     return null;
   } catch (error) {
     console.error(`Error in fetchListItems for ${listId}:`, error);

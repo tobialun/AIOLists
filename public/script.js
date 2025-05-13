@@ -114,9 +114,7 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
       }
       
-      try {
-        showStatus('Importing MDBList...', 'info');
-        
+      try {        
         // Get the current RPDB API key
         const rpdbApiKey = elements.rpdbApiKeyInput?.value?.trim() || state.userConfig.rpdbApiKey;
         

@@ -51,7 +51,6 @@ async function fetchPosterFromRPDB(imdbId, rpdbApiKey) {
   
   try {
     const url = `https://api.ratingposterdb.com/${rpdbApiKey}/imdb/poster-default/${imdbId}.jpg`;
-    console.log(`Fetching RPDB poster for ${imdbId}`);
     
     // First try a HEAD request to check if poster exists
     try {
@@ -61,7 +60,6 @@ async function fetchPosterFromRPDB(imdbId, rpdbApiKey) {
       });
       
       // If HEAD request succeeds, cache and return the URL
-      console.log(`Successfully fetched RPDB poster for ${imdbId}`);
       posterCache.set(cacheKey, url);
       return url;
     } catch (headError) {
@@ -74,7 +72,6 @@ async function fetchPosterFromRPDB(imdbId, rpdbApiKey) {
             validateStatus: status => status === 200
           });
           
-          console.log(`Successfully fetched medium RPDB poster for ${imdbId}`);
           posterCache.set(cacheKey, mediumUrl);
           return mediumUrl;
         } catch (mediumError) {
@@ -88,11 +85,9 @@ async function fetchPosterFromRPDB(imdbId, rpdbApiKey) {
   } catch (error) {
     // Cache negative results to avoid repeated requests
     if (error.response?.status === 404) {
-      console.log(`No RPDB poster found for ${imdbId} (404)`);
       posterCache.set(cacheKey, 'null', 3600 * 1000); // Cache 404s for 1 hour
     } else if (!error.response || error.code === 'ECONNABORTED') {
       // For network errors or timeouts, cache for a shorter time
-      console.log(`Network error fetching RPDB poster for ${imdbId}: ${error.message}`);
       posterCache.set(cacheKey, 'null', 300 * 1000); // Cache for 5 minutes
     } else {
       console.error(`RPDB error for ${imdbId}:`, error.message, error.response?.status);
