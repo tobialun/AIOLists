@@ -16,17 +16,38 @@ const axios = require('axios');
  * @returns {Promise<Array>} Array of Stremio meta objects
  */
 async function convertToStremioFormat(items, skip = 0, limit = ITEMS_PER_PAGE, rpdbApiKey = null) {
-  // If the response is already in Stremio format (has metas array)
-  if (items.metas && Array.isArray(items.metas)) {
-    // Just return the slice we need
-    return items.metas.slice(skip, skip + limit);
-  }
-
-  const metas = [];
+  let metas = [];
   
   // Check if we have a valid RPDB API key
   const useRPDB = !!rpdbApiKey;
   
+  // If the response is already in Stremio format (has metas array)
+  if (items.metas && Array.isArray(items.metas)) {
+    // Get the slice we need
+    const pageItems = items.metas.slice(skip, skip + limit);
+    
+    // If we have RPDB key, update the posters
+    if (useRPDB) {
+      const posterPromises = pageItems.map(async (item) => {
+        // Ensure we have a valid IMDb ID
+        const imdbId = item.imdb_id || item.id;
+        if (!imdbId) return item;
+        
+        const rpdbPoster = await fetchPosterFromRPDB(imdbId, rpdbApiKey);
+        if (rpdbPoster) {
+          return { ...item, poster: rpdbPoster };
+        }
+        return item;
+      });
+      
+      metas = await Promise.all(posterPromises);
+    } else {
+      metas = pageItems;
+    }
+    
+    return metas;
+  }
+
   // Preserve the catalog order if it exists
   const catalogOrder = items.catalogOrder;
   

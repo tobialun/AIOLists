@@ -2,12 +2,13 @@ const { validateRPDBKey, testRPDBKey } = require('../utils/posters');
 const { authenticateTrakt, getTraktAuthUrl, fetchTraktLists, fetchTraktListItems } = require('../integrations/trakt');
 const { fetchAllLists, fetchListItems, validateMDBListKey } = require('../integrations/mdblist');
 const { importExternalAddon, fetchExternalAddonItems } = require('../integrations/externalAddons');
-const { rebuildAddon, convertToStremioFormat } = require('../addon');
+const { rebuildAddon, convertToStremioFormat, fetchListContent } = require('../addon');
 const { compressConfig, decompressConfig, defaultConfig } = require('../utils/urlConfig');
 const { extractMDBListId, buildManifestUrl } = require('../utils/mdblistUrl');
 const path = require('path');
 const { ITEMS_PER_PAGE } = require('../config');
 const Cache = require('../cache');
+const axios = require('axios');
 
 // Create cache instances
 const listsCache = new Cache({ defaultTTL: 30 * 60 * 1000 }); // 30 minutes
@@ -100,42 +101,27 @@ function setupApiRoutes(app) {
 
       const config = await decompressConfig(configHash);
 
-      // Check if this is a MDBList catalog
-      if (config.importedAddons) {
-        for (const addon of Object.values(config.importedAddons)) {
-          if (addon.id.startsWith('mdblist_')) {
-            const catalog = addon.catalogs.find(c => c.id === id && c.type === type);
-            if (catalog && catalog.url) {
-              console.log(`Redirecting to MDBList URL: ${catalog.url}`);
-              return res.redirect(catalog.url);
-            }
-          }
-        }
-      }
-
-      // Check if skip is in the URL path (e.g., "skip=100")
+      // Parse skip parameter from extra
       if (extra && extra.includes('skip=')) {
         const skipMatch = extra.match(/skip=(\d+)/);
         if (skipMatch && skipMatch[1]) {
           skip = parseInt(skipMatch[1]);
-          console.log(`Found skip in URL path: ${skip}`);
         }
       }
 
-      // Extract the list ID - handle both aiolists and trakt prefixes
+      // Extract the list ID
       let listId = id;
       if (id.startsWith('aiolists_') || id.startsWith('aiolists-')) {
         listId = id.substring(9);
       }
 
-      // Check if ID contains skip parameter (e.g., "aiolists-12345/skip=100")
+      // Check if ID contains skip parameter
       if (listId.includes('/skip=')) {
         const parts = listId.split('/');
         listId = parts[0];
         const skipMatch = parts[1]?.match(/skip=(\d+)/);
         if (skipMatch && skipMatch[1]) {
           skip = parseInt(skipMatch[1]);
-          console.log(`Found skip in ID: ${skip}`);
         }
       }
 
@@ -144,91 +130,40 @@ function setupApiRoutes(app) {
         return res.status(400).json({ error: 'Invalid catalog ID format' });
       }
 
-      console.log(`Catalog request with skip=${skip} for listId=${listId}`);
-
-      // Parse skip to ensure it's a number
-      const skipInt = isNaN(parseInt(skip)) ? 0 : parseInt(skip);
-      console.log(`Using skipInt=${skipInt}`);
-
       // Check if this list is hidden
       const hiddenLists = new Set((config.hiddenLists || []).map(String));
       if (hiddenLists.has(String(listId))) {
         return res.json({ metas: [] });
       }
 
-      // Fetch items based on list type
-      let items;
-      console.log(`Fetching items for catalog ${listId} with skip=${skipInt}`);
-
-      // Check if this is an imported addon catalog
-      if (config.importedAddons) {
-        for (const addon of Object.values(config.importedAddons)) {
-          const catalog = addon.catalogs.find(c => c.id === listId);
-          if (catalog) {
-            console.log(`Fetching from external addon with skip=${skipInt}`);
-            items = await fetchExternalAddonItems(listId, addon, skipInt);
-            break;
-          }
-        }
-      }
-
-      // If not found in imported addons, check other sources
+      // Fetch items
+      const items = await fetchListContent(listId, config, config.importedAddons, skip);
       if (!items) {
-        if (listId.startsWith('trakt_')) {
-          // Only check Trakt access token for Trakt lists
-          if (!config.traktAccessToken) {
-            return res.status(500).json({ error: 'No Trakt access token configured' });
-          }
-          console.log(`Fetching from Trakt with skip=${skipInt}`);
-          items = await fetchTraktListItems(listId, config, skipInt);
-        } else {
-          // For MDBList items, check API key
-          if (!config.apiKey) {
-            return res.status(500).json({ error: 'No AIOLists API key configured' });
-          }
-          console.log(`Fetching from MDBList with skip=${skipInt}`);
-          items = await fetchListItems(listId, config.apiKey, config.listsMetadata, skipInt);
-        }
+        return res.json({ metas: [] });
       }
 
-      if (!items) {
-        return res.status(500).json({ error: 'Failed to fetch list items' });
-      }
-
-      // Convert to Stremio format without applying skip again
-      // Skip is already applied in the API requests to fetch only the needed page
-      const metas = await convertToStremioFormat(items, 0, ITEMS_PER_PAGE, config.rpdbApiKey);
-      console.log(`Converted ${metas.length} items to Stremio format`);
+      // Convert to Stremio format with RPDB posters
+      const allMetas = await convertToStremioFormat(items, 0, ITEMS_PER_PAGE, config.rpdbApiKey);
 
       // Filter by type
-      let filteredMetas = metas;
+      let filteredMetas = allMetas;
       if (type === 'movie') {
-        filteredMetas = metas.filter(item => item.type === 'movie');
+        filteredMetas = allMetas.filter(item => item.type === 'movie');
       } else if (type === 'series') {
-        filteredMetas = metas.filter(item => item.type === 'series');
+        filteredMetas = allMetas.filter(item => item.type === 'series');
       }
 
       // Set cache headers
       res.setHeader('Cache-Control', `max-age=${3600 * 24}`);
 
-      // Check if we likely have more items
-      const hasMore = filteredMetas.length >= ITEMS_PER_PAGE;
-      console.log(`Has more pages: ${hasMore} (returned ${filteredMetas.length} items)`);
-
-      // Return response with explicit pagination format
-      const result = {
+      // Return response
+      res.json({
         metas: filteredMetas,
         cacheMaxAge: 3600 * 24
-      };
-
-      // Cache the result
-      const cacheKey = getMetadataCacheKey(listId, skip, type);
-      metadataCache.set(cacheKey, result);
-
-      res.json(result);
+      });
     } catch (error) {
-      console.error('Error serving catalog:', error);
-      res.status(500).json({ error: 'Failed to serve catalog' });
+      console.error('Error in catalog endpoint:', error);
+      res.status(500).json({ error: 'Internal server error' });
     }
   });
 
@@ -669,7 +604,7 @@ function setupApiRoutes(app) {
   app.post('/api/config/:configHash/import-mdblist-url', async (req, res) => {
     try {
       const { configHash } = req.params;
-      const { url, types = ['movie', 'series'] } = req.body;
+      const { url, rpdbApiKey } = req.body;
       
       if (!url) {
         return res.status(400).json({ error: 'MDBList URL is required' });
@@ -684,45 +619,98 @@ function setupApiRoutes(app) {
       
       // Extract list ID and name from URL
       const { listId, listName } = await extractMDBListId(url);
-      
-      // Create a manifest for the MDBList
-      const manifest = {
-        id: `mdblist_${listId}`,
-        name: `MDBList - ${listName}`,
-        version: '1.0.0',
-        description: `Imported from MDBList: ${url}`,
-        catalogs: types.map(type => {
-          const catalogId = `${listId}_${type}`;
-          return {
-            type,
-            id: catalogId,
-            name: `${listName} (${type})`,
-            url: buildManifestUrl(listId, listName, config.apiKey, type),
-            extra: [{ name: 'skip' }]
-          };
-        }),
-        resources: ['catalog'],
-        types: types
-      };
 
-      // Add the manifest to the config
-      const updatedConfig = {
-        ...config,
-        importedAddons: {
-          ...(config.importedAddons || {}),
-          [`mdblist_${listId}`]: manifest
-        },
-        lastUpdated: new Date().toISOString()
-      };
-      
-      const newConfigHash = await compressConfig(updatedConfig);
-      await rebuildAddonWithConfig(updatedConfig);
-      
-      res.json({
-        success: true,
-        configHash: newConfigHash,
-        addon: manifest
-      });
+      // Fetch list details to determine content types
+      try {
+        const response = await axios.get(`https://api.mdblist.com/lists/${listId}/items/?apikey=${config.apiKey}`);
+        const data = response.data;
+        
+        // Check what types of content are in the list
+        const hasMovies = data.movies && data.movies.length > 0;
+        const hasShows = data.shows && data.shows.length > 0;
+        
+        // Create catalogs based on content types
+        const catalogs = [];
+        
+        if (hasMovies) {
+          catalogs.push({
+            id: `${listId}-movie`,
+            name: listName,
+            type: 'movie',
+            url: buildManifestUrl(listId, listName, config.apiKey, 'movie'),
+            extra: [{ name: 'skip' }]
+          });
+        }
+        
+        if (hasShows) {
+          catalogs.push({
+            id: `${listId}-series`,
+            name: listName,
+            type: 'series',
+            url: buildManifestUrl(listId, listName, config.apiKey, 'series'),
+            extra: [{ name: 'skip' }]
+          });
+        }
+        
+        // If no specific content type is found, default to both
+        if (!hasMovies && !hasShows) {
+          catalogs.push({
+            id: `${listId}-movie`,
+            name: listName,
+            type: 'movie',
+            url: buildManifestUrl(listId, listName, config.apiKey, 'movie'),
+            extra: [{ name: 'skip' }]
+          });
+          catalogs.push({
+            id: `${listId}-series`,
+            name: listName,
+            type: 'series',
+            url: buildManifestUrl(listId, listName, config.apiKey, 'series'),
+            extra: [{ name: 'skip' }]
+          });
+        }
+
+        // Create manifest for the MDBList
+        const manifest = {
+          id: `mdblist_${listId}`,
+          name: `MDBList - ${listName}`,
+          version: '1.0.0',
+          description: `Imported from MDBList: ${url}`,
+          catalogs: catalogs,
+          resources: ['catalog'],
+          types: ['movie', 'series']
+        };
+
+        // Get existing MDBList imports
+        const existingMDBLists = Object.entries(config.importedAddons || {})
+          .filter(([key]) => key.startsWith('mdblist_'))
+          .reduce((acc, [key, value]) => ({ ...acc, [key]: value }), {});
+
+        // Update the config with RPDB key if provided and preserve existing MDBList imports
+        const updatedConfig = {
+          ...config,
+          rpdbApiKey: rpdbApiKey || config.rpdbApiKey,
+          importedAddons: {
+            ...config.importedAddons,
+            ...existingMDBLists,
+            [`mdblist_${listId}`]: manifest
+          },
+          lastUpdated: new Date().toISOString()
+        };
+        
+        const newConfigHash = await compressConfig(updatedConfig);
+        await rebuildAddonWithConfig(updatedConfig);
+        
+        res.json({
+          success: true,
+          configHash: newConfigHash,
+          addon: manifest,
+          message: `Successfully imported ${listName}`
+        });
+      } catch (error) {
+        console.error('Error fetching list details:', error);
+        return res.status(500).json({ error: 'Failed to fetch list details from MDBList' });
+      }
     } catch (error) {
       console.error('Error importing MDBList URL:', error);
       res.status(500).json({ error: error.message });

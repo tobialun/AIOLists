@@ -117,13 +117,16 @@ document.addEventListener('DOMContentLoaded', function() {
       try {
         showStatus('Importing MDBList...', 'info');
         
-        // Import both movie and series catalogs
+        // Get the current RPDB API key
+        const rpdbApiKey = elements.rpdbApiKeyInput?.value?.trim() || state.userConfig.rpdbApiKey;
+        
+        // Import a single catalog - type will be determined by content
         const response = await fetch(`/api/config/${state.configHash}/import-mdblist-url`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
             url: mdblistUrl,
-            types: ['movie', 'series']
+            rpdbApiKey
           })
         });
         

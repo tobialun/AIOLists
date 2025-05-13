@@ -56,7 +56,8 @@ async function extractMDBListId(url) {
  */
 function buildManifestUrl(listId, listName, mdblistApiKey, type) {
   const baseUrl = '1fe84bc728af-stremio-mdblist.baby-beamup.club';
-  const catalogName = `${listName}-${type}`;
+  // Remove the type suffix from catalog name since we'll determine type from content
+  const catalogName = listName;
   return `https://${baseUrl}/${listId}/${mdblistApiKey}/catalog/${type}/${catalogName}.json`;
 }
 

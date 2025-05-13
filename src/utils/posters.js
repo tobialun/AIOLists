@@ -14,7 +14,7 @@ async function validateRPDBKey(rpdbApiKey) {
   
   try {
     const response = await axios.get(`https://api.ratingposterdb.com/${rpdbApiKey}/isValid`, {
-      timeout: 5000 // 5 second timeout
+      timeout: 10000 // 5 second timeout
     });
     
     return response.status === 200 && response.data && response.data.valid === true;
@@ -31,10 +31,14 @@ async function validateRPDBKey(rpdbApiKey) {
  * @returns {Promise<string|null>} Poster URL or null
  */
 async function fetchPosterFromRPDB(imdbId, rpdbApiKey) {
-  if (!rpdbApiKey || !imdbId) return null;
+  if (!rpdbApiKey || !imdbId) {
+    console.log(`Skipping RPDB fetch - missing ${!rpdbApiKey ? 'API key' : 'IMDb ID'}`);
+    return null;
+  }
   
   // Only process valid IMDb IDs
   if (!imdbId.match(/^tt\d+$/)) {
+    console.log(`Invalid IMDb ID format: ${imdbId}`);
     return null;
   }
   
@@ -47,32 +51,51 @@ async function fetchPosterFromRPDB(imdbId, rpdbApiKey) {
   
   try {
     const url = `https://api.ratingposterdb.com/${rpdbApiKey}/imdb/poster-default/${imdbId}.jpg`;
+    console.log(`Fetching RPDB poster for ${imdbId}`);
     
-    const response = await Promise.race([
-      axios.head(url, { 
-        timeout: 2000, // Reduced timeout to 2 seconds
+    // First try a HEAD request to check if poster exists
+    try {
+      await axios.head(url, { 
+        timeout: 5000, // Increased timeout to 5 seconds
         validateStatus: status => status === 200 // Only accept 200 status
-      }),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout')), 2000)
-      )
-    ]);
-    
-    // Cache the poster URL
-    posterCache.set(cacheKey, url);
-    return url;
+      });
+      
+      // If HEAD request succeeds, cache and return the URL
+      console.log(`Successfully fetched RPDB poster for ${imdbId}`);
+      posterCache.set(cacheKey, url);
+      return url;
+    } catch (headError) {
+      // If HEAD request fails with 404, try the medium size
+      if (headError.response?.status === 404) {
+        const mediumUrl = url.replace('poster-default', 'poster-medium');
+        try {
+          await axios.head(mediumUrl, {
+            timeout: 5000,
+            validateStatus: status => status === 200
+          });
+          
+          console.log(`Successfully fetched medium RPDB poster for ${imdbId}`);
+          posterCache.set(cacheKey, mediumUrl);
+          return mediumUrl;
+        } catch (mediumError) {
+          // If medium size also fails, throw the original error
+          throw headError;
+        }
+      } else {
+        throw headError;
+      }
+    }
   } catch (error) {
     // Cache negative results to avoid repeated requests
-    if (error.response && error.response.status === 404) {
+    if (error.response?.status === 404) {
+      console.log(`No RPDB poster found for ${imdbId} (404)`);
       posterCache.set(cacheKey, 'null', 3600 * 1000); // Cache 404s for 1 hour
-    } else if (!error.response) {
-      // For network errors, cache for a shorter time
+    } else if (!error.response || error.code === 'ECONNABORTED') {
+      // For network errors or timeouts, cache for a shorter time
+      console.log(`Network error fetching RPDB poster for ${imdbId}: ${error.message}`);
       posterCache.set(cacheKey, 'null', 300 * 1000); // Cache for 5 minutes
-    }
-    
-    // Don't log 404s or timeouts as they're expected
-    if (error.response && error.response.status !== 404 && error.message !== 'Timeout') {
-      console.error(`RPDB error for ${imdbId}:`, error.message);
+    } else {
+      console.error(`RPDB error for ${imdbId}:`, error.message, error.response?.status);
     }
     return null;
   }
