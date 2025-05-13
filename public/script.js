@@ -691,25 +691,25 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   }
 
-  function showWelcomeMessage() {
-    const welcomeMessage = document.createElement('div');
-    welcomeMessage.className = 'welcome-message';
-    welcomeMessage.innerHTML = `
-      <h2>Welcome to AIOLists! 🎉</h2>
-      <p>To get started, you'll need to:</p>
-      <ol>
-        <li>Enter your MDBList API key</li>
-        <li>Optionally add your RPDB API key for better poster support</li>
-        <li>Connect your Trakt account if you want to include your Trakt lists</li>
-      </ol>
-      <button onclick="this.parentElement.remove()">Got it!</button>
-    `;
-    document.body.insertBefore(welcomeMessage, document.body.firstChild);
-  }
-
   function updateAddonStyles() {
     const style = document.createElement('style');
     style.textContent = `
+      .header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 20px;
+      }
+      .header img {
+        height: 40px;
+        width: auto;
+      }
+      .header h1 {
+        color: #000;
+        margin: 0;
+        font-size: 24px;
+        font-weight: 500;
+      }
       .addon-list { 
         background: #2c3e50; 
         padding: 8px 0;
@@ -783,7 +783,7 @@ document.addEventListener('DOMContentLoaded', function() {
         margin-right: 3px;
         background: transparent;
       }
-        
+
       .mdblist-logo {
         width: 16px;
         height: 16px;
@@ -809,6 +809,30 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     `;
     document.head.appendChild(style);
+
+    // Add favicon
+    const favicon = document.createElement('link');
+    favicon.rel = 'icon';
+    favicon.type = 'image/x-icon';
+    favicon.href = '/assets/logo.ico';
+    document.head.appendChild(favicon);
+
+    // Create header
+    const header = document.createElement('div');
+    header.className = 'header';
+    header.innerHTML = `
+      <img src="/assets/image.png" alt="AIOLists Logo">
+      <h1>AIOLists</h1>
+    `;
+
+    // Remove old title
+    const oldTitle = document.querySelector('h1');
+    if (oldTitle) {
+      oldTitle.remove();
+    }
+
+    // Insert new header at the top
+    document.body.insertBefore(header, document.body.firstChild);
   }
 
   // Function to update the imported addons section
