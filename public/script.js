@@ -27,7 +27,7 @@ document.addEventListener('DOMContentLoaded', function() {
     traktLoginBtn: document.getElementById('traktLoginBtn'),
     traktStatus: document.getElementById('traktStatus'),
     manifestUrlInput: document.getElementById('manifestUrl'),
-    importAddonBtn: document.getElementById('importAddon'),
+    importAddonBtn: document.getElementById('importAddonBtn'),
     importStatus: document.getElementById('importStatus'),
     traktPinContainer: document.getElementById('traktPinContainer'),
     traktPin: document.getElementById('traktPin'),
@@ -50,6 +50,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // ==================== INITIALIZATION ====================
   async function init() {
+    // Set up UI regardless of URL
+    initEventListeners();
+    updateAddonStyles();
+
     // Check if we have a config hash in the URL path
     const pathParts = window.location.pathname.split('/').filter(Boolean);
     
@@ -66,11 +70,12 @@ document.addEventListener('DOMContentLoaded', function() {
         if (data.success) {
           state.configHash = data.configHash;
           updateURL();
+          await loadConfiguration(); // Load configuration after creating it
         }
       } catch (error) {
         console.error('Failed to create configuration:', error);
       }
-      return; // Exit early if at root URL
+      return;
     }
 
     state.configHash = pathParts[0];
@@ -80,8 +85,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   
     initStremioButton();
-    initEventListeners();
-    updateAddonStyles();
     await loadConfiguration();
   }
 

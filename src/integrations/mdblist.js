@@ -1,4 +1,5 @@
 const axios = require('axios');
+const cheerio = require('cheerio');
 
 /**
  * Validate MDBList API key
@@ -170,8 +171,64 @@ function processApiResponse(data) {
   };
 }
 
+/**
+ * Extract list ID and metadata from MDBList URL
+ * @param {string} url - MDBList URL (e.g., https://mdblist.com/lists/username/list-name)
+ * @param {string} apiKey - MDBList API key
+ * @returns {Promise<{listId: string, listName: string, mediatype: string}>} List ID, name and content type
+ * @throws {Error} If list ID cannot be extracted or list not found
+ */
+async function extractListFromUrl(url, apiKey) {
+  try {
+    // Validate URL format
+    const urlPattern = /^https?:\/\/mdblist\.com\/lists\/([\w-]+)\/([\w-]+)$/;
+    const urlMatch = url.match(urlPattern);
+    if (!urlMatch) {
+      throw new Error('Invalid MDBList URL format');
+    }
+
+    const [, username, listSlug] = urlMatch;
+
+    // First scrape the page to get the list ID
+    const response = await axios.get(url);
+    const $ = cheerio.load(response.data);
+
+    // Find the meta tag with og:image property which contains the list ID
+    const ogImage = $('meta[property="og:image"]').attr('content');
+    if (!ogImage) {
+      throw new Error('Could not find list image metadata');
+    }
+
+    // Extract list ID from the image URL
+    const idMatch = ogImage.match(/[?&]id=(\d+)/);
+    if (!idMatch) {
+      throw new Error('Could not extract list ID from image URL');
+    }
+
+    const listId = idMatch[1];
+
+    // Now fetch list details from API to get mediatype
+    const apiResponse = await axios.get(`https://api.mdblist.com/lists/${listId}?apikey=${apiKey}`);
+    if (!apiResponse.data?.[0]) {
+      throw new Error('Could not fetch list details from API');
+    }
+
+    const listData = apiResponse.data[0];
+    
+    return {
+      listId: listId,
+      listName: listData.name,
+      mediatype: listData.mediatype || 'movie' // Default to movie if not specified
+    };
+  } catch (error) {
+    console.error('Error extracting list from URL:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   fetchAllLists,
   fetchListItems,
-  validateMDBListKey
+  validateMDBListKey,
+  extractListFromUrl
 }; 

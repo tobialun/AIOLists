@@ -1,10 +1,9 @@
 const { addonBuilder } = require('stremio-addon-sdk');
 const { fetchPosterFromRPDB } = require('../utils/posters');
 const { fetchTraktListItems, fetchTraktLists } = require('../integrations/trakt');
-const { fetchListItems: fetchMDBListItems, fetchAllLists } = require('../integrations/mdblist');
+const { fetchListItems: fetchMDBListItems, fetchAllLists, extractListFromUrl } = require('../integrations/mdblist');
 const { fetchExternalAddonItems } = require('../integrations/externalAddons');
 const { storeListsMetadata, ITEMS_PER_PAGE } = require('../config');
-const { buildManifestUrl } = require('../utils/mdblistUrl');
 const axios = require('axios');
 
 /**
@@ -402,7 +401,6 @@ async function createAddon(userConfig) {
           const baseId = aId.split('_')[0];
           if (orderMap.has(baseId)) {
             aOrder = orderMap.get(baseId);
-            console.log(`Using base ID for ordering: ${aId} -> ${baseId} (order: ${aOrder})`);
           }
         }
         

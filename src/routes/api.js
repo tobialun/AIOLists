@@ -1,10 +1,10 @@
+const express = require('express');
 const { validateRPDBKey, testRPDBKey } = require('../utils/posters');
 const { authenticateTrakt, getTraktAuthUrl, fetchTraktLists, fetchTraktListItems } = require('../integrations/trakt');
-const { fetchAllLists, fetchListItems, validateMDBListKey } = require('../integrations/mdblist');
+const { fetchAllLists, fetchListItems, validateMDBListKey, extractListFromUrl } = require('../integrations/mdblist');
 const { importExternalAddon, fetchExternalAddonItems } = require('../integrations/externalAddons');
 const { rebuildAddon, convertToStremioFormat, fetchListContent } = require('../addon');
 const { compressConfig, decompressConfig, defaultConfig } = require('../utils/urlConfig');
-const { extractMDBListId, buildManifestUrl } = require('../utils/mdblistUrl');
 const path = require('path');
 const { ITEMS_PER_PAGE } = require('../config');
 const Cache = require('../cache');
@@ -135,7 +135,55 @@ function setupApiRoutes(app) {
         return res.json({ metas: [] });
       }
 
-      // Fetch items
+      // Check if this is an external addon catalog
+      const addonCatalog = Object.values(config.importedAddons || {}).find(addon => 
+        addon.catalogs.some(cat => cat.id === listId)
+      );
+
+      if (addonCatalog) {
+        // For MDBList imported URLs, fetch directly using our API
+        const catalog = addonCatalog.catalogs.find(cat => cat.id === listId);
+        if (addonCatalog.id.startsWith('mdblist_') && catalog?.url) {
+          // Extract list ID from the URL and fetch using MDBList API
+          const items = await fetchListItems(listId, config.apiKey, config.listsMetadata, skip);
+          if (!items) {
+            return res.json({ metas: [] });
+          }
+
+          // Convert to Stremio format
+          const allMetas = await convertToStremioFormat(items, 0, ITEMS_PER_PAGE, config.rpdbApiKey);
+
+          // Filter by type
+          let filteredMetas = allMetas;
+          if (type === 'movie') {
+            filteredMetas = allMetas.filter(item => item.type === 'movie');
+          } else if (type === 'series') {
+            filteredMetas = allMetas.filter(item => item.type === 'series');
+          }
+
+          // Set cache headers
+          res.setHeader('Cache-Control', `max-age=${3600 * 24}`);
+
+          return res.json({
+            metas: filteredMetas,
+            cacheMaxAge: 3600 * 24
+          });
+        }
+
+        // For other external addons, fetch from their API
+        const items = await fetchExternalAddonItems(listId, addonCatalog, skip);
+        
+        // Set cache headers
+        res.setHeader('Cache-Control', `max-age=${3600 * 24}`);
+        
+        // Return the metadata directly
+        return res.json({
+          metas: items,
+          cacheMaxAge: 3600 * 24
+        });
+      }
+
+      // For regular lists, fetch content normally
       const items = await fetchListContent(listId, config, config.importedAddons, skip);
       if (!items) {
         return res.json({ metas: [] });
@@ -502,8 +550,17 @@ function setupApiRoutes(app) {
         return res.status(400).json({ error: 'Manifest URL is required' });
       }
       
-      const config = await decompressConfig(configHash);
+      let config;
+      try {
+        config = await decompressConfig(configHash);
+      } catch (error) {
+        console.log('Failed to decompress config, using default');
+        config = { ...defaultConfig };
+      }
+
+      console.log('Current config:', config);
       const addonInfo = await importExternalAddon(manifestUrl);
+      console.log('Imported addon info:', addonInfo);
       
       const updatedConfig = {
         ...config,
@@ -514,7 +571,10 @@ function setupApiRoutes(app) {
         lastUpdated: new Date().toISOString()
       };
       
+      console.log('Updated config:', updatedConfig);
       const newConfigHash = await compressConfig(updatedConfig);
+      console.log('New config hash:', newConfigHash);
+      
       await rebuildAddonWithConfig(updatedConfig);
       
       res.json({
@@ -617,7 +677,7 @@ function setupApiRoutes(app) {
       }
       
       // Extract list ID, name and type from URL, passing the API key
-      const { listId, listName, type } = await extractMDBListId(url, config.apiKey);
+      const { listId, listName, mediatype } = await extractListFromUrl(url, config.apiKey);
       
       // Create a manifest for the MDBList with a single catalog
       const manifest = {
@@ -628,8 +688,8 @@ function setupApiRoutes(app) {
         catalogs: [{
           id: listId,
           name: listName,
-          type: type, // Use detected type from MDBList API
-          url: buildManifestUrl(listId, listName, config.apiKey, type),
+          type: mediatype, // Use detected type from MDBList API
+          url: url, // Store the original URL
           extra: [{ name: 'skip' }]
         }],
         resources: ['catalog'],
