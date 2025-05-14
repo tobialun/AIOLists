@@ -217,7 +217,7 @@ async function extractListFromUrl(url, apiKey) {
     return {
       listId: listId,
       listName: listData.name,
-      mediatype: listData.mediatype || 'movie' // Default to movie if not specified
+      mediatype: listData.mediatype === 'show' ? 'series' : (listData.mediatype || 'movie') // Convert 'show' to 'series', default to 'movie' if not specified
     };
   } catch (error) {
     console.error('Error extracting list from URL:', error);

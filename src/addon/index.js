@@ -1,7 +1,7 @@
 const { addonBuilder } = require('stremio-addon-sdk');
 const { fetchPosterFromRPDB } = require('../utils/posters');
 const { fetchTraktListItems, fetchTraktLists } = require('../integrations/trakt');
-const { fetchListItems: fetchMDBListItems, fetchAllLists, extractListFromUrl } = require('../integrations/mdblist');
+const { fetchListItems: fetchMDBListItems, fetchAllLists } = require('../integrations/mdblist');
 const { fetchExternalAddonItems } = require('../integrations/externalAddons');
 const { storeListsMetadata, ITEMS_PER_PAGE } = require('../config');
 const axios = require('axios');

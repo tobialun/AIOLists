@@ -1,6 +1,6 @@
 const express = require('express');
 const { validateRPDBKey, testRPDBKey } = require('../utils/posters');
-const { authenticateTrakt, getTraktAuthUrl, fetchTraktLists, fetchTraktListItems } = require('../integrations/trakt');
+const { authenticateTrakt, getTraktAuthUrl, fetchTraktLists } = require('../integrations/trakt');
 const { fetchAllLists, fetchListItems, validateMDBListKey, extractListFromUrl } = require('../integrations/mdblist');
 const { importExternalAddon, fetchExternalAddonItems } = require('../integrations/externalAddons');
 const { rebuildAddon, convertToStremioFormat, fetchListContent } = require('../addon');
