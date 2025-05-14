@@ -303,6 +303,42 @@ function setupApiRoutes(app) {
     }
   });
 
+  app.post('/api/config/:configHash/trakt/disconnect', async (req, res) => {
+    try {
+      const { configHash } = req.params;
+      const config = await decompressConfig(configHash);
+      
+      // Remove Trakt tokens
+      const updatedConfig = {
+        ...config,
+        traktAccessToken: null,
+        traktRefreshToken: null,
+        traktExpiresAt: null,
+        lastUpdated: new Date().toISOString()
+      };
+
+      // Remove Trakt lists from manifest
+      if (updatedConfig.lists) {
+        updatedConfig.lists = updatedConfig.lists.filter(list => !list.isTraktList);
+      }
+      
+      const newConfigHash = await compressConfig(updatedConfig);
+      await rebuildAddonWithConfig(updatedConfig);
+      
+      res.json({
+        success: true,
+        configHash: newConfigHash,
+        message: 'Successfully disconnected from Trakt'
+      });
+    } catch (error) {
+      console.error('Error disconnecting from Trakt:', error);
+      res.status(500).json({
+        error: 'Failed to disconnect from Trakt',
+        details: error.message
+      });
+    }
+  });
+
   // Update configuration
   app.post('/api/config/:configHash/update', async (req, res) => {
     try {

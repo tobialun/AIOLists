@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', function() {
     updateStremioBtn: document.getElementById('updateStremioBtn'),
     traktLoginBtn: document.getElementById('traktLoginBtn'),
     traktStatus: document.getElementById('traktStatus'),
+    traktConnectedState: document.getElementById('traktConnectedState'),
     manifestUrlInput: document.getElementById('manifestUrl'),
     importAddonBtn: document.getElementById('importAddonBtn'),
     importStatus: document.getElementById('importStatus'),
@@ -102,7 +103,9 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   function initEventListeners() {
-    elements.traktLoginBtn?.addEventListener('click', () => elements.traktPinContainer.style.display = 'block');
+    elements.traktLoginBtn?.addEventListener('click', () => {
+      elements.traktPinContainer.style.display = 'flex';
+    });
     elements.submitTraktPin?.addEventListener('click', handleTraktPinSubmission);
     elements.importAddonBtn?.addEventListener('click', handleAddonImport);
     elements.importMDBListBtn?.addEventListener('click', async function() {
@@ -592,6 +595,8 @@ document.addEventListener('DOMContentLoaded', function() {
         state.configHash = data.configHash;
         updateURL();
         elements.traktPinContainer.style.display = 'none';
+        elements.traktLoginBtn.style.display = 'none';
+        elements.traktConnectedState.style.display = 'flex';
         showSectionNotification('connections', 'Successfully connected to Trakt ✅');
         await loadLists();
       } else {
@@ -997,6 +1002,41 @@ document.addEventListener('DOMContentLoaded', function() {
       }, 500);
     }
   });
+
+  // Add disconnect functions to window scope
+  window.disconnectTrakt = async function() {
+    try {
+      const response = await fetch(`/api/config/${state.configHash}/trakt/disconnect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to disconnect');
+      }
+
+      const data = await response.json();
+      if (data.success) {
+        state.configHash = data.configHash;
+        updateURL();
+        
+        // Reset Trakt UI elements
+        elements.traktLoginBtn.style.display = 'block';
+        elements.traktConnectedState.style.display = 'none';
+        elements.traktPinContainer.style.display = 'none';
+        elements.traktPin.value = '';
+        
+        // Reload lists to show remaining ones
+        await loadLists();
+        
+        showSectionNotification('connections', 'Disconnected from Trakt ✅');
+      }
+    } catch (error) {
+      console.error('Failed to disconnect from Trakt:', error);
+      showStatus('Failed to disconnect from Trakt', 'error');
+    }
+  };
 
   // Initialize the application
   init();

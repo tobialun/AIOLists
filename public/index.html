@@ -44,15 +44,23 @@
     <div class="api-section">
       <div class="section-header">
         <h2>Connections</h2>
-        <span id="connectionsNotification" class="section-notification">Connected to Trakt successfully ✅</span>
+        <span id="connectionsNotification" class="section-notification"></span>
       </div>
       <div class="connections-row">
-        <a href="/api/trakt/login" id="traktLoginBtn" class="trakt-login-btn" target="_blank">
-          Login to Trakt.tv
-        </a>
-        <div id="traktPinContainer">
-          <input type="text" id="traktPin" placeholder="Enter PIN" maxlength="8">
-          <button id="submitTraktPin" class="trakt-login-btn">Submit PIN</button>
+        <!-- Trakt Connection -->
+        <div id="traktConnection">
+          <a href="/api/trakt/login" id="traktLoginBtn" class="trakt-login-btn" target="_blank">
+            Connect to Trakt
+            <img src="https://walter.trakt.tv/hotlink-ok/public/favicon.ico" alt="Trakt.tv">
+          </a>
+          <div id="traktConnectedState" class="connected-state">
+            Connected to Trakt.tv
+            <button onclick="window.disconnectTrakt()" class="disconnect-btn">Disconnect</button>
+          </div>
+          <div id="traktPinContainer">
+            <input type="text" id="traktPin" placeholder="Enter PIN" maxlength="8">
+            <button id="submitTraktPin" class="trakt-login-btn">Submit PIN</button>
+          </div>
         </div>
       </div>
       <div id="traktStatus"></div>

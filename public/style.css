@@ -408,65 +408,82 @@ button:hover {
   color: #666;
 }
 
-.trakt-login-btn {
-  display: inline-block;
-  padding: 10px 15px;
-  background-color: #ED1C24;
-  color: white;
-  text-decoration: none;
-  border-radius: 4px;
-  font-weight: bold;
-  transition: background-color 0.3s;
-}
-
-.trakt-login-btn:hover {
-  background-color: #C41017;
-}
-
-.auth-status {
-  margin-top: 10px;
-  padding: 10px;
-  border-radius: 4px;
-  font-size: 14px;
-}
-
-.auth-status.info {
-  background-color: #e3f2fd;
-  color: #0d47a1;
-}
-
-.auth-status.warning {
-  background-color: #fff3e0;
-  color: #e65100;
-}
-
-.auth-status.success {
-  background-color: #e8f5e9;
-  color: #2e7d32;
-}
-
-.auth-status.error {
-  background-color: #ffebee;
-  color: #c62828;
-}
-
 .connections-row {
   display: flex;
   align-items: center;
   gap: 15px;
 }
 
+#traktConnection {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 #traktPinContainer {
   display: none;
   align-items: center;
+  gap: 10px;
+  flex-direction: row;
 }
 
 #traktPin {
   width: 100px;
-  margin-right: 10px;
   padding: 8px;
   border: 1px solid #ccc;
   border-radius: 4px;
+  margin: 0;
+}
+
+.trakt-login-btn {
+  padding: 8px 12px;
+  border: none;
+  border-radius: 4px;
+  background-color: #4CAF50;
+  color: white;
+  cursor: pointer;
+  text-decoration: none;
+  font-size: 14px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.trakt-login-btn img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
+.trakt-login-btn:hover {
+  background-color: #45a049;
+}
+
+#traktConnectedState {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background-color: rgba(76, 175, 80, 0.1);
+  border: 1px solid #4CAF50;
+  border-radius: 4px;
+  color: #2e7d32;
+  gap: 10px;
+}
+
+#traktConnectedState button {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  background-color: #dc3545;
+  color: white;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+#traktConnectedState button:hover {
+  background-color: #c82333;
 }
 
 .imported-addons h3 {
