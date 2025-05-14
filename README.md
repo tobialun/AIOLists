@@ -67,12 +67,12 @@ You can also use Docker to deploy the addon:
 
 1. Build the Docker image:
    ```
-   docker build -t mdblist-addon .
+   docker build -t aiolists-addon .
    ```
 
 2. Run the container:
    ```
-   docker run -p 7000:7000 -e NODE_ENV=production mdblist-addon
+   docker run -p 7000:7000 -e NODE_ENV=production aiolists-addon
    ```
 
 ## Configuration
