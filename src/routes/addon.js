@@ -1,9 +1,6 @@
 const path = require('path');
 const fs = require('fs');
 const { convertToStremioFormat } = require('../addon');
-const { fetchTraktListItems } = require('../integrations/trakt');
-const { fetchListItems } = require('../integrations/mdblist');
-const { fetchExternalAddonItems } = require('../integrations/externalAddons');
 const { ITEMS_PER_PAGE } = require('../config');
 const Cache = require('../cache');
 

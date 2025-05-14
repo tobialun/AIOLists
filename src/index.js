@@ -20,6 +20,11 @@ async function initializeApp() {
     // Initialize Express app
     const app = express();
     
+    // Add root URL redirect before any other middleware
+    app.get('/', (req, res) => {
+      return res.status(301).redirect('/configure');
+    });
+    
     // Configure middleware
     app.use((req, res, next) => {
       res.header('Cache-Control', 'no-cache, no-store, must-revalidate');

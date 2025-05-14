@@ -31,6 +31,11 @@ async function compressConfig(config) {
  */
 async function decompressConfig(compressed) {
   try {
+
+    if (compressed === 'configure') {
+      return { ...defaultConfig };
+    }
+
     if (!compressed || typeof compressed !== 'string') {
       return { ...defaultConfig };
     }
