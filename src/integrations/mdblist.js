@@ -42,7 +42,9 @@ async function fetchAllLists(apiKey) {
         const internalLists = internalResponse.data.map(list => ({
           ...list,
           listType: 'L',
-          endpoint: `/lists/${list.id}/items`
+          endpoint: `/lists/${list.id}/items`,
+          isInternalList: true,
+          isExternalList: false
         }));
         allLists = [...allLists, ...internalLists];
       }
@@ -57,7 +59,9 @@ async function fetchAllLists(apiKey) {
         const externalLists = externalResponse.data.map(list => ({
           ...list,
           listType: 'E',
-          endpoint: `/external/lists/${list.id}/items`
+          endpoint: `/external/lists/${list.id}/items`,
+          isInternalList: false,
+          isExternalList: true
         }));
         allLists = [...allLists, ...externalLists];
       }
@@ -70,7 +74,10 @@ async function fetchAllLists(apiKey) {
       id: 'watchlist',
       name: 'My Watchlist',
       listType: 'W',
-      endpoint: '/watchlist/items'
+      endpoint: '/watchlist/items',
+      isInternalList: false,
+      isExternalList: false,
+      isWatchlist: true
     });
 
     return allLists;
@@ -94,6 +101,8 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0) {
   try {
     // Remove aiolists- prefix if present
     const id = listId.replace(/^aiolists-/, '');
+    console.log('Fetching list items for ID:', id);
+    console.log('List metadata:', listsMetadata?.[id]);
     
     // Special case for watchlist
     if (id === 'watchlist') {
@@ -104,26 +113,58 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0) {
     // Check if this is an internal or external list using metadata
     const metadata = listsMetadata?.[id];
     const isExternal = metadata?.isExternalList;
+    console.log('Is external list:', isExternal);
 
-    if (isExternal) {
-      // Try external list endpoint
-      try {
-        const response = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
-        if (response.status === 200 && !response.data.error) {
-          return processApiResponse(response.data);
+    // If we have metadata, use the appropriate endpoint
+    if (metadata) {
+      if (isExternal) {
+        try {
+          console.log('Trying external list endpoint (from metadata)');
+          const response = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
+          if (response.status === 200 && !response.data.error) {
+            return processApiResponse(response.data);
+          }
+        } catch (err) {
+          console.error(`Error fetching external list ${id}:`, err.message);
         }
-      } catch (err) {
-        console.error(`Error fetching external list ${id}:`, err.message);
+      } else {
+        try {
+          console.log('Trying internal list endpoint (from metadata)');
+          const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
+          if (response.status === 200 && !response.data.error) {
+            return processApiResponse(response.data);
+          }
+        } catch (err) {
+          console.error(`Error fetching internal list ${id}:`, err.message);
+        }
       }
     } else {
-      // Try internal list endpoint
+      // If metadata is undefined, try external first since that seems to be working
+      console.log('No metadata available, trying external endpoint first');
+      
+      // Try external first
       try {
+        console.log('Trying external list endpoint');
+        const response = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
+        if (response.status === 200 && !response.data.error) {
+          const processedResponse = processApiResponse(response.data);
+          if (processedResponse && (processedResponse.movies.length > 0 || processedResponse.shows.length > 0)) {
+            return processedResponse;
+          }
+        }
+      } catch (externalErr) {
+        console.log('External endpoint failed:', externalErr.message);
+      }
+      
+      // If external fails or returns no items, try internal
+      try {
+        console.log('Trying internal list endpoint');
         const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
         if (response.status === 200 && !response.data.error) {
           return processApiResponse(response.data);
         }
-      } catch (err) {
-        console.error(`Error fetching internal list ${id}:`, err.message);
+      } catch (internalErr) {
+        console.error(`Error fetching internal list ${id}:`, internalErr.message);
       }
     }
 
@@ -141,6 +182,8 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0) {
  * @returns {Object} Processed items with movies and shows
  */
 function processApiResponse(data) {
+  console.log('Processing MDBList API response:', JSON.stringify(data, null, 2));
+  
   if (!data || data.error) {
     console.error('API error:', data?.error || 'No data');
     return null;
@@ -148,6 +191,7 @@ function processApiResponse(data) {
   
   // Handle direct movies/shows response
   if (data.movies !== undefined || data.shows !== undefined) {
+    console.log('Found direct movies/shows response');
     return {
       movies: Array.isArray(data.movies) ? data.movies : [],
       shows: Array.isArray(data.shows) ? data.shows : []
@@ -157,16 +201,27 @@ function processApiResponse(data) {
   // Handle items array response
   let items = [];
   if (Array.isArray(data)) {
+    console.log('Found array response');
     items = data;
   } else if (Array.isArray(data.items)) {
+    console.log('Found items array response');
     items = data.items;
   } else if (Array.isArray(data.results)) {
+    console.log('Found results array response');
     items = data.results;
   }
   
+  console.log('Processing items:', items.length);
+  console.log('Sample item:', items[0]);
+  
+  const movies = items.filter(item => item && (item.type === 'movie' || item.mediatype === 'movie'));
+  const shows = items.filter(item => item && (item.type === 'show' || item.mediatype === 'show'));
+  
+  console.log(`Found ${movies.length} movies and ${shows.length} shows`);
+  
   return {
-    movies: items.filter(item => item && (item.type === 'movie' || item.mediatype === 'movie')),
-    shows: items.filter(item => item && (item.type === 'show' || item.mediatype === 'show'))
+    movies: movies,
+    shows: shows
   };
 }
 
