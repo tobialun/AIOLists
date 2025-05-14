@@ -12,4 +12,4 @@ EXPOSE 7000
 
 ENV NODE_ENV=production
 
-CMD ["node", "index.js"] 
+CMD ["node", "src/index.js"]
