@@ -219,7 +219,6 @@ async function fetchListContent(listId, userConfig, importedAddons, skip = 0) {
         // If this is a MDBList catalog with a direct URL
         if (catalog.url && addon.id.startsWith('mdblist_')) {
           try {
-            console.log(`Fetching MDBList catalog from URL: ${catalog.url}`);
             const response = await axios.get(catalog.url);
             return response.data;
           } catch (error) {
@@ -439,7 +438,6 @@ async function createAddon(userConfig) {
 
         // Find the catalog's position in the manifest
         const catalogIndex = manifest.catalogs.findIndex(c => c.id === id && c.type === type);
-        console.log(`Catalog ${id} found at index ${catalogIndex} in manifest`);
         
         const items = await fetchListContent(id, userConfig, userConfig.importedAddons, skipValue);
         if (!items) {
@@ -452,11 +450,9 @@ async function createAddon(userConfig) {
         // Log how many items we got back
         const totalMovies = items.movies?.length || 0;
         const totalShows = items.shows?.length || 0;
-        console.log(`Fetched ${totalMovies} movies and ${totalShows} shows for ${id}`);
         
         // When we fetch items with skip parameter, we don't need to skip again in convertToStremioFormat
         const allMetas = await convertToStremioFormat(items, 0, ITEMS_PER_PAGE, userConfig.rpdbApiKey);
-        console.log(`Converted ${allMetas.length} items to Stremio format`);
         
         let filteredMetas = allMetas;
         if (type === 'movie') {
@@ -472,7 +468,6 @@ async function createAddon(userConfig) {
           return orderA - orderB;
         });
         
-        console.log(`Returning ${filteredMetas.length} items after filtering for type=${type}`);
         
         // If we have a full page of results, indicate that there might be more
         const hasMore = filteredMetas.length >= ITEMS_PER_PAGE;

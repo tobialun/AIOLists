@@ -1,538 +1,699 @@
 body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    max-width: 900px;
-    margin: 0 auto;
-    padding: 20px;
-    background-color: #f5f5f5;
-    color: #333;
-  }
-  
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 20px;
+  background-color: #f5f5f5;
+  color: #333;
+}
+
+.container {
+  background-color: white;
+  border-radius: 8px;
+  padding: 25px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  max-width: 800px;
+  margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+}
+
+h1 {
+  color: #1e88e5;
+  margin-top: 0;
+}
+
+.form-group {
+  display: flex;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.form-group label {
+  width: 120px;
+  flex-shrink: 0;
+  font-weight: bold;
+}
+
+.form-group input[type="text"],
+.form-group input[type="password"] {
+  flex-grow: 1;
+  max-width: 500px;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  transition: all 0.3s ease;
+}
+
+.form-group input[type="text"]:focus,
+.form-group input[type="password"]:focus {
+  outline: none;
+  border-color: #8E5AF7;
+  box-shadow: 0 0 0 2px rgba(142, 90, 247, 0.2);
+}
+
+.form-group input[readonly] {
+  background-color: rgba(76, 175, 80, 0.1);
+  border-color: #4CAF50;
+  color: #2e7d32;
+  cursor: not-allowed;
+}
+
+.form-group input.invalid {
+  background-color: rgba(244, 67, 54, 0.1);
+  border-color: #f44336;
+  color: #d32f2f;
+}
+
+button {
+  background: #8E5AF7;
+  color: white;
+  border: none;
+  padding: 10px 15px;
+  border-radius: 4px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+button:hover {
+  background: #7B4DE0;
+}
+
+.list-container {
+  margin-top: 30px;
+  opacity: 1;
+  transition: opacity 0.3s;
+}
+
+.list-container.hidden {
+  opacity: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.list-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.drag-handle {
+  color: #999;
+  font-size: 14px;
+  cursor: move;
+  user-select: none;
+}
+
+.saved-indicator {
+  display: none;
+  color: #2e7d32;
+  font-size: 14px;
+  background-color: rgba(76, 175, 80, 0.1);
+  border-radius: 4px;
+  padding: 5px 10px;
+}
+
+.saved-indicator.visible {
+  display: inline-block;
+}
+
+.saved-indicator.saving {
+  color: #0277bd;
+  background-color: rgba(3, 169, 244, 0.1);
+}
+
+.list-item {
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  margin: 5px 0;
+  background: #f5f5f5;
+  border-radius: 4px;
+  cursor: move;
+  gap: 10px;
+}
+
+.list-item:hover {
+  background-color: #f1f1f1;
+}
+
+.list-item:active {
+  transform: scale(0.99);
+  background-color: #e9e9e9;
+}
+
+.list-name {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.list-name span {
+  flex: 1;
+  margin-right: 10px;
+}
+
+.list-logo {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.list-type-badge {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: bold;
+  color: white;
+  flex-shrink: 0;
+}
+
+.list-type-E { background-color: #4CAF50; }
+.list-type-L { background-color: #9C27B0; }
+.list-type-W { background-color: #FF9800; }
+
+.edit-name-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 5px;
+  color: #666;
+  font-size: 16px;
+}
+
+.edit-name-btn:hover {
+  color: #000;
+}
+
+.badge {
+  display: none;
+}
+
+.visibility-toggle {
+  cursor: pointer;
+  padding: 5px;
+  color: #555;
+  font-size: 1.2em;
+  transition: color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.visibility-toggle:hover {
+  color: #000;
+  background-color: rgba(0,0,0,0.05);
+}
+
+.eye-icon {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+
+.eye-open {
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>');
+}
+
+.eye-closed {
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>');
+}
+
+.list-item.hidden {
+  opacity: 0.6;
+  background-color: #f5f5f5;
+  display: flex;
+}
+
+.edit-name-input {
+  flex: 1;
+  padding: 5px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin-right: 10px;
+}
+
+.save-name-btn,
+.cancel-name-btn {
+  padding: 5px 10px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: 5px;
+}
+
+.save-name-btn {
+  background: #4CAF50;
+  color: white;
+}
+
+.cancel-name-btn {
+  background: #f44336;
+  color: white;
+}
+
+.status {
+  margin-top: 15px;
+  padding: 10px;
+  border-radius: 4px;
+  transition: opacity 0.3s;
+}
+
+.status.success {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.status.error {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+.status.hidden {
+  opacity: 0;
+  height: 0;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+}
+
+.addon-info {
+  flex-grow: 1;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.hidden {
+  display: none;
+}
+
+.loading {
+  margin: 20px 0;
+  text-align: center;
+  color: #666;
+}
+
+.install-button {
+  display: block;
+  width: 30%;
+  padding: 12px;
+  margin-top: 10px;
+  text-align: center;
+  background-color: #4caf50;
+  color: white;
+  border-radius: 4px;
+  text-decoration: none;
+  font-weight: bold;
+  font-size: 16px;
+}
+
+.install-button:hover {
+  background-color: #388e3c;
+}
+
+.note {
+  padding: 10px 15px;
+  background-color: #fff3cd;
+  color: #856404;
+  border-radius: 4px;
+  margin-top: 15px;
+}
+
+.saving {
+  color: #ff9800;
+}
+
+.refresh-note {
+  margin: 15px 0;
+  padding: 12px;
+  background-color: #e8f5e9;
+  border-radius: 4px;
+  border-left: 4px solid #4caf50;
+}
+
+.refresh-note button {
+  background-color: #4caf50;
+  margin-top: 10px;
+}
+
+.refresh-note button:hover {
+  background-color: #388e3c;
+}
+
+.refresh-note button:disabled {
+  background-color: #a5d6a7;
+  cursor: not-allowed;
+}
+
+.welcome-banner {
+  background-color: #f8f9fa;
+  border-left: 4px solid #8E5AF7;
+  padding: 15px 20px;
+  margin: 20px 0;
+  border-radius: 0 4px 4px 0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.welcome-banner h2 {
+  color: #8E5AF7;
+  margin-top: 0;
+}
+
+.welcome-banner ol,
+.welcome-banner ul {
+  padding-left: 25px;
+}
+
+.welcome-banner li {
+  margin-bottom: 8px;
+}
+
+.sortable-ghost {
+  opacity: 0.5;
+  background-color: #f0f0f0;
+}
+
+.api-section {
+  border: 1px solid #eee;
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 10px;
+}
+
+.api-section h2 {
+  margin-top: 0;
+  color: #444;
+}
+
+.api-section p {
+  margin-top: 0;
+  margin-bottom: 10px;
+  color: #666;
+}
+
+.trakt-login-btn {
+  display: inline-block;
+  padding: 10px 15px;
+  background-color: #ED1C24;
+  color: white;
+  text-decoration: none;
+  border-radius: 4px;
+  font-weight: bold;
+  transition: background-color 0.3s;
+}
+
+.trakt-login-btn:hover {
+  background-color: #C41017;
+}
+
+.auth-status {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.auth-status.info {
+  background-color: #e3f2fd;
+  color: #0d47a1;
+}
+
+.auth-status.warning {
+  background-color: #fff3e0;
+  color: #e65100;
+}
+
+.auth-status.success {
+  background-color: #e8f5e9;
+  color: #2e7d32;
+}
+
+.auth-status.error {
+  background-color: #ffebee;
+  color: #c62828;
+}
+
+.connections-row {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+#traktPinContainer {
+  display: none;
+  align-items: center;
+}
+
+#traktPin {
+  width: 100px;
+  margin-right: 10px;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.imported-addons h3 {
+  margin-top: 0;
+  margin-bottom: 5px;
+}
+
+.addons-list {
+  margin-top: 5px;
+}
+
+.addon-item {
+  padding: 8px 12px;
+  margin-bottom: 5px;
+  background: #f5f5f5;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.addon-logo {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  margin-right: 12px;
+}
+
+.addon-info {
+  display: flex;
+  align-items: center;
+  flex: 1;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.section-notification {
+  display: none;
+  color: #2e7d32;
+  font-size: 14px;
+  background-color: rgba(76, 175, 80, 0.1);
+  border-radius: 4px;
+  padding: 5px 10px;
+  margin-left: 10px;
+  transition: opacity 0.3s ease-in-out;
+}
+
+.section-notification.visible {
+  display: inline-block;
+  animation: fadeInOut 3s ease-in-out;
+}
+
+@keyframes fadeInOut {
+  0%, 100% { opacity: 0; }
+  10%, 90% { opacity: 1; }
+}
+
+.input-container {
+  flex-grow: 1;
+  max-width: 500px;
+  position: relative;
+  display: flex;
+  gap: 8px;
+}
+
+.connected-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px;
+  background-color: rgba(76, 175, 80, 0.1);
+  border: 1px solid #4CAF50;
+  border-radius: 4px;
+  color: #2e7d32;
+  width: 100%;
+  max-width: 500px;
+}
+
+.connected-text {
+  font-weight: 500;
+}
+
+.disconnect-btn {
+  padding: 4px 8px;
+  background-color: #f44336;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background-color 0.3s;
+  margin-left: 10px;
+  white-space: nowrap;
+}
+
+.disconnect-btn:hover {
+  background-color: #d32f2f;
+}
+
+.action-btn {
+  padding: 8px 16px;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.action-btn:hover {
+  background-color: #45a049;
+}
+
+.status-message {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.status-message.error {
+  background-color: #ffebee;
+  color: #c62828;
+}
+
+.status-message.success {
+  background-color: #e8f5e9;
+  color: #2e7d32;
+}
+
+.status-message.info {
+  background-color: #e3f2fd;
+  color: #1565c0;
+}
+
+.stremio-buttons {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 30px 0;
+}
+
+.stremio-refresh-btn {
+  padding: 15px 30px;
+  background-color: #8E5AF7;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 18px;
+  transition: background-color 0.3s;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.stremio-refresh-btn:hover {
+  background-color: #7B4DE0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.header img {
+  height: 40px;
+  width: auto;
+}
+
+.header h1 {
+  color: #000;
+  margin: 0;
+  font-size: 24px;
+  font-weight: 500;
+}
+
+.badge-mdblist {
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  margin-right: 3px;
+  background: transparent;
+}
+
+.mdblist-logo {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
+@media (max-width: 600px) {
   .container {
-    background-color: white;
-    border-radius: 8px;
-    padding: 25px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-    max-width: 800px;
-    margin: 0 auto;
-    padding: 20px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-  }
-  
-  h1 {
-    color: #1e88e5;
-    margin-top: 0;
-  }
-  
-  .form-group {
-    margin-bottom: 15px;
-  }
-  
-  label {
-    display: block;
-    margin-bottom: 5px;
-    font-weight: bold;
-  }
-  
-  input[type="text"],
-  input[type="password"] {
-    width: 100%;
     padding: 10px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    font-size: 16px;
-  }
-  
-  input.highlight {
-    border-color: #8E5AF7;
-    box-shadow: 0 0 5px rgba(142, 90, 247, 0.5);
-  }
-  
-  button {
-    background: #8E5AF7;
-    color: white;
-    border: none;
-    padding: 10px 15px;
-    border-radius: 4px;
-    font-size: 16px;
-    cursor: pointer;
-    transition: background-color 0.2s;
-  }
-  
-  button:hover {
-    background: #7B4DE0;
-  }
-  
-  .list-container {
-    margin-top: 30px;
-    opacity: 1;
-    transition: opacity 0.3s;
-  }
-  
-  .list-container.hidden {
-    opacity: 0;
-    height: 0;
-    overflow: hidden;
   }
   
   .list-heading {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  
-  .drag-handle {
-    cursor: move;
-    color: #999;
-    padding: 0 5px;
+    flex-direction: column;
+    align-items: flex-start;
   }
   
   .saved-indicator {
-    background-color: #d4edda;
-    color: #155724;
-    padding: 5px 10px;
-    border-radius: 4px;
-    font-size: 14px;
-    opacity: 0;
-    transition: opacity 0.3s;
-  }
-  
-  .saved-indicator.visible {
-    opacity: 1;
-  }
-  
-  .saved-indicator.saving {
-    background-color: #cce5ff;
-    color: #004085;
-  }
-  
-  .list-item {
-    display: flex;
-    align-items: center;
-    padding: 10px;
-    margin: 5px 0;
-    background: #f5f5f5;
-    border-radius: 4px;
-    cursor: move;
-    gap: 10px;
-  }
-  
-  .list-item:hover {
-    background-color: #f1f1f1;
-  }
-  
-  .list-name {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  
-  .list-name span {
-    flex: 1;
-  }
-  
-  .edit-name-btn {
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 5px;
-    color: #666;
-    font-size: 16px;
-  }
-  
-  .edit-name-btn:hover {
-    color: #000;
-  }
-  
-  .badge {
-    padding: 2px 8px;
-    border-radius: 12px;
-    color: white;
-    font-size: 12px;
-    font-weight: bold;
-    min-width: 20px;
-    text-align: center;
-  }
-  
-  .badge-E { background-color: #4CAF50; }
-  .badge-L { background-color: #9C27B0; }
-  .badge-W { background-color: #FF9800; }
-  .badge-T { background-color: #E91E63; }
-  
-  .visibility-toggle {
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 5px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  
-  .eye-icon {
-    width: 20px;
-    height: 20px;
-    opacity: 0.6;
-  }
-  
-  .eye-icon:hover {
-    opacity: 1;
-  }
-  
-  .list-item.hidden {
-    opacity: 0.6;
-  }
-  
-  .edit-name-input {
-    flex: 1;
-    padding: 5px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    margin-right: 10px;
-  }
-  
-  .save-name-btn,
-  .cancel-name-btn {
-    padding: 5px 10px;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    margin-left: 5px;
-  }
-  
-  .save-name-btn {
-    background: #4CAF50;
-    color: white;
-  }
-  
-  .cancel-name-btn {
-    background: #f44336;
-    color: white;
-  }
-  
-  .status {
-    margin-top: 15px;
-    padding: 10px;
-    border-radius: 4px;
-    transition: opacity 0.3s;
-  }
-  
-  .status.success {
-    background-color: #d4edda;
-    color: #155724;
-  }
-  
-  .status.error {
-    background-color: #f8d7da;
-    color: #721c24;
-  }
-  
-  .status.hidden {
-    opacity: 0;
-    height: 0;
-    padding: 0;
-    margin: 0;
-    overflow: hidden;
-  }
-  
-  .addon-info {
-    flex-grow: 1;
-    text-align: center;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-  }
-  
-  .hidden {
-    display: none;
-  }
-  
-  .loading {
-    margin: 20px 0;
-    text-align: center;
-    color: #666;
-  }
-  
-  .install-button {
-    display: block;
-    width: 30%;
-    padding: 12px;
-    margin-top: 10px;
-    text-align: center;
-    background-color: #4caf50;
-    color: white;
-    border-radius: 4px;
-    text-decoration: none;
-    font-weight: bold;
-    font-size: 16px;
-    text-decoration: none;
-  }
-  
-  .install-button:hover {
-    background-color: #388e3c;
-  }
-  
-  .note {
-    padding: 10px 15px;
-    background-color: #fff3cd;
-    color: #856404;
-    border-radius: 4px;
-    margin-top: 15px;
-  }
-
-  .saving {
-    color: #ff9800;
-  }
-  
-  .refresh-note {
-    margin: 15px 0;
-    padding: 12px;
-    background-color: #e8f5e9;
-    border-radius: 4px;
-    border-left: 4px solid #4caf50;
-  }
-  
-  .refresh-note button {
-    background-color: #4caf50;
     margin-top: 10px;
   }
-  
-  .refresh-note button:hover {
-    background-color: #388e3c;
-  }
-  
-  .refresh-note button:disabled {
-    background-color: #a5d6a7;
-    cursor: not-allowed;
-  }
-  
-  /* Welcome banner for first-time setup */
-  .welcome-banner {
-    background-color: #f8f9fa;
-    border-left: 4px solid #8E5AF7;
-    padding: 15px 20px;
-    margin: 20px 0;
-    border-radius: 0 4px 4px 0;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-  }
-  
-  .welcome-banner h2 {
-    color: #8E5AF7;
-    margin-top: 0;
-  }
-  
-  .welcome-banner ol, .welcome-banner ul {
-    padding-left: 25px;
-  }
-  
-  .welcome-banner li {
-    margin-bottom: 8px;
-  }
-  
-  /* Sortable ghost (dragging) */
-  .sortable-ghost {
-    opacity: 0.5;
-    background-color: #f0f0f0;
-  }
-  
-  /* Media queries for responsive design */
-  @media (max-width: 600px) {
-    .container {
-      padding: 10px;
-    }
-    
-    .list-heading {
-      flex-direction: column;
-      align-items: flex-start;
-    }
-    
-    .saved-indicator {
-      margin-top: 10px;
-    }
-  }
-  
-  /* API Section Styling */
-  .api-section {
-    border: 1px solid #eee;
-    border-radius: 8px;
-    padding: 15px;
-    margin-bottom: 10px;
-  }
-  
-  .api-section h2 {
-    margin-top: 0;
-    color: #444;
-  }
-  
-  /* Trakt Authentication Styling */
-  .auth-button {
-    background-color: #ED1C24;
-    color: white;
-    border: none;
-    padding: 8px 15px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-weight: bold;
-    margin-top: 10px;
-    transition: background-color 0.3s;
-  }
-  
-  .auth-button:hover {
-    background-color: #C41017;
-  }
-  
-  .auth-status {
-    margin-top: 10px;
-    padding: 10px;
-    border-radius: 4px;
-    font-size: 14px;
-  }
-  
-  .auth-status.info {
-    background-color: #e3f2fd;
-    color: #0d47a1;
-  }
-  
-  .auth-status.warning {
-    background-color: #fff3e0;
-    color: #e65100;
-  }
-  
-  .auth-status.success {
-    background-color: #e8f5e9;
-    color: #2e7d32;
-  }
-  
-  .auth-status.error {
-    background-color: #ffebee;
-    color: #c62828;
-  }
-  
-  .auth-code-form {
-    display: flex;
-    gap: 10px;
-    margin-top: 10px;
-  }
-  
-  .auth-code-form input {
-    flex: 1;
-    padding: 8px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-  }
-  
-  .auth-code-form button {
-    background-color: #ED1C24;
-    color: white;
-    border: none;
-    padding: 8px 15px;
-    border-radius: 4px;
-    cursor: pointer;
-  }
+}
 
-  .import-btn {
-    background-color: #2196F3;
-    color: white;
-    border: none;
-    padding: 8px 15px;
-    border-radius: 4px;
-    cursor: pointer;
-    margin-left: 10px;
-    transition: background-color 0.3s;
-  }
+/* Additional styles for inline styles in HTML */
+#mdblistConnected,
+#rpdbConnected {
+  display: none;
+}
 
-  .import-btn:hover {
-    background-color: #1976D2;
-  }
+#traktStatus {
+  margin-top: 10px;
+}
 
-  #manifestUrl {
-    flex: 1;
-    margin-right: 10px;
-  }
+#submitTraktPin {
+  border: none;
+  cursor: pointer;
+}
 
-  .form-group {
-    display: flex;
-    align-items: center;
-    margin-bottom: 15px;
-  }
-  
-  .imported-addons h3 {
-    margin-bottom: 15px;
-    color: #333;
-  }
-  
-  .addons-list {
-    display: flex;
-    flex-direction: column;
-  }
-  
-  .addon-item {
-    display: flex;
-    align-items: center;
-    padding: 10px;
-    background: #f8f9fa;
-    border-radius: 6px;
-    border: 1px solid #e9ecef;
-  }
-  
-  .addon-logo {
-    width: 40px;
-    height: 40px;
-    margin-right: 15px;
-    border-radius: 4px;
-    object-fit: contain;
-  }
-  
-  .addon-name {
-    font-weight: 500;
-    color: #212529;
-    margin-bottom: 2px;
-  }
-  
-  .addon-version {
-    font-size: 0.8em;
-    color: #6c757d;
-    margin-left: 8px;
-  }
-  
-  .remove-addon {
-    padding: 6px 12px;
-    background-color: #dc3545;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: background-color 0.2s;
-  }
-  
-  .remove-addon:hover {
-    background-color: #c82333;
-  }
-  
-  .stremio-buttons {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    margin: 30px 0;
-  }
-  
-  .stremio-refresh-btn {
-    padding: 15px 30px;
-    background-color: #8E5AF7;
-    color: white;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    font-weight: bold;
-    font-size: 18px;
-    transition: background-color 0.3s;
-    text-decoration: none;
-    display: inline-block;
-  }
-
-  .stremio-refresh-btn:hover {
-    background-color: #7B4DE0;
-  }
-  
+#listItems {
+  list-style: none;
+  padding: 0;
+} 

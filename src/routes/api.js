@@ -557,9 +557,7 @@ function setupApiRoutes(app) {
         config = { ...defaultConfig };
       }
 
-      console.log('Current config:', config);
       const addonInfo = await importExternalAddon(manifestUrl);
-      console.log('Imported addon info:', addonInfo);
       
       const updatedConfig = {
         ...config,
@@ -570,9 +568,7 @@ function setupApiRoutes(app) {
         lastUpdated: new Date().toISOString()
       };
       
-      console.log('Updated config:', updatedConfig);
       const newConfigHash = await compressConfig(updatedConfig);
-      console.log('New config hash:', newConfigHash);
       
       await rebuildAddonWithConfig(updatedConfig);
       

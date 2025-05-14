@@ -8,7 +8,6 @@ document.addEventListener('DOMContentLoaded', function() {
       listsMetadata: {},
       lastUpdated: null
     },
-    isFirstTimeSetup: window.isFirstTimeSetup === true,
     addons: {},  // Store imported addons for reference
     currentLists: []  // Store current list data for immediate UI updates
   };
@@ -79,10 +78,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     state.configHash = pathParts[0];
-
-    if (state.isFirstTimeSetup) {
-      showWelcomeMessage();
-    }
   
     initStremioButton();
     await loadConfiguration();
@@ -333,6 +328,33 @@ document.addEventListener('DOMContentLoaded', function() {
     const nameContainer = document.createElement('div');
     nameContainer.className = 'list-name';
     
+    let listIdentifier;
+    
+    if (list.addonId?.startsWith('mdblist_')) {
+      // For MDBList items
+      listIdentifier = document.createElement('img');
+      listIdentifier.className = 'list-logo';
+      listIdentifier.src = 'https://mdblist.com/static/mdblist_logo.png';
+      listIdentifier.alt = 'MDBList';
+    } else if (list.addonLogo) {
+      // For other addon items with logo
+      listIdentifier = document.createElement('img');
+      listIdentifier.className = 'list-logo';
+      listIdentifier.src = list.addonLogo;
+      listIdentifier.alt = list.addonName || 'Addon Logo';
+    } else if (list.listType === 'T') {
+      // For Trakt lists
+      listIdentifier = document.createElement('img');
+      listIdentifier.className = 'list-logo';
+      listIdentifier.src = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico';
+      listIdentifier.alt = 'Trakt.tv';
+    } else {
+      // For regular lists, use letter badges
+      listIdentifier = document.createElement('div');
+      listIdentifier.className = `list-type-badge list-type-${list.listType || 'L'}`;
+      listIdentifier.textContent = list.listType || 'L';
+    }
+    
     const nameSpan = document.createElement('span');
     nameSpan.textContent = list.customName || list.name;
     
@@ -342,23 +364,7 @@ document.addEventListener('DOMContentLoaded', function() {
     editBtn.title = 'Edit list name';
     editBtn.onclick = () => startEditingName(nameContainer, list);
     
-    nameContainer.append(nameSpan, editBtn);
-    
-    // Create badge/tag based on list type
-    const badge = document.createElement('span');
-    if (list.addonId?.startsWith('mdblist_')) {
-      // For MDBList items, use the logo
-      badge.className = 'badge badge-mdblist';
-      const img = document.createElement('img');
-      img.src = 'https://mdblist.com/static/mdblist_logo.png';
-      img.alt = 'MDBList';
-      img.className = 'mdblist-logo';
-      badge.appendChild(img);
-    } else {
-      // For other items, use the regular badge
-      badge.className = `badge badge-${list.listType || 'L'}`;
-      badge.textContent = list.listType || 'L';
-    }
+    nameContainer.append(listIdentifier, nameSpan, editBtn);
     
     const visibilityToggle = document.createElement('button');
     visibilityToggle.className = 'visibility-toggle';
@@ -367,7 +373,7 @@ document.addEventListener('DOMContentLoaded', function() {
       '<span class="eye-icon eye-closed"></span>' : 
       '<span class="eye-icon eye-open"></span>';
     
-    li.append(dragHandle, nameContainer, badge, visibilityToggle);
+    li.append(dragHandle, nameContainer, visibilityToggle);
     return li;
   }
 
@@ -375,7 +381,6 @@ document.addEventListener('DOMContentLoaded', function() {
     if (window.Sortable) {
       Sortable.create(elements.listItems, {
         animation: 150,
-        handle: '.drag-handle',
         ghostClass: 'sortable-ghost',
         onEnd: async (evt) => {
           const items = elements.listItems.querySelectorAll('.list-item');
@@ -803,10 +808,6 @@ document.addEventListener('DOMContentLoaded', function() {
         font-size: 1.1em;
         background: #e0e0e0;
         border-bottom: 1px solid #ddd;
-      }
-      /* Remove the top gray bar by setting the background to white */
-      #addonsList {
-        background: #fff;
       }
     `;
     document.head.appendChild(style);
