@@ -170,6 +170,13 @@ document.addEventListener('DOMContentLoaded', function() {
             await validateApiKeys('', state.userConfig.rpdbApiKey);
           }
         }
+
+        // Handle Trakt connection state
+        if (state.userConfig.traktAccessToken) {
+          elements.traktLoginBtn.style.display = 'none';
+          elements.traktPinContainer.style.display = 'none';
+          elements.traktConnectedState.style.display = 'flex';
+        }
         
         if (state.userConfig.apiKey) {
           await loadLists();
@@ -442,6 +449,29 @@ document.addEventListener('DOMContentLoaded', function() {
     
     container.innerHTML = '';
     
+    // Create and add the list identifier (logo or badge)
+    let listIdentifier;
+    if (list.addonId?.startsWith('mdblist_')) {
+      listIdentifier = document.createElement('img');
+      listIdentifier.className = 'list-logo';
+      listIdentifier.src = 'https://mdblist.com/static/mdblist_logo.png';
+      listIdentifier.alt = 'MDBList';
+    } else if (list.addonLogo) {
+      listIdentifier = document.createElement('img');
+      listIdentifier.className = 'list-logo';
+      listIdentifier.src = list.addonLogo;
+      listIdentifier.alt = list.addonName || 'Addon Logo';
+    } else if (list.listType === 'T') {
+      listIdentifier = document.createElement('img');
+      listIdentifier.className = 'list-logo';
+      listIdentifier.src = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico';
+      listIdentifier.alt = 'Trakt.tv';
+    } else {
+      listIdentifier = document.createElement('div');
+      listIdentifier.className = `list-type-badge list-type-${list.listType || 'L'}`;
+      listIdentifier.textContent = list.listType || 'L';
+    }
+    
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'edit-name-input';
@@ -469,7 +499,7 @@ document.addEventListener('DOMContentLoaded', function() {
         editBtn.onclick = () => startEditingName(container, { ...list, customName: newName });
         
         container.innerHTML = '';
-        container.append(nameSpan, editBtn);
+        container.append(listIdentifier, nameSpan, editBtn);
       } else {
         container.innerHTML = originalContent;
       }
@@ -497,7 +527,7 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     });
     
-    container.append(input, saveBtn, cancelBtn);
+    container.append(listIdentifier, input, saveBtn, cancelBtn);
     input.focus();
     input.select();
   }
