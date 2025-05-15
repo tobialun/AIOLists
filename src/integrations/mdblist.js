@@ -102,7 +102,6 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0) {
     // Remove aiolists- prefix if present
     const id = listId.replace(/^aiolists-/, '');
     console.log('Fetching list items for ID:', id);
-    console.log('List metadata:', listsMetadata?.[id]);
     
     // Special case for watchlist
     if (id === 'watchlist') {
@@ -144,7 +143,6 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0) {
       
       // Try external first
       try {
-        console.log('Trying external list endpoint');
         const response = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
         if (response.status === 200 && !response.data.error) {
           const processedResponse = processApiResponse(response.data);
@@ -158,7 +156,6 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0) {
       
       // If external fails or returns no items, try internal
       try {
-        console.log('Trying internal list endpoint');
         const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
         if (response.status === 200 && !response.data.error) {
           return processApiResponse(response.data);
@@ -181,9 +178,7 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0) {
  * @param {Object} data - API response data
  * @returns {Object} Processed items with movies and shows
  */
-function processApiResponse(data) {
-  console.log('Processing MDBList API response:', JSON.stringify(data, null, 2));
-  
+function processApiResponse(data) {  
   if (!data || data.error) {
     console.error('API error:', data?.error || 'No data');
     return null;
@@ -191,7 +186,6 @@ function processApiResponse(data) {
   
   // Handle direct movies/shows response
   if (data.movies !== undefined || data.shows !== undefined) {
-    console.log('Found direct movies/shows response');
     return {
       movies: Array.isArray(data.movies) ? data.movies : [],
       shows: Array.isArray(data.shows) ? data.shows : []
@@ -201,23 +195,16 @@ function processApiResponse(data) {
   // Handle items array response
   let items = [];
   if (Array.isArray(data)) {
-    console.log('Found array response');
     items = data;
   } else if (Array.isArray(data.items)) {
-    console.log('Found items array response');
     items = data.items;
   } else if (Array.isArray(data.results)) {
-    console.log('Found results array response');
     items = data.results;
   }
-  
-  console.log('Processing items:', items.length);
-  console.log('Sample item:', items[0]);
   
   const movies = items.filter(item => item && (item.type === 'movie' || item.mediatype === 'movie'));
   const shows = items.filter(item => item && (item.type === 'show' || item.mediatype === 'show'));
   
-  console.log(`Found ${movies.length} movies and ${shows.length} shows`);
   
   return {
     movies: movies,

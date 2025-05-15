@@ -1,5 +1,5 @@
 const { addonBuilder } = require('stremio-addon-sdk');
-const { fetchPosterFromRPDB } = require('../utils/posters');
+const { fetchPosterFromRPDB, batchFetchPosters } = require('../utils/posters');
 const { fetchTraktListItems, fetchTraktLists } = require('../integrations/trakt');
 const { fetchListItems: fetchMDBListItems, fetchAllLists } = require('../integrations/mdblist');
 const { fetchExternalAddonItems } = require('../integrations/externalAddons');
@@ -27,19 +27,22 @@ async function convertToStremioFormat(items, skip = 0, limit = ITEMS_PER_PAGE, r
     
     // If we have RPDB key, update the posters
     if (useRPDB) {
-      const posterPromises = pageItems.map(async (item) => {
-        // Ensure we have a valid IMDb ID
+      // Collect all IMDb IDs first
+      const imdbIds = pageItems
+        .map(item => item.imdb_id || item.id)
+        .filter(id => id && id.startsWith('tt'));
+      
+      // Batch fetch all posters
+      const posterMap = await batchFetchPosters(imdbIds, rpdbApiKey);
+      
+      // Update items with fetched posters
+      metas = pageItems.map(item => {
         const imdbId = item.imdb_id || item.id;
-        if (!imdbId) return item;
-        
-        const rpdbPoster = await fetchPosterFromRPDB(imdbId, rpdbApiKey);
-        if (rpdbPoster) {
-          return { ...item, poster: rpdbPoster };
+        if (imdbId && posterMap[imdbId]) {
+          return { ...item, poster: posterMap[imdbId] };
         }
         return item;
       });
-      
-      metas = await Promise.all(posterPromises);
     } else {
       metas = pageItems;
     }
@@ -174,17 +177,19 @@ async function convertToStremioFormat(items, skip = 0, limit = ITEMS_PER_PAGE, r
   
   // Process RPDB posters only for the current page of items
   if (useRPDB && pageItems.length > 0) {
-    // Fetch all posters in parallel using Promise.all
-    const posterPromises = pageItems.map(async (item) => {
-      const rpdbPoster = await fetchPosterFromRPDB(item.id, rpdbApiKey);
-      if (rpdbPoster) {
-        item.poster = rpdbPoster;
+    // Collect all IMDb IDs
+    const imdbIds = pageItems.map(item => item.id).filter(id => id && id.startsWith('tt'));
+    
+    // Batch fetch all posters
+    const posterMap = await batchFetchPosters(imdbIds, rpdbApiKey);
+    
+    // Update items with fetched posters
+    metas = pageItems.map(item => {
+      if (item.id && posterMap[item.id]) {
+        return { ...item, poster: posterMap[item.id] };
       }
       return item;
     });
-    
-    // Wait for all poster fetches to complete
-    metas.push(...(await Promise.all(posterPromises)));
   } else {
     // If not using RPDB, just add items without fetching posters
     metas.push(...pageItems);

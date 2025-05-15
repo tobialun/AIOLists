@@ -25,6 +25,47 @@ async function validateRPDBKey(rpdbApiKey) {
 }
 
 /**
+ * Batch fetch posters from RatingPosterDB
+ * @param {string[]} imdbIds - Array of IMDb IDs
+ * @param {string} rpdbApiKey - RPDB API key
+ * @returns {Promise<Object>} Map of IMDb IDs to poster URLs
+ */
+async function batchFetchPosters(imdbIds, rpdbApiKey) {
+  if (!rpdbApiKey || !imdbIds?.length) return {};
+  
+  const results = {};
+  const uncachedIds = [];
+  
+  // Check cache first for all IDs
+  for (const imdbId of imdbIds) {
+    const cacheKey = `poster_${imdbId}`;
+    const cachedPoster = posterCache.get(cacheKey);
+    if (cachedPoster) {
+      results[imdbId] = cachedPoster === 'null' ? null : cachedPoster;
+    } else {
+      uncachedIds.push(imdbId);
+    }
+  }
+  
+  // If all posters were cached, return early
+  if (!uncachedIds.length) return results;
+  
+  // Fetch uncached posters in parallel
+  const fetchPromises = uncachedIds.map(async (imdbId) => {
+    try {
+      const poster = await fetchPosterFromRPDB(imdbId, rpdbApiKey);
+      results[imdbId] = poster;
+    } catch (error) {
+      console.error(`Error fetching poster for ${imdbId}:`, error.message);
+      results[imdbId] = null;
+    }
+  });
+  
+  await Promise.all(fetchPromises);
+  return results;
+}
+
+/**
  * Fetch poster from RatingPosterDB
  * @param {string} imdbId - IMDb ID
  * @param {string} rpdbApiKey - RPDB API key
@@ -99,5 +140,5 @@ async function fetchPosterFromRPDB(imdbId, rpdbApiKey) {
 module.exports = {
   validateRPDBKey,
   fetchPosterFromRPDB,
-  posterCache
+  batchFetchPosters
 }; 

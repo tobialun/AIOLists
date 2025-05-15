@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { fetchPosterFromRPDB } = require('../utils/posters');
+const { fetchPosterFromRPDB, batchFetchPosters } = require('../utils/posters');
 
 /**
  * Represents an external addon with its manifest and metadata endpoints
@@ -254,19 +254,23 @@ async function fetchExternalAddonItems(catalogId, addon, skip = 0, rpdbApiKey = 
     // If we have RPDB API key, update posters
     if (rpdbApiKey) {
       const metas = response.data.metas;
-      const posterPromises = metas.map(async (item) => {
-        // Ensure we have a valid IMDb ID
+      
+      // Collect all IMDb IDs
+      const imdbIds = metas
+        .map(item => item.imdb_id || item.id)
+        .filter(id => id && id.startsWith('tt'));
+      
+      // Batch fetch all posters
+      const posterMap = await batchFetchPosters(imdbIds, rpdbApiKey);
+      
+      // Update items with fetched posters
+      return metas.map(item => {
         const imdbId = item.imdb_id || item.id;
-        if (!imdbId || !imdbId.startsWith('tt')) return item;
-        
-        const rpdbPoster = await fetchPosterFromRPDB(imdbId, rpdbApiKey);
-        if (rpdbPoster) {
-          return { ...item, poster: rpdbPoster };
+        if (imdbId && posterMap[imdbId]) {
+          return { ...item, poster: posterMap[imdbId] };
         }
         return item;
       });
-      
-      return await Promise.all(posterPromises);
     }
 
     return response.data.metas;
