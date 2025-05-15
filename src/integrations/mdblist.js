@@ -229,7 +229,7 @@ function processApiResponse(data) {
  * Extract list ID and metadata from MDBList URL
  * @param {string} url - MDBList URL (e.g., https://mdblist.com/lists/username/list-name)
  * @param {string} apiKey - MDBList API key
- * @returns {Promise<{listId: string, listName: string, mediatype: string}>} List ID, name and content type
+ * @returns {Promise<{listId: string, listName: string}>} List ID and name
  * @throws {Error} If list ID cannot be extracted or list not found
  */
 async function extractListFromUrl(url, apiKey) {
@@ -261,7 +261,7 @@ async function extractListFromUrl(url, apiKey) {
 
     const listId = idMatch[1];
 
-    // Now fetch list details from API to get mediatype
+    // Now fetch list details from API to get name
     const apiResponse = await axios.get(`https://api.mdblist.com/lists/${listId}?apikey=${apiKey}`);
     if (!apiResponse.data?.[0]) {
       throw new Error('Could not fetch list details from API');
@@ -271,8 +271,7 @@ async function extractListFromUrl(url, apiKey) {
     
     return {
       listId: listId,
-      listName: listData.name,
-      mediatype: listData.mediatype === 'show' ? 'series' : (listData.mediatype || 'movie') // Convert 'show' to 'series', default to 'movie' if not specified
+      listName: listData.name
     };
   } catch (error) {
     console.error('Error extracting list from URL:', error);

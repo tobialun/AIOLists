@@ -708,24 +708,57 @@ function setupApiRoutes(app) {
       }
       
       // Extract list ID, name and type from URL, passing the API key
-      const { listId, listName, mediatype } = await extractListFromUrl(url, config.apiKey);
+      const { listId, listName } = await extractListFromUrl(url, config.apiKey);
       
-      // Create a manifest for the MDBList with a single catalog
+      // Fetch the actual list content to determine what types it contains
+      const listContent = await fetchListItems(listId, config.apiKey, config.listsMetadata);
+      if (!listContent) {
+        throw new Error('Could not fetch list content');
+      }
+
+      // Determine which types to include based on actual content
+      const hasMovies = listContent.movies && listContent.movies.length > 0;
+      const hasShows = listContent.shows && listContent.shows.length > 0;
+      
+      // Create a manifest for the MDBList with catalogs based on content
       const manifest = {
         id: `mdblist_${listId}`,
         name: `MDBList - ${listName}`,
         version: '1.0.0',
         description: `Imported from MDBList: ${url}`,
-        catalogs: [{
+        catalogs: [],
+        resources: ['catalog'],
+        types: []
+      };
+
+      // Only add movie catalog if there are movies
+      if (hasMovies) {
+        manifest.catalogs.push({
           id: listId,
           name: listName,
-          type: mediatype, // Use detected type from MDBList API
-          url: url, // Store the original URL
+          type: 'movie',
+          url: url,
           extra: [{ name: 'skip' }]
-        }],
-        resources: ['catalog'],
-        types: ['movie', 'series']
-      };
+        });
+        manifest.types.push('movie');
+      }
+
+      // Only add series catalog if there are shows
+      if (hasShows) {
+        manifest.catalogs.push({
+          id: listId,
+          name: listName,
+          type: 'series',
+          url: url,
+          extra: [{ name: 'skip' }]
+        });
+        manifest.types.push('series');
+      }
+
+      // If no content was found, throw an error
+      if (!hasMovies && !hasShows) {
+        throw new Error('List appears to be empty');
+      }
 
       // Get existing MDBList imports
       const existingMDBLists = Object.entries(config.importedAddons || {})

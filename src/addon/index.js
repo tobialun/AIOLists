@@ -295,7 +295,8 @@ async function createAddon(userConfig) {
       // Store metadata for the lists
       storeListsMetadata(allLists, userConfig);
       
-      visibleLists.forEach(list => {
+      // Process lists in parallel and collect all catalogs
+      const catalogPromises = visibleLists.map(async list => {
         const listId = String(list.id);
         let displayName = list.name;
         if (userConfig.customListNames && userConfig.customListNames[listId]) {
@@ -304,25 +305,68 @@ async function createAddon(userConfig) {
         
         const safeName = displayName.replace(/[^\w\s-]/g, '');
         const catalogId = listId.startsWith('trakt_') ? listId : `aiolists-${listId}`;
-        let types = ['movie', 'series'];
         
-        if (list.isMovieList) {
-          types = ['movie'];
-        } else if (list.isShowList) {
-          types = ['series'];
+        // Fetch list content to determine types
+        const listContent = await fetchListContent(listId, userConfig, userConfig.importedAddons);
+        if (!listContent) {
+          return [];
         }
-        
-        types.forEach(type => {
-          manifest.catalogs.push({
-            type: type,
+
+        // Determine which types to include based on actual content
+        const hasMovies = listContent.movies && listContent.movies.length > 0;
+        const hasShows = listContent.shows && listContent.shows.length > 0;
+
+        const catalogs = [];
+
+        // Only add movie catalog if there are movies
+        if (hasMovies) {
+          catalogs.push({
+            type: 'movie',
             id: catalogId,
-            name: `${safeName}`,
-            extra: [
-              { name: "skip" }
-            ],
-            extraSupported: ["skip"]
+            name: safeName,
+            extra: [{ name: "skip" }],
+            extraSupported: ["skip"],
+            originalListId: listId // Store original list ID for sorting
           });
+        }
+
+        // Only add series catalog if there are shows
+        if (hasShows) {
+          catalogs.push({
+            type: 'series',
+            id: catalogId,
+            name: safeName,
+            extra: [{ name: "skip" }],
+            extraSupported: ["skip"],
+            originalListId: listId // Store original list ID for sorting
+          });
+        }
+
+        return catalogs;
+      });
+
+      // Wait for all catalog promises to resolve
+      const allCatalogs = (await Promise.all(catalogPromises)).flat();
+
+      // If we have a list order, sort the catalogs
+      if (userConfig.listOrder && userConfig.listOrder.length > 0) {
+        const orderMap = new Map(userConfig.listOrder.map((id, index) => [String(id), index]));
+        
+        allCatalogs.sort((a, b) => {
+          const aId = String(a.originalListId);
+          const bId = String(b.originalListId);
+          
+          const aOrder = orderMap.has(aId) ? orderMap.get(aId) : Number.MAX_SAFE_INTEGER;
+          const bOrder = orderMap.has(bId) ? orderMap.get(bId) : Number.MAX_SAFE_INTEGER;
+          
+          return aOrder - bOrder;
         });
+      }
+
+      // Remove the temporary originalListId property and add to manifest
+      allCatalogs.forEach(catalog => {
+        delete catalog.originalListId;
+        manifest.catalogs.push(catalog);
       });
     }
 
