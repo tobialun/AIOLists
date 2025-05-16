@@ -100,9 +100,7 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0) {
   
   try {
     // Remove aiolists- prefix if present
-    const id = listId.replace(/^aiolists-/, '');
-    console.log('Fetching list items for ID:', id);
-    
+    const id = listId.replace(/^aiolists-/, '');    
     // Special case for watchlist
     if (id === 'watchlist') {
       const response = await axios.get(`https://api.mdblist.com/watchlist/items?apikey=${apiKey}&limit=100&offset=${skip}`);
@@ -112,13 +110,11 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0) {
     // Check if this is an internal or external list using metadata
     const metadata = listsMetadata?.[id];
     const isExternal = metadata?.isExternalList;
-    console.log('Is external list:', isExternal);
 
     // If we have metadata, use the appropriate endpoint
     if (metadata) {
       if (isExternal) {
         try {
-          console.log('Trying external list endpoint (from metadata)');
           const response = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
           if (response.status === 200 && !response.data.error) {
             return processApiResponse(response.data);
@@ -128,7 +124,6 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0) {
         }
       } else {
         try {
-          console.log('Trying internal list endpoint (from metadata)');
           const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
           if (response.status === 200 && !response.data.error) {
             return processApiResponse(response.data);
@@ -138,9 +133,6 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0) {
         }
       }
     } else {
-      // If metadata is undefined, try external first since that seems to be working
-      console.log('No metadata available, trying external endpoint first');
-      
       // Try external first
       try {
         const response = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
@@ -151,7 +143,6 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0) {
           }
         }
       } catch (externalErr) {
-        console.log('External endpoint failed:', externalErr.message);
       }
       
       // If external fails or returns no items, try internal

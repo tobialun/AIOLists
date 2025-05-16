@@ -263,7 +263,7 @@ async function createAddon(userConfig) {
     version: '1.0.0-' + Date.now(),
     name: 'AIOLists',
     description: 'Manage all your lists in one place.',
-    resources: ['catalog'],
+    resources: ['catalog', 'meta'],
     types: ['movie', 'series'],
     idPrefixes: ['tt'],
     catalogs: [],
@@ -531,7 +531,31 @@ async function createAddon(userConfig) {
         return { metas: [] };
       }
     });
-    
+
+    // Add meta handler to pass through to Cinemeta
+    builder.defineMetaHandler(({ type, id }) => {
+      // We only handle imdb ids with the "tt" prefix
+      if (!id.startsWith('tt')) {
+        return Promise.resolve({ meta: null });
+      }
+      
+      // Return basic meta information but delegate to Cinemeta for detailed information
+      return Promise.resolve({
+        meta: {
+          id: id,
+          type: type,
+          name: "Loading via Cinemeta...",
+          background: null,
+          logo: null,
+          posterShape: "regular",
+          runtime: null,
+          genres: [],
+          description: null
+        },
+        cacheMaxAge: 3600 * 24
+      });
+    });
+
     return builder.getInterface();
   } catch (error) {
     console.error(`Error creating addon: ${error.message}`);

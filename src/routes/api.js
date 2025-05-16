@@ -727,7 +727,7 @@ function setupApiRoutes(app) {
         version: '1.0.0',
         description: `Imported from MDBList: ${url}`,
         catalogs: [],
-        resources: ['catalog'],
+        resources: ['catalog', 'meta'],
         types: []
       };
 
