@@ -144,6 +144,12 @@ document.addEventListener('DOMContentLoaded', function() {
         showStatus(error.message, 'error');
       }
     });
+
+    // Add event listener for copy manifest button
+    const copyManifestBtn = document.getElementById('copyManifestBtn');
+    if (copyManifestBtn) {
+      copyManifestBtn.addEventListener('click', copyManifestUrl);
+    }
   }
 
   // ==================== CONFIGURATION MANAGEMENT ====================
@@ -1067,6 +1073,29 @@ document.addEventListener('DOMContentLoaded', function() {
       showStatus('Failed to disconnect from Trakt', 'error');
     }
   };
+
+  // Function to copy manifest URL to clipboard
+  async function copyManifestUrl() {
+    try {
+      const manifestUrl = document.getElementById('updateStremioBtn').getAttribute('href');
+      
+      await navigator.clipboard.writeText(manifestUrl);
+      
+      // Show temporary feedback
+      const copyBtn = document.getElementById('copyManifestBtn');
+      const originalContent = copyBtn.innerHTML;
+      copyBtn.innerHTML = '<span>Copied!</span>';
+      copyBtn.disabled = true;
+      
+      setTimeout(() => {
+        copyBtn.innerHTML = originalContent;
+        copyBtn.disabled = false;
+      }, 2000);      
+    } catch (err) {
+      console.error('Failed to copy manifest URL:', err);
+      showStatus('Failed to copy URL. Please try again.', 'error');
+    }
+  }
 
   // Initialize the application
   init();
