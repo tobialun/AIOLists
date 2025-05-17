@@ -24,7 +24,6 @@ async function initTraktApi(userConfig) {
       return refreshTraktToken(userConfig);
     }
   }
-  
   // No tokens or failed to refresh
   return false;
 }

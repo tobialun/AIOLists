@@ -111,49 +111,26 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0) {
     const metadata = listsMetadata?.[id];
     const isExternal = metadata?.isExternalList;
 
-    // If we have metadata, use the appropriate endpoint
-    if (metadata) {
-      if (isExternal) {
-        try {
-          const response = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
-          if (response.status === 200 && !response.data.error) {
-            return processApiResponse(response.data);
-          }
-        } catch (err) {
-          console.error(`Error fetching external list ${id}:`, err.message);
-        }
-      } else {
-        try {
-          const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
-          if (response.status === 200 && !response.data.error) {
-            return processApiResponse(response.data);
-          }
-        } catch (err) {
-          console.error(`Error fetching internal list ${id}:`, err.message);
+    // Try external first
+    try {
+      const response = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
+      if (response.status === 200 && !response.data.error) {
+        const processedResponse = processApiResponse(response.data);
+        if (processedResponse && (processedResponse.movies.length > 0 || processedResponse.shows.length > 0)) {
+          return processedResponse;
         }
       }
-    } else {
-      // Try external first
-      try {
-        const response = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
-        if (response.status === 200 && !response.data.error) {
-          const processedResponse = processApiResponse(response.data);
-          if (processedResponse && (processedResponse.movies.length > 0 || processedResponse.shows.length > 0)) {
-            return processedResponse;
-          }
-        }
-      } catch (externalErr) {
+    } catch (externalErr) {
+    }
+    
+    // If external fails or returns no items, try internal
+    try {
+      const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
+      if (response.status === 200 && !response.data.error) {
+        return processApiResponse(response.data);
       }
-      
-      // If external fails or returns no items, try internal
-      try {
-        const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
-        if (response.status === 200 && !response.data.error) {
-          return processApiResponse(response.data);
-        }
-      } catch (internalErr) {
-        console.error(`Error fetching internal list ${id}:`, internalErr.message);
-      }
+    } catch (internalErr) {
+      console.error(`Error fetching internal list ${id}:`, internalErr.message);
     }
 
     console.error(`Failed to fetch list ${id}`);
