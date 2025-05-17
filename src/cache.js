@@ -4,7 +4,7 @@
 class Cache {
   constructor(options = {}) {
     this.cache = new Map();
-    this.defaultTTL = options.defaultTTL || 3600000; // 1 hour in milliseconds
+    this.defaultTTL = options.defaultTTL || 86400000; // 1 day in milliseconds
     this.cleanupInterval = options.cleanupInterval || 300000; // 5 minutes
     this._startCleanupInterval();
   }

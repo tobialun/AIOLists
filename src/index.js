@@ -27,9 +27,12 @@ async function initializeApp() {
     
     // Configure middleware
     app.use((req, res, next) => {
-      res.header('Cache-Control', 'no-cache, no-store, must-revalidate');
-      res.header('Pragma', 'no-cache');
-      res.header('Expires', '0');
+      // Only apply no-cache to configuration/admin routes
+      if (req.path.includes('/configure') || req.path.includes('/config/') || req.path.includes('/api/')) {
+        res.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.header('Pragma', 'no-cache');
+        res.header('Expires', '0');
+      }
       next();
     });
     app.use(cors());

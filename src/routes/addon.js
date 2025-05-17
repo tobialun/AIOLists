@@ -56,6 +56,16 @@ function setupAddonRoutes(app, userConfig, cache, addonInterface) {
       const skipMatch = extra.match(/skip=(\d+)/);
       const skip = skipMatch ? parseInt(skipMatch[1]) : 0;
       
+      // For watchlists, don't cache the response
+      if (id === 'watchlist' || id === 'trakt_watchlist') {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+      } else {
+        // For regular metadata, cache for 1 day
+        res.setHeader('Cache-Control', `max-age=86400, public`);
+      }
+      
       // Check cache first
       const cacheKey = getCatalogCacheKey(type, id, skip);
       const cachedContent = addonCache.get(cacheKey);
@@ -81,10 +91,15 @@ function setupAddonRoutes(app, userConfig, cache, addonInterface) {
         });
       }
       
-      const result = { metas };
+      const result = { 
+        metas,
+        cacheMaxAge: id.includes('watchlist') ? 0 : 86400
+      };
       
-      // Cache the result
-      addonCache.set(cacheKey, result);
+      // Cache the result, but don't cache watchlists
+      if (!id.includes('watchlist')) {
+        addonCache.set(cacheKey, result);
+      }
       
       res.json(result);
     } catch (error) {

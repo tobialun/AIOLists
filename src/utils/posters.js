@@ -1,8 +1,8 @@
 const axios = require('axios');
 const Cache = require('../cache');
 
-// Create a cache instance for posters with 24 hour TTL
-const posterCache = new Cache({ defaultTTL: 24 * 3600 * 1000 });
+// Create a cache instance for posters with 1 week TTL
+const posterCache = new Cache({ defaultTTL: 7 * 24 * 3600 * 1000 });
 
 /**
  * Test RPDB key with a validation endpoint

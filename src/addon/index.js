@@ -524,7 +524,7 @@ async function createAddon(userConfig) {
         
         return {
           metas: filteredMetas,
-          cacheMaxAge: 3600 * 24
+          cacheMaxAge: 86400 // 1 day in seconds
         };
       } catch (error) {
         console.error(`Error in catalog handler: ${error.message}`);
@@ -552,7 +552,7 @@ async function createAddon(userConfig) {
           genres: [],
           description: null
         },
-        cacheMaxAge: 3600 * 24
+        cacheMaxAge: 86400 // 1 day in seconds
       });
     });
 

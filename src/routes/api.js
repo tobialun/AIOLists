@@ -139,6 +139,16 @@ function setupApiRoutes(app) {
         addon.catalogs.some(cat => cat.id === listId)
       );
 
+      // For watchlists, don't cache the response
+      if (listId === 'watchlist' || listId === 'trakt_watchlist') {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+      } else {
+        // For regular metadata, cache for 1 day
+        res.setHeader('Cache-Control', `max-age=86400, public`);
+      }
+
       if (addonCatalog) {
         // For MDBList imported URLs, fetch directly using our API
         const catalog = addonCatalog.catalogs.find(cat => cat.id === listId);
@@ -160,25 +170,19 @@ function setupApiRoutes(app) {
             filteredMetas = allMetas.filter(item => item.type === 'series');
           }
 
-          // Set cache headers
-          res.setHeader('Cache-Control', `max-age=${3600 * 24}`);
-
           return res.json({
             metas: filteredMetas,
-            cacheMaxAge: 3600 * 24
+            cacheMaxAge: listId.includes('watchlist') ? 0 : 86400
           });
         }
 
         // For other external addons, fetch from their API
         const items = await fetchExternalAddonItems(listId, addonCatalog, skip, config.rpdbApiKey);
         
-        // Set cache headers
-        res.setHeader('Cache-Control', `max-age=${3600 * 24}`);
-        
         // Return the metadata directly
         return res.json({
           metas: items,
-          cacheMaxAge: 3600 * 24
+          cacheMaxAge: listId.includes('watchlist') ? 0 : 86400
         });
       }
 
@@ -199,13 +203,10 @@ function setupApiRoutes(app) {
         filteredMetas = allMetas.filter(item => item.type === 'series');
       }
 
-      // Set cache headers
-      res.setHeader('Cache-Control', `max-age=${3600 * 24}`);
-
       // Return response
       res.json({
         metas: filteredMetas,
-        cacheMaxAge: 3600 * 24
+        cacheMaxAge: listId.includes('watchlist') ? 0 : 86400
       });
     } catch (error) {
       console.error('Error in catalog endpoint:', error);
