@@ -152,7 +152,6 @@ async function convertToStremioFormat(items, skip = 0, limit = ITEMS_PER_PAGE, r
         popularity: show.popularity,
         slug: show.slug,
         status: show.status,
-        videos: show.videos || [],
         behaviorHints: show.behaviorHints || {
           defaultVideoId: imdbId,
           hasScheduledVideos: false
