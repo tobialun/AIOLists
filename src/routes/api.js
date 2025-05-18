@@ -67,20 +67,34 @@ function setupApiRoutes(app) {
       }
 
       const config = await decompressConfig(configHash);
-      const addonInterface = await rebuildAddonWithConfig(config);
+      
+      // Create a cache key for this manifest based on relevant config parts
+      // We only need to rebuild if lists, API keys, or imported addons change
+      const manifestCacheKey = `manifest_${configHash}`;
+      let manifest = null;
+      
+      // Check if we have the manifest cached
+      if (metadataCache.has(manifestCacheKey)) {
+        manifest = metadataCache.get(manifestCacheKey);
+      } else {
+        // If not cached, rebuild the addon interface
+        const addonInterface = await rebuildAddonWithConfig(config);
+        manifest = addonInterface.manifest;
+        
+        // Cache the manifest
+        metadataCache.set(manifestCacheKey, manifest, 3600 * 1000); // Cache for 1 hour
+      }
 
       // Set cache control headers
-      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
+      res.setHeader('Cache-Control', 'max-age=3600, public'); // Cache for 1 hour
 
-      // Add a timestamp to version to prevent caching
-      const manifest = {
-        ...addonInterface.manifest,
-        version: `${addonInterface.manifest.version.split('-')[0]}-${Date.now()}`
+      // Add a timestamp to version to prevent aggressive caching
+      const timestampedManifest = {
+        ...manifest,
+        version: `${manifest.version.split('-')[0]}-${Date.now()}`
       };
 
-      res.json(manifest);
+      res.json(timestampedManifest);
     } catch (error) {
       console.error('Error serving manifest:', error);
       res.status(500).json({ error: 'Failed to serve manifest' });
@@ -154,7 +168,23 @@ function setupApiRoutes(app) {
         res.setHeader('Cache-Control', `max-age=86400, public`);
       }
 
-      // Check if this is an external addon catalog
+      // Create cache key based on all relevant parameters
+      const cacheKey = getMetadataCacheKey(listId, skip, type);
+      
+      // Add sort preferences to cache key if available
+      const fullCacheKey = sortPrefs 
+        ? `${cacheKey}_${sortPrefs.sort}_${sortPrefs.order}` 
+        : cacheKey;
+        
+      // Skip cache for watchlists which should always be fresh
+      const shouldUseCache = !(listId === 'watchlist' || listId === 'watchlist-W' || listId === 'trakt_watchlist');
+      
+      // Check cache first for non-watchlist items
+      if (shouldUseCache && metadataCache.has(fullCacheKey)) {
+        return res.json(metadataCache.get(fullCacheKey));
+      }
+
+      // For other external addons, fetch from their API
       const addonCatalog = Object.values(config.importedAddons || {}).find(addon => 
         addon.catalogs.some(cat => cat.id === listId || cat.originalId === listId)
       );
@@ -188,20 +218,34 @@ function setupApiRoutes(app) {
             filteredMetas = allMetas.filter(item => item.type === 'series');
           }
 
-          return res.json({
+          const result = {
             metas: filteredMetas,
             cacheMaxAge: listId.includes('watchlist') ? 0 : 86400
-          });
+          };
+          
+          // Cache the result if it's not a watchlist
+          if (shouldUseCache) {
+            metadataCache.set(fullCacheKey, result);
+          }
+          
+          return res.json(result);
         }
 
         // For other external addons, fetch from their API
         const items = await fetchExternalAddonItems(listId, addonCatalog, skip, config.rpdbApiKey);
         
-        // Return the metadata directly
-        return res.json({
+        // Cache the result and return it
+        const result = {
           metas: items,
           cacheMaxAge: listId.includes('watchlist') ? 0 : 86400
-        });
+        };
+        
+        // Cache the result if it's not a watchlist
+        if (shouldUseCache) {
+          metadataCache.set(fullCacheKey, result);
+        }
+        
+        return res.json(result);
       }
 
       // For regular lists, fetch content normally
@@ -230,11 +274,19 @@ function setupApiRoutes(app) {
         filteredMetas = allMetas.filter(item => item.type === 'series');
       }
 
-      // Return response
-      res.json({
+      // Prepare response
+      const result = {
         metas: filteredMetas,
         cacheMaxAge: listId.includes('watchlist') ? 0 : 86400
-      });
+      };
+      
+      // Cache the result if it's not a watchlist
+      if (shouldUseCache) {
+        metadataCache.set(fullCacheKey, result);
+      }
+      
+      // Return response
+      res.json(result);
     } catch (error) {
       console.error('Error in catalog endpoint:', error);
       res.status(500).json({ error: 'Internal server error' });
@@ -439,6 +491,12 @@ function setupApiRoutes(app) {
         allLists = [...allLists, ...traktLists];
       }
       
+      // Convert removed lists to a Set for quicker lookup
+      const removedLists = new Set(config.removedLists || []);
+      
+      // Filter out completely removed lists
+      allLists = allLists.filter(list => !removedLists.has(String(list.id)));
+      
       // Process lists
       const lists = allLists.map(list => ({
         id: String(list.id),
@@ -455,25 +513,27 @@ function setupApiRoutes(app) {
         sortPreferences: config.sortPreferences?.[String(list.id)] || { sort: 'imdbvotes', order: 'desc' }
       }));
       
-      // Add imported addon lists
+      // Add imported addon lists (filtering out removed ones)
       if (config.importedAddons) {
         for (const addon of Object.values(config.importedAddons)) {
-          const addonLists = addon.catalogs.map(catalog => ({
-            id: String(catalog.id),
-            name: catalog.name,
-            customName: config.customListNames?.[String(catalog.id)] || null,
-            isHidden: (config.hiddenLists || []).includes(String(catalog.id)),
-            isMovieList: catalog.type === 'movie',
-            isShowList: catalog.type === 'series' || catalog.type === 'anime',
-            isExternalList: true,
-            listType: 'A',
-            addonId: addon.id,
-            addonName: addon.name,
-            addonLogo: addon.logo || null,
-            tag: 'A',
-            tagImage: addon.logo,
-            sortPreferences: config.sortPreferences?.[String(catalog.id)] || { sort: 'imdbvotes', order: 'desc' }
-          }));
+          const addonLists = addon.catalogs
+            .filter(catalog => !removedLists.has(String(catalog.id)))
+            .map(catalog => ({
+              id: String(catalog.id),
+              name: catalog.name,
+              customName: config.customListNames?.[String(catalog.id)] || null,
+              isHidden: (config.hiddenLists || []).includes(String(catalog.id)),
+              isMovieList: catalog.type === 'movie',
+              isShowList: catalog.type === 'series' || catalog.type === 'anime',
+              isExternalList: true,
+              listType: 'A',
+              addonId: addon.id,
+              addonName: addon.name,
+              addonLogo: addon.logo || null,
+              tag: 'A',
+              tagImage: addon.logo,
+              sortPreferences: config.sortPreferences?.[String(catalog.id)] || { sort: 'imdbvotes', order: 'desc' }
+            }));
           lists.push(...addonLists);
         }
       }
@@ -561,7 +621,10 @@ function setupApiRoutes(app) {
       
       updatedConfig.lastUpdated = new Date().toISOString();
       const newConfigHash = await compressConfig(updatedConfig);
-      await rebuildAddonWithConfig(updatedConfig);
+      
+      // Don't rebuild the full addon for name changes - these are UI-only changes
+      // and don't require refetching content from APIs
+      // await rebuildAddonWithConfig(updatedConfig);
       
       res.json({
         success: true,
@@ -592,7 +655,10 @@ function setupApiRoutes(app) {
       };
       
       const newConfigHash = await compressConfig(updatedConfig);
-      await rebuildAddonWithConfig(updatedConfig);
+      
+      // Don't rebuild the full addon for visibility changes - these are UI-only changes
+      // and don't require refetching content from APIs
+      // await rebuildAddonWithConfig(updatedConfig);
       
       res.json({
         success: true,
@@ -602,6 +668,49 @@ function setupApiRoutes(app) {
     } catch (error) {
       console.error('Error updating list visibility:', error);
       res.status(500).json({ error: 'Failed to update list visibility' });
+    }
+  });
+
+  // Remove lists completely
+  app.post('/api/config/:configHash/lists/remove', async (req, res) => {
+    try {
+      const { configHash } = req.params;
+      const { listIds } = req.body;
+      
+      if (!Array.isArray(listIds)) {
+        return res.status(400).json({ error: 'List IDs must be an array' });
+      }
+      
+      const config = await decompressConfig(configHash);
+      
+      // Get current removed lists or initialize empty array
+      const currentRemovedLists = config.removedLists || [];
+      
+      // Add new list IDs to removed lists
+      const updatedRemovedLists = [...new Set([...currentRemovedLists, ...listIds.map(String)])];
+      
+      // Remove these IDs from hiddenLists if they're there
+      const updatedHiddenLists = (config.hiddenLists || [])
+        .filter(id => !listIds.includes(String(id)));
+      
+      const updatedConfig = {
+        ...config,
+        removedLists: updatedRemovedLists,
+        hiddenLists: updatedHiddenLists,
+        lastUpdated: new Date().toISOString()
+      };
+      
+      const newConfigHash = await compressConfig(updatedConfig);
+      await rebuildAddonWithConfig(updatedConfig);
+      
+      res.json({
+        success: true,
+        configHash: newConfigHash,
+        message: 'Lists removed successfully'
+      });
+    } catch (error) {
+      console.error('Error removing lists:', error);
+      res.status(500).json({ error: 'Failed to remove lists' });
     }
   });
 
@@ -623,7 +732,10 @@ function setupApiRoutes(app) {
       };
       
       const newConfigHash = await compressConfig(updatedConfig);
-      await rebuildAddonWithConfig(updatedConfig);
+      
+      // Don't rebuild the full addon for order changes - these are UI-only changes
+      // and don't require refetching content from APIs
+      // await rebuildAddonWithConfig(updatedConfig);
       
       res.json({ 
         success: true,
@@ -912,7 +1024,16 @@ function setupApiRoutes(app) {
       
       updatedConfig.lastUpdated = new Date().toISOString();
       const newConfigHash = await compressConfig(updatedConfig);
-      await rebuildAddonWithConfig(updatedConfig);
+      
+      // Clear cache for this specific list's content since sort order affects content
+      // But don't rebuild the entire addon
+      const listCacheKey = `metadata_${listId}`;
+      if (metadataCache) {
+        // Delete any entries starting with this prefix
+        Array.from(metadataCache.cache.keys())
+          .filter(key => key.startsWith(listCacheKey))
+          .forEach(key => metadataCache.delete(key));
+      }
       
       res.json({
         success: true,

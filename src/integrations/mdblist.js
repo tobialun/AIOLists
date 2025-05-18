@@ -126,7 +126,6 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0, sort = 'i
     // Also handle watchlist with W type suffix
     if (id === 'watchlist-W') {
       try {
-        console.log('Fetching watchlist items with type suffix (W)');
         const response = await axios.get(`https://api.mdblist.com/watchlist/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
         if (response.status === 429) {
           console.error('Rate limited by MDBList API. Please wait a moment before trying again.');
@@ -250,7 +249,9 @@ function processApiResponse(data) {
   if (data.movies !== undefined || data.shows !== undefined) {
     return {
       movies: Array.isArray(data.movies) ? data.movies : [],
-      shows: Array.isArray(data.shows) ? data.shows : []
+      shows: Array.isArray(data.shows) ? data.shows : [],
+      hasMovies: Array.isArray(data.movies) && data.movies.length > 0,
+      hasShows: Array.isArray(data.shows) && data.shows.length > 0
     };
   }
   
@@ -270,7 +271,9 @@ function processApiResponse(data) {
   
   return {
     movies: movies,
-    shows: shows
+    shows: shows,
+    hasMovies: movies.length > 0,
+    hasShows: shows.length > 0
   };
 }
 

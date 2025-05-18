@@ -290,7 +290,9 @@ async function fetchTraktListItems(listId, userConfig, skip = 0) {
           title: item.show.title,
           year: item.show.year,
           type: 'show'
-        }))
+        })),
+        hasMovies: movies.data.length > 0,
+        hasShows: shows.data.length > 0
       };
     }
     
@@ -310,7 +312,9 @@ async function fetchTraktListItems(listId, userConfig, skip = 0) {
           year: item.movie.year,
           type: 'movie'
         })),
-        shows: []
+        shows: [],
+        hasMovies: response.data.length > 0,
+        hasShows: false
       };
     }
     
@@ -330,7 +334,9 @@ async function fetchTraktListItems(listId, userConfig, skip = 0) {
           title: item.show.title,
           year: item.show.year,
           type: 'show'
-        }))
+        })),
+        hasMovies: false,
+        hasShows: response.data.length > 0
       };
     }
     
@@ -350,7 +356,9 @@ async function fetchTraktListItems(listId, userConfig, skip = 0) {
           year: item.year,
           type: 'movie'
         })),
-        shows: []
+        shows: [],
+        hasMovies: response.data.length > 0,
+        hasShows: false
       };
     }
     
@@ -370,7 +378,9 @@ async function fetchTraktListItems(listId, userConfig, skip = 0) {
           title: item.title,
           year: item.year,
           type: 'show'
-        }))
+        })),
+        hasMovies: false,
+        hasShows: response.data.length > 0
       };
     }
     
@@ -391,7 +401,9 @@ async function fetchTraktListItems(listId, userConfig, skip = 0) {
           year: item.year,
           type: 'movie'
         })),
-        shows: []
+        shows: [],
+        hasMovies: response.data.length > 0,
+        hasShows: false
       };
     }
     
@@ -412,7 +424,9 @@ async function fetchTraktListItems(listId, userConfig, skip = 0) {
           title: item.title,
           year: item.year,
           type: 'show'
-        }))
+        })),
+        hasMovies: false,
+        hasShows: response.data.length > 0
       };
     }
     
@@ -427,23 +441,29 @@ async function fetchTraktListItems(listId, userConfig, skip = 0) {
       }
     });
     
+    const moviesFromList = response.data
+      .filter(item => item.type === 'movie')
+      .map(item => ({
+        imdb_id: item.movie.ids.imdb,
+        title: item.movie.title,
+        year: item.movie.year,
+        type: 'movie'
+      }));
+      
+    const showsFromList = response.data
+      .filter(item => item.type === 'show')
+      .map(item => ({
+        imdb_id: item.show.ids.imdb,
+        title: item.show.title,
+        year: item.show.year,
+        type: 'show'
+      }));
+    
     return {
-      movies: response.data
-        .filter(item => item.type === 'movie')
-        .map(item => ({
-          imdb_id: item.movie.ids.imdb,
-          title: item.movie.title,
-          year: item.movie.year,
-          type: 'movie'
-        })),
-      shows: response.data
-        .filter(item => item.type === 'show')
-        .map(item => ({
-          imdb_id: item.show.ids.imdb,
-          title: item.show.title,
-          year: item.show.year,
-          type: 'show'
-        }))
+      movies: moviesFromList,
+      shows: showsFromList,
+      hasMovies: moviesFromList.length > 0,
+      hasShows: showsFromList.length > 0
     };
   } catch (error) {
     console.error(`Error fetching Trakt list ${listId}:`, error.message);

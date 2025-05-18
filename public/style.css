@@ -925,4 +925,62 @@ input:checked + .slider:before {
 .list-name {
   font-size: 15px;
   color: #333;
+}
+
+.remove-list-button {
+  cursor: pointer;
+  padding: 5px;
+  color: #ff3b30;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  font-size: 16px;
+}
+
+.remove-list-button:hover {
+  color: #fff;
+  background-color: #ff3b30;
+}
+
+/* Icon Legend Styles */
+.icon-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  margin-bottom: 20px;
+  padding: 12px 15px;
+  background-color: #f9f9f9;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.legend-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+
+.legend-text {
+  color: #555;
+}
+
+@media (max-width: 600px) {
+  .icon-legend {
+    flex-direction: column;
+    gap: 10px;
+  }
 } 

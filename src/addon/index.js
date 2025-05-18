@@ -305,8 +305,9 @@ async function createAddon(userConfig) {
   };
 
   try {
-    // Convert hiddenLists to a Set for more efficient lookups
+    // Convert hiddenLists and removedLists to Sets for more efficient lookups
     const hiddenLists = new Set(userConfig.hiddenLists || []);
+    const removedLists = new Set(userConfig.removedLists || []);
     
     // Add regular lists
     if (userConfig.apiKey || userConfig.traktAccessToken) {
@@ -324,14 +325,14 @@ async function createAddon(userConfig) {
         allLists = [...allLists, ...traktLists];
       }
       
-      // Use Set's has() method for efficient filtering
-      const visibleLists = allLists.filter(list => !hiddenLists.has(String(list.id)));
+      // Filter out completely removed lists, but keep hidden ones
+      const filteredLists = allLists.filter(list => !removedLists.has(String(list.id)));
       
       // Store metadata for the lists
-      storeListsMetadata(allLists, userConfig);
+      storeListsMetadata(filteredLists, userConfig);
       
       // Process lists in parallel and collect all catalogs
-      const catalogPromises = visibleLists.map(async list => {
+      const catalogPromises = filteredLists.map(async list => {
         const listId = String(list.id);
         let displayName = list.name;
         if (userConfig.customListNames && userConfig.customListNames[listId]) {
@@ -353,11 +354,42 @@ async function createAddon(userConfig) {
         
         // Check if we have cached content type information
         const metadata = userConfig.listsMetadata?.[listId] || {};
+        
+        // If we don't have metadata, try to fetch the first page of content to determine types
+        if (!metadata.hasOwnProperty('hasMovies') || !metadata.hasOwnProperty('hasShows')) {
+          try {
+            // Fetch first page of list items to determine content types
+            const listContent = await fetchListContent(listId, userConfig, userConfig.importedAddons, 0);
+            if (listContent) {
+              // Get hasMovies and hasShows from the fetched content
+              metadata.hasMovies = listContent.hasMovies !== undefined ? listContent.hasMovies : listContent.movies?.length > 0;
+              metadata.hasShows = listContent.hasShows !== undefined ? listContent.hasShows : listContent.shows?.length > 0;
+              
+              // Update metadata in userConfig
+              if (!userConfig.listsMetadata) {
+                userConfig.listsMetadata = {};
+              }
+              userConfig.listsMetadata[listId] = {
+                ...metadata,
+                hasMovies: metadata.hasMovies,
+                hasShows: metadata.hasShows
+              };
+            }
+          } catch (error) {
+            console.error(`Error fetching content types for list ${listId}:`, error);
+            // Default to true for both if we can't determine
+            metadata.hasMovies = true;
+            metadata.hasShows = true;
+          }
+        }
+        
         const hasMovies = metadata.hasMovies !== false; // Default to true if not specified
         const hasShows = metadata.hasShows !== false;   // Default to true if not specified
         
-        // For most lists, create both movie and series catalogs by default
-        // or use the cached type information if available
+        // Determine if this list should be hidden from main view
+        const isHidden = hiddenLists.has(listId);
+        
+        // Create catalogs based on content types
         if (hasMovies && hasShows && !listId.startsWith('trakt_')) {
           catalogs.push({
             type: 'all', // custom type for merged row
@@ -366,7 +398,8 @@ async function createAddon(userConfig) {
             extra: [{ name: "skip" }],
             extraSupported: ["skip"],
             originalListId: listId,
-            listType: list.listType || 'L' // Add listType
+            listType: list.listType || 'L', // Add listType
+            visibleInMainView: !isHidden // Stremio can use this to hide from main view
           });
         } else {
           if (hasMovies || list.isMovieList) {
@@ -377,7 +410,8 @@ async function createAddon(userConfig) {
               extra: [{ name: "skip" }],
               extraSupported: ["skip"],
               originalListId: listId,
-              listType: list.listType || 'L' // Add listType
+              listType: list.listType || 'L', // Add listType
+              visibleInMainView: !isHidden // Stremio can use this to hide from main view
             });
           }
           if (hasShows || list.isShowList) {
@@ -388,7 +422,8 @@ async function createAddon(userConfig) {
               extra: [{ name: "skip" }],
               extraSupported: ["skip"],
               originalListId: listId,
-              listType: list.listType || 'L' // Add listType
+              listType: list.listType || 'L', // Add listType
+              visibleInMainView: !isHidden // Stremio can use this to hide from main view
             });
           }
         }
@@ -457,8 +492,8 @@ async function createAddon(userConfig) {
           .filter(catalog => {
             // Ensure consistent handling of string IDs
             const catalogId = String(catalog.id);
-            const isHidden = hiddenLists.has(catalogId);
-            return !isHidden;
+            // Filter out completely removed lists
+            return !removedLists.has(catalogId);
           })
           .forEach(catalog => {
             // Apply custom names if available
@@ -472,6 +507,8 @@ async function createAddon(userConfig) {
             // Determine catalog type
             const catalogType = catalog.type === 'anime' ? 'series' : catalog.type;
             
+            // Determine if this catalog should be hidden from main view
+            const isHidden = hiddenLists.has(catalogId);
             
             const catalogEntry = {
               type: catalogType,
@@ -480,7 +517,8 @@ async function createAddon(userConfig) {
               extra: [
                 { name: "skip" }
               ],
-              extraSupported: ["skip"]
+              extraSupported: ["skip"],
+              visibleInMainView: !isHidden // Stremio can use this to hide from main view
             };
 
             // Add redirectUrl for MDBList catalogs
@@ -600,8 +638,16 @@ async function createAddon(userConfig) {
         if (!userConfig.listsMetadata[realListId]) {
           userConfig.listsMetadata[realListId] = {};
         }
-        userConfig.listsMetadata[realListId].hasMovies = totalMovies > 0;
-        userConfig.listsMetadata[realListId].hasShows = totalShows > 0;
+        
+        // Check if the response has the content type information
+        if (items.hasMovies !== undefined && items.hasShows !== undefined) {
+          userConfig.listsMetadata[realListId].hasMovies = items.hasMovies;
+          userConfig.listsMetadata[realListId].hasShows = items.hasShows;
+        } else {
+          // If not explicitly specified, determine from content counts
+          userConfig.listsMetadata[realListId].hasMovies = totalMovies > 0;
+          userConfig.listsMetadata[realListId].hasShows = totalShows > 0;
+        }
         
         // When we fetch items with skip parameter, we don't need to skip again in convertToStremioFormat
         const allMetas = await convertToStremioFormat(items, 0, ITEMS_PER_PAGE, userConfig.rpdbApiKey);

@@ -349,14 +349,20 @@ document.addEventListener('DOMContentLoaded', function() {
         state.currentLists = data.lists;
         state.addons = data.importedAddons;
         
-        // Convert hiddenLists to Set for easier lookup
+        // Convert hiddenLists and removedLists to Sets for easier lookup
         state.userConfig.hiddenLists = new Set(state.userConfig.hiddenLists || []);
+        state.userConfig.removedLists = new Set(state.userConfig.removedLists || []);
         
         // Update list items
         elements.listItems.innerHTML = '';
         const fragment = document.createDocumentFragment();
         
         state.currentLists.forEach(list => {
+          // Skip completely removed lists in the UI
+          if (state.userConfig.removedLists.has(String(list.id))) {
+            return;
+          }
+          
           const li = createListItem(list);
           fragment.appendChild(li);
         });
@@ -501,6 +507,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const editButton = document.createElement('button');
     editButton.className = 'edit-button';
     editButton.innerHTML = '✏️';
+    editButton.title = 'Edit List Name';
     editButton.addEventListener('click', () => startEditingName(container, list));
     actions.appendChild(editButton);
 
@@ -508,8 +515,18 @@ document.addEventListener('DOMContentLoaded', function() {
     visibilityToggle.className = 'visibility-toggle';
     visibilityToggle.innerHTML = '<span class="eye-icon ' + (list.isHidden ? 'eye-closed' : 'eye-open') + '"></span>';
     visibilityToggle.dataset.listId = list.id;
+    visibilityToggle.title = list.isHidden ? 'Show in Main View' : 'Hide from Main View';
     visibilityToggle.addEventListener('click', toggleListVisibility);
     actions.appendChild(visibilityToggle);
+    
+    // Add remove list button (red X)
+    const removeButton = document.createElement('button');
+    removeButton.className = 'remove-list-button';
+    removeButton.innerHTML = '❌';
+    removeButton.title = 'Remove List';
+    removeButton.dataset.listId = list.id;
+    removeButton.addEventListener('click', removeList);
+    actions.appendChild(removeButton);
 
     container.appendChild(actions);
     return container;
@@ -762,6 +779,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     listItem.classList.toggle('hidden', newHiddenState);
     eyeIcon.className = `eye-icon ${newHiddenState ? 'eye-closed' : 'eye-open'}`;
+    toggleEl.title = newHiddenState ? 'Show in Main View' : 'Hide from Main View';
     
     if (newHiddenState) {
       state.userConfig.hiddenLists.add(listId);
@@ -1310,6 +1328,56 @@ document.addEventListener('DOMContentLoaded', function() {
     } catch (error) {
       console.error('Error updating sort preferences:', error);
       showStatus('Failed to update sort preferences', 'error');
+    }
+  }
+
+  // Add remove list function
+  async function removeList(event) {
+    const listId = event.currentTarget.dataset.listId;
+    const listItem = document.querySelector(`.list-item[data-id="${listId}"]`);
+    
+    try {
+      showSectionNotification('lists', 'Removing list...', true);
+      
+      const response = await fetch(`/api/config/${state.configHash}/lists/remove`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ listIds: [listId] })
+      });
+      
+      const data = await response.json();
+      if (data.success) {
+        state.configHash = data.configHash;
+        updateURL();
+        
+        // Remove from state - handle both Array and Set cases
+        if (!state.userConfig.removedLists) {
+          state.userConfig.removedLists = new Set();
+        }
+        
+        // If removedLists is an Array, use push, otherwise use add (for Set)
+        if (Array.isArray(state.userConfig.removedLists)) {
+          state.userConfig.removedLists.push(listId);
+        } else {
+          // Assume it's a Set
+          state.userConfig.removedLists.add(listId);
+        }
+        
+        // Remove from hiddenLists if it's there
+        if (state.userConfig.hiddenLists && state.userConfig.hiddenLists instanceof Set) {
+          state.userConfig.hiddenLists.delete(listId);
+        }
+        
+        // Remove from UI
+        listItem.remove();
+        
+        showSectionNotification('lists', 'List removed successfully ✅');
+      } else {
+        throw new Error(data.error || 'Failed to remove list');
+      }
+    } catch (error) {
+      console.error('Error removing list:', error);
+      showStatus(`Failed to remove list: ${error.message}`, 'error');
     }
   }
 
