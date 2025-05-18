@@ -149,11 +149,11 @@ function setupApiRoutes(app) {
         return res.status(400).json({ error: 'Invalid catalog ID format' });
       }
 
-      // Check if this list is hidden
+      // Check if this list is hidden - but don't block the content, just mark it for hiding in the main view
+      // This allows hidden lists to still be accessible through the Discover tab
       const hiddenLists = new Set((config.hiddenLists || []).map(String));
-      if (hiddenLists.has(String(listId))) {
-        return res.json({ metas: [] });
-      }
+      // We won't return empty content here, just track if it's hidden
+      const isHidden = hiddenLists.has(String(listId));
 
       // Get sort preferences for this list
       const sortPrefs = config.sortPreferences?.[listId] || { sort: 'imdbvotes', order: 'desc' };

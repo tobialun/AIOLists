@@ -515,7 +515,7 @@ document.addEventListener('DOMContentLoaded', function() {
     visibilityToggle.className = 'visibility-toggle';
     visibilityToggle.innerHTML = '<span class="eye-icon ' + (list.isHidden ? 'eye-closed' : 'eye-open') + '"></span>';
     visibilityToggle.dataset.listId = list.id;
-    visibilityToggle.title = list.isHidden ? 'Show in Main View' : 'Hide from Main View';
+    visibilityToggle.title = list.isHidden ? 'Show in Main View (currently hidden, but still accessible in Discover)' : 'Hide from Main View (will still be accessible in Discover)';
     visibilityToggle.addEventListener('click', toggleListVisibility);
     actions.appendChild(visibilityToggle);
     
@@ -779,7 +779,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     listItem.classList.toggle('hidden', newHiddenState);
     eyeIcon.className = `eye-icon ${newHiddenState ? 'eye-closed' : 'eye-open'}`;
-    toggleEl.title = newHiddenState ? 'Show in Main View' : 'Hide from Main View';
+    toggleEl.title = newHiddenState ? 'Show in Main View (currently hidden, but still accessible in Discover)' : 'Hide from Main View (will still be accessible in Discover)';
     
     if (newHiddenState) {
       state.userConfig.hiddenLists.add(listId);
