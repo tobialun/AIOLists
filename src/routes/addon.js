@@ -1,6 +1,6 @@
 const path = require('path');
 const fs = require('fs');
-const { convertToStremioFormat } = require('../addon');
+const { convertToStremioFormat, fetchListContent } = require('../addon');
 const { ITEMS_PER_PAGE } = require('../config');
 const Cache = require('../cache');
 
@@ -57,7 +57,7 @@ function setupAddonRoutes(app, userConfig, cache, addonInterface) {
       const skip = skipMatch ? parseInt(skipMatch[1]) : 0;
       
       // For watchlists, don't cache the response
-      if (id === 'watchlist' || id === 'trakt_watchlist') {
+      if (id === 'watchlist' || id === 'watchlist-W' || id === 'aiolists-watchlist-W' || id === 'trakt_watchlist') {
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.setHeader('Pragma', 'no-cache');
         res.setHeader('Expires', '0');
@@ -97,7 +97,7 @@ function setupAddonRoutes(app, userConfig, cache, addonInterface) {
       };
       
       // Cache the result, but don't cache watchlists
-      if (!id.includes('watchlist')) {
+      if (!(id === 'watchlist' || id === 'watchlist-W' || id === 'aiolists-watchlist-W' || id.includes('trakt_watchlist'))) {
         addonCache.set(cacheKey, result);
       }
       

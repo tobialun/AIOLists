@@ -95,7 +95,6 @@ async function convertToStremioFormat(items, skip = 0, limit = ITEMS_PER_PAGE, r
         popularity: movie.popularity,
         slug: movie.slug,
         behaviorHints: movie.behaviorHints || {
-          defaultVideoId: imdbId,
           hasScheduledVideos: false
         },
         catalogOrder: catalogOrder
@@ -202,9 +201,11 @@ async function convertToStremioFormat(items, skip = 0, limit = ITEMS_PER_PAGE, r
  * @param {Object} userConfig - User configuration
  * @param {Object} importedAddons - Imported addons
  * @param {number} skip - Number of items to skip
+ * @param {string} [sort='rank'] - Sort field
+ * @param {string} [order='desc'] - Sort order
  * @returns {Promise<Object>} List items
  */
-async function fetchListContent(listId, userConfig, importedAddons, skip = 0) {
+async function fetchListContent(listId, userConfig, importedAddons, skip = 0, sort = 'rank', order = 'desc') {
   // Check if this is an imported addon catalog
   if (importedAddons) {
     for (const addon of Object.values(importedAddons)) {
@@ -222,8 +223,24 @@ async function fetchListContent(listId, userConfig, importedAddons, skip = 0) {
         // If this is a MDBList catalog with a direct URL
         if (catalog.url && addon.id.startsWith('mdblist_')) {
           try {
-            const response = await axios.get(catalog.url);
-            return response.data;
+            const listType = catalog.listType || 'L'; // Default to Internal list type (L) for URL imports
+            console.log(`Found list ${listId} as URL import with listType: ${listType}`);
+            
+            if (!userConfig.listsMetadata) {
+              userConfig.listsMetadata = {};
+            }
+            
+            // Add or update metadata in userConfig to properly set this as an internal list
+            userConfig.listsMetadata[listId] = {
+              ...(userConfig.listsMetadata[listId] || {}),
+              isExternalList: false,
+              isInternalList: true,
+              isUrlImport: true,
+              listType: listType
+            };
+            
+            // Use fetchListItems with the proper listType setting for better API URL selection
+            return fetchMDBListItems(listId, userConfig.apiKey, userConfig.listsMetadata, skip, sort, order);
           } catch (error) {
             console.error(`Error fetching MDBList catalog: ${error.message}`);
             return null;
@@ -237,6 +254,27 @@ async function fetchListContent(listId, userConfig, importedAddons, skip = 0) {
     }
   }
   
+  // If list ID has a listType directly in it, extract and use that
+  const listTypeMatch = listId.match(/^aiolists-(\d+)-([ELW])$/);
+  if (listTypeMatch) {
+    const actualId = listTypeMatch[1];
+    const listType = listTypeMatch[2];
+    console.log(`Extracted listType ${listType} from list ID ${listId}`);
+    
+    // Create a temporary metadata for this request
+    const tempMetadata = {};
+    tempMetadata[actualId] = { listType };
+    
+    // Call fetchListItems with the extracted ID and type
+    return fetchMDBListItems(actualId, userConfig.apiKey, tempMetadata, skip, sort, order);
+  }
+  
+  // Special case for watchlist with list type
+  if (listId === 'aiolists-watchlist-W') {
+    console.log('Handling watchlist with type suffix (W)');
+    return fetchMDBListItems('watchlist', userConfig.apiKey, userConfig.listsMetadata, skip, sort, order);
+  }
+  
   // Check if this is a Trakt list
   if (listId.startsWith('trakt_')) {
     // Verify we have Trakt config
@@ -247,7 +285,7 @@ async function fetchListContent(listId, userConfig, importedAddons, skip = 0) {
   }
   
   // Otherwise, assume it's an MDBList list
-  return fetchMDBListItems(listId, userConfig.apiKey, userConfig.listsMetadata, skip);
+  return fetchMDBListItems(listId, userConfig.apiKey, userConfig.listsMetadata, skip, sort, order);
 }
 
 /**
@@ -307,7 +345,15 @@ async function createAddon(userConfig) {
         }
         
         const safeName = displayName.replace(/[^\w\s-]/g, '');
-        const catalogId = listId.startsWith('trakt_') ? listId : `aiolists-${listId}`;
+        // Special case for watchlist to keep consistent ID format
+        let catalogId;
+        if (listId.startsWith('trakt_')) {
+          catalogId = listId;
+        } else if (listId === 'watchlist') {
+          catalogId = `aiolists-watchlist-W`;
+        } else {
+          catalogId = `aiolists-${listId}-${list.listType || 'L'}`;
+        }
         
         // Fetch list content to determine types
         const listContent = await fetchListContent(listId, userConfig, userConfig.importedAddons);
@@ -321,28 +367,40 @@ async function createAddon(userConfig) {
 
         const catalogs = [];
 
-        // Only add movie catalog if there are movies
-        if (hasMovies) {
+        // For MDBList watchlist, if both movies and shows, create a single custom-type catalog
+        if (hasMovies && hasShows) {
           catalogs.push({
-            type: 'movie',
+            type: 'all', // custom type for merged row
             id: catalogId,
             name: safeName,
             extra: [{ name: "skip" }],
             extraSupported: ["skip"],
-            originalListId: listId // Store original list ID for sorting
+            originalListId: listId,
+            listType: list.listType || 'L' // Add listType
           });
-        }
-
-        // Only add series catalog if there are shows
-        if (hasShows) {
-          catalogs.push({
-            type: 'series',
-            id: catalogId,
-            name: safeName,
-            extra: [{ name: "skip" }],
-            extraSupported: ["skip"],
-            originalListId: listId // Store original list ID for sorting
-          });
+        } else {
+          if (hasMovies) {
+            catalogs.push({
+              type: 'movie',
+              id: catalogId,
+              name: safeName,
+              extra: [{ name: "skip" }],
+              extraSupported: ["skip"],
+              originalListId: listId,
+              listType: list.listType || 'L' // Add listType
+            });
+          }
+          if (hasShows) {
+            catalogs.push({
+              type: 'series',
+              id: catalogId,
+              name: safeName,
+              extra: [{ name: "skip" }],
+              extraSupported: ["skip"],
+              originalListId: listId,
+              listType: list.listType || 'L' // Add listType
+            });
+          }
         }
 
         return catalogs;
@@ -356,11 +414,39 @@ async function createAddon(userConfig) {
         const orderMap = new Map(userConfig.listOrder.map((id, index) => [String(id), index]));
         
         allCatalogs.sort((a, b) => {
-          const aId = String(a.originalListId);
-          const bId = String(b.originalListId);
+          // Get the clean IDs for comparison
+          let aId = String(a.originalListId);
+          let bId = String(b.originalListId);
           
-          const aOrder = orderMap.has(aId) ? orderMap.get(aId) : Number.MAX_SAFE_INTEGER;
-          const bOrder = orderMap.has(bId) ? orderMap.get(bId) : Number.MAX_SAFE_INTEGER;
+          // Special case for watchlist - just pass through the ID as it should match what's in the list order
+          
+          // Handle aiolists prefix with consistent regex
+          if (aId.startsWith('aiolists-')) {
+            aId = aId.replace(/^aiolists-(\d+)-[ELW]$/, '$1');
+          }
+          
+          if (bId.startsWith('aiolists-')) {
+            bId = bId.replace(/^aiolists-(\d+)-[ELW]$/, '$1');
+          }
+          
+          // Check direct match first
+          let aOrder = orderMap.has(aId) ? orderMap.get(aId) : Number.MAX_SAFE_INTEGER;
+          let bOrder = orderMap.has(bId) ? orderMap.get(bId) : Number.MAX_SAFE_INTEGER;
+          
+          // If no direct match, check if it's a composite ID with underscore
+          if (aOrder === Number.MAX_SAFE_INTEGER && aId.includes('_')) {
+            const baseId = aId.split('_')[0];
+            if (orderMap.has(baseId)) {
+              aOrder = orderMap.get(baseId);
+            }
+          }
+          
+          if (bOrder === Number.MAX_SAFE_INTEGER && bId.includes('_')) {
+            const baseId = bId.split('_')[0];
+            if (orderMap.has(baseId)) {
+              bOrder = orderMap.get(baseId);
+            }
+          }
           
           return aOrder - bOrder;
         });
@@ -429,13 +515,22 @@ async function createAddon(userConfig) {
         let aId = String(a.id);
         let bId = String(b.id);
         
-        // Handle aiolists prefix for MDBList items
+        // Special case for watchlist
+        if (aId === 'aiolists-watchlist-W') {
+          aId = 'watchlist';
+        }
+        
+        if (bId === 'aiolists-watchlist-W') {
+          bId = 'watchlist';
+        }
+        
+        // Handle aiolists prefix for MDBList items with consistent regex
         if (aId.startsWith('aiolists-')) {
-          aId = aId.replace('aiolists-', '');
+          aId = aId.replace(/^aiolists-(\d+)-[ELW]$/, '$1');
         }
         
         if (bId.startsWith('aiolists-')) {
-          bId = bId.replace('aiolists-', '');
+          bId = bId.replace(/^aiolists-(\d+)-[ELW]$/, '$1');
         }
         
         // Check direct match first
@@ -506,6 +601,9 @@ async function createAddon(userConfig) {
           filteredMetas = allMetas.filter(item => item.type === 'movie');
         } else if (type === 'series') {
           filteredMetas = allMetas.filter(item => item.type === 'series');
+        } else if (type === 'all') {
+          // For custom merged row, return both movies and series
+          filteredMetas = allMetas;
         }
         
         // Sort by manifest order

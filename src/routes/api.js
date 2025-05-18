@@ -90,7 +90,7 @@ function setupApiRoutes(app) {
   // Serve catalog content
   app.get('/:configHash/catalog/:type/:id/:extra?.json', async (req, res) => {
     try {
-      const { configHash, type, id, extra } = req.params;
+      const { configHash, type, id } = req.params;
       let { skip = 0 } = req.query;
       
       if (!configHash || !type || !id) {
@@ -100,17 +100,25 @@ function setupApiRoutes(app) {
       const config = await decompressConfig(configHash);
 
       // Parse skip parameter from extra
-      if (extra && extra.includes('skip=')) {
-        const skipMatch = extra.match(/skip=(\d+)/);
+      if (req.params.extra && req.params.extra.includes('skip=')) {
+        const skipMatch = req.params.extra.match(/skip=(\d+)/);
         if (skipMatch && skipMatch[1]) {
           skip = parseInt(skipMatch[1]);
         }
       }
 
-      // Extract the list ID
+      // Extract the list ID - handle both aiolists- and plain IDs
       let listId = id;
-      if (id.startsWith('aiolists_') || id.startsWith('aiolists-')) {
-        listId = id.substring(9);
+      let listType = null;
+      
+      // Check for the new ID format that includes list type
+      const listWithTypeMatch = id.match(/^aiolists-(\d+)-([ELW])$/);
+      if (listWithTypeMatch) {
+        listId = listWithTypeMatch[1];
+        listType = listWithTypeMatch[2];
+        console.log(`Extracted ID ${listId} with type ${listType}`);
+      } else if (listId.startsWith('aiolists-')) {
+        listId = listId.substring(9);
       }
 
       // Check if ID contains skip parameter
@@ -134,13 +142,11 @@ function setupApiRoutes(app) {
         return res.json({ metas: [] });
       }
 
-      // Check if this is an external addon catalog
-      const addonCatalog = Object.values(config.importedAddons || {}).find(addon => 
-        addon.catalogs.some(cat => cat.id === listId)
-      );
+      // Get sort preferences for this list
+      const sortPrefs = config.sortPreferences?.[listId] || { sort: 'rank', order: 'desc' };
 
       // For watchlists, don't cache the response
-      if (listId === 'watchlist' || listId === 'trakt_watchlist') {
+      if (listId === 'watchlist' || listId === 'watchlist-W' || listId === 'trakt_watchlist') {
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.setHeader('Pragma', 'no-cache');
         res.setHeader('Expires', '0');
@@ -149,12 +155,26 @@ function setupApiRoutes(app) {
         res.setHeader('Cache-Control', `max-age=86400, public`);
       }
 
+      // Check if this is an external addon catalog
+      const addonCatalog = Object.values(config.importedAddons || {}).find(addon => 
+        addon.catalogs.some(cat => cat.id === listId || cat.originalId === listId)
+      );
+
       if (addonCatalog) {
+        const catalog = addonCatalog.catalogs.find(cat => cat.id === listId || cat.originalId === listId);
+        
         // For MDBList imported URLs, fetch directly using our API
-        const catalog = addonCatalog.catalogs.find(cat => cat.id === listId);
         if (addonCatalog.id.startsWith('mdblist_') && catalog?.url) {
-          // Extract list ID from the URL and fetch using MDBList API
-          const items = await fetchListItems(listId, config.apiKey, config.listsMetadata, skip);
+          // If we have a listType, set it in the metadata
+          if (listType) {
+            if (!config.listsMetadata) config.listsMetadata = {};
+            config.listsMetadata[listId] = {
+              ...(config.listsMetadata[listId] || {}),
+              listType
+            };
+          }
+          
+          const items = await fetchListItems(listId, config.apiKey, config.listsMetadata, skip, sortPrefs.sort, sortPrefs.order);
           if (!items) {
             return res.json({ metas: [] });
           }
@@ -187,8 +207,18 @@ function setupApiRoutes(app) {
       }
 
       // For regular lists, fetch content normally
-      const items = await fetchListContent(listId, config, config.importedAddons, skip);
+      // If we have a listType, add it to the metadata
+      if (listType) {
+        if (!config.listsMetadata) config.listsMetadata = {};
+        config.listsMetadata[listId] = {
+          ...(config.listsMetadata[listId] || {}),
+          listType
+        };
+      }
+      
+      const items = await fetchListContent(listId, config, config.importedAddons, skip, sortPrefs.sort, sortPrefs.order);
       if (!items) {
+        console.error(`No items returned for list ${listId}`);
         return res.json({ metas: [] });
       }
 
@@ -424,7 +454,8 @@ function setupApiRoutes(app) {
         listType: list.listType || 'L',
         isTraktList: list.isTraktList,
         isWatchlist: list.isWatchlist,
-        tag: list.listType || 'L'
+        tag: list.listType || 'L',
+        sortPreferences: config.sortPreferences?.[String(list.id)] || { sort: 'rank', order: 'desc' }
       }));
       
       // Add imported addon lists
@@ -443,7 +474,8 @@ function setupApiRoutes(app) {
             addonName: addon.name,
             addonLogo: addon.logo || null,
             tag: 'A',
-            tagImage: addon.logo
+            tagImage: addon.logo,
+            sortPreferences: config.sortPreferences?.[String(catalog.id)] || { sort: 'rank', order: 'desc' }
           }));
           lists.push(...addonLists);
         }
@@ -453,8 +485,38 @@ function setupApiRoutes(app) {
       if (config.listOrder?.length > 0) {
         const orderMap = new Map(config.listOrder.map((id, index) => [String(id), index]));
         lists.sort((a, b) => {
-          const posA = orderMap.has(a.id) ? orderMap.get(a.id) : Number.MAX_SAFE_INTEGER;
-          const posB = orderMap.has(b.id) ? orderMap.get(b.id) : Number.MAX_SAFE_INTEGER;
+          // Clean IDs for comparison (match logic in createAddon)
+          let aId = String(a.id);
+          let bId = String(b.id);
+          
+          // Handle aiolists prefix
+          if (aId.startsWith('aiolists-')) {
+            aId = aId.replace(/^aiolists-(\d+)-[ELW]$/, '$1');
+          }
+          
+          if (bId.startsWith('aiolists-')) {
+            bId = bId.replace(/^aiolists-(\d+)-[ELW]$/, '$1');
+          }
+          
+          // Check direct match first
+          let posA = orderMap.has(aId) ? orderMap.get(aId) : Number.MAX_SAFE_INTEGER;
+          let posB = orderMap.has(bId) ? orderMap.get(bId) : Number.MAX_SAFE_INTEGER;
+          
+          // If no direct match, check if it's a composite ID with underscore
+          if (posA === Number.MAX_SAFE_INTEGER && aId.includes('_')) {
+            const baseId = aId.split('_')[0];
+            if (orderMap.has(baseId)) {
+              posA = orderMap.get(baseId);
+            }
+          }
+          
+          if (posB === Number.MAX_SAFE_INTEGER && bId.includes('_')) {
+            const baseId = bId.split('_')[0];
+            if (orderMap.has(baseId)) {
+              posB = orderMap.get(baseId);
+            }
+          }
+          
           return posA - posB;
         });
       }
@@ -462,7 +524,8 @@ function setupApiRoutes(app) {
       const result = {
         success: true,
         lists,
-        importedAddons: config.importedAddons || {}
+        importedAddons: config.importedAddons || {},
+        availableSortOptions: config.availableSortOptions || []
       };
       
       // Cache the result
@@ -708,18 +771,48 @@ function setupApiRoutes(app) {
         return res.status(400).json({ error: 'MDBList API key is required' });
       }
       
+      console.log(`Starting import for URL: ${url}`);
+      
       // Extract list ID, name and type from URL, passing the API key
-      const { listId, listName } = await extractListFromUrl(url, config.apiKey);
+      const { listId, listName, isUrlImport } = await extractListFromUrl(url, config.apiKey);
+      console.log(`Extracted list: ID=${listId}, Name=${listName}, isUrlImport=${isUrlImport}`);
+      
+      // Set a flag to indicate this is a URL import
+      if (!config.listsMetadata) {
+        config.listsMetadata = {};
+      }
+      
+      // Update metadata to indicate this is a URL imported list (internal list)
+      config.listsMetadata[listId] = {
+        isExternalList: false,
+        isInternalList: true,
+        isUrlImport: true,
+        name: listName,
+        listType: 'L'  // Mark explicitly as internal list type
+      };
+      
+      // Mark that we're importing from URL for this API call
+      config.listsMetadata._importingUrl = true;
       
       // Fetch the actual list content to determine what types it contains
+      console.log(`Fetching list content to determine types for ID: ${listId}`);
       const listContent = await fetchListItems(listId, config.apiKey, config.listsMetadata);
+      
+      // Remove the importing flag after fetch
+      delete config.listsMetadata._importingUrl;
+      
       if (!listContent) {
+        console.error(`Could not fetch list content for ID: ${listId}`);
         throw new Error('Could not fetch list content');
       }
+      
+      console.log(`List content fetched. Movies: ${listContent.movies?.length || 0}, Shows: ${listContent.shows?.length || 0}`);
 
       // Determine which types to include based on actual content
       const hasMovies = listContent.movies && listContent.movies.length > 0;
       const hasShows = listContent.shows && listContent.shows.length > 0;
+      
+      console.log(`List has movies: ${hasMovies}, has shows: ${hasShows}`);
       
       // Create a manifest for the MDBList with catalogs based on content
       const manifest = {
@@ -739,6 +832,7 @@ function setupApiRoutes(app) {
           name: listName,
           type: 'movie',
           url: url,
+          listType: 'L', // Mark explicitly as internal list
           extra: [{ name: 'skip' }]
         });
         manifest.types.push('movie');
@@ -751,6 +845,7 @@ function setupApiRoutes(app) {
           name: listName,
           type: 'series',
           url: url,
+          listType: 'L', // Mark explicitly as internal list
           extra: [{ name: 'skip' }]
         });
         manifest.types.push('series');
@@ -758,6 +853,7 @@ function setupApiRoutes(app) {
 
       // If no content was found, throw an error
       if (!hasMovies && !hasShows) {
+        console.error(`List appears to be empty`);
         throw new Error('List appears to be empty');
       }
 
@@ -781,6 +877,8 @@ function setupApiRoutes(app) {
       const newConfigHash = await compressConfig(updatedConfig);
       await rebuildAddonWithConfig(updatedConfig);
       
+      console.log(`Successfully imported list: ${listName}`);
+      
       res.json({
         success: true,
         configHash: newConfigHash,
@@ -790,6 +888,43 @@ function setupApiRoutes(app) {
     } catch (error) {
       console.error('Error importing MDBList URL:', error);
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Update sort preferences
+  app.post('/api/config/:configHash/lists/sort', async (req, res) => {
+    try {
+      const { configHash } = req.params;
+      const { listId, sort, order } = req.body;
+      
+      if (!listId || !sort) {
+        return res.status(400).json({ error: 'List ID and sort field are required' });
+      }
+      
+      const config = await decompressConfig(configHash);
+      const updatedConfig = { ...config };
+      
+      if (!updatedConfig.sortPreferences) {
+        updatedConfig.sortPreferences = {};
+      }
+      
+      updatedConfig.sortPreferences[listId] = {
+        sort,
+        order: order || 'desc'
+      };
+      
+      updatedConfig.lastUpdated = new Date().toISOString();
+      const newConfigHash = await compressConfig(updatedConfig);
+      await rebuildAddonWithConfig(updatedConfig);
+      
+      res.json({
+        success: true,
+        configHash: newConfigHash,
+        message: 'Sort preferences updated successfully'
+      });
+    } catch (error) {
+      console.error('Error updating sort preferences:', error);
+      res.status(500).json({ error: 'Failed to update sort preferences' });
     }
   });
 

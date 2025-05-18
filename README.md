@@ -1,95 +1,74 @@
-# MDBList Stremio Addon
+# AIOLists Stremio Addon
 
-A Stremio addon for MDBList integration that allows you to view your MDBList and Trakt lists directly in Stremio.
+A Stremio addon to manage all your lists in one place, with powerful import, customization, and integration features.
 
-## Features
+## Key Features
 
-- Integrate your MDBList watchlists and custom lists directly in Stremio
-- Optional Trakt integration for accessing your Trakt lists
-- Custom list ordering and visibility control
-- Admin panel for easy configuration
+- **Import lists from any addon**: Bring in catalogs from any Stremio addon.
+- **Rename and rearrange all your lists**: Personalize your lists with custom names and drag-and-drop ordering.
+- **Trakt integration**: Access your Trakt lists, watchlist, recommendations, and more directly in Stremio.
+- **Import any MDBList through URL**: Add any MDBList by connecting your account or pasting a list's URL.
+- **Full RPDB support**: RatingPosterDB (RPDB) support for all the lists.
 
 ## Production Deployment
 
-This addon can be deployed to a variety of hosting platforms. Below are instructions for common deployment options:
+The easiest way to use AIOLists is to **fork this repository** and deploy it to your own server or cloud platform. This gives you full control over your lists and configuration.
 
-### 1. Deploying to Heroku
+### 1. Deploy with Docker (Recommended)
 
-1. Create a Heroku account if you don't have one
-2. Install the Heroku CLI
-3. Clone this repository
-4. Login to Heroku:
-   ```
-   heroku login
-   ```
-5. Create a new Heroku app:
-   ```
-   heroku create your-app-name
-   ```
-6. Deploy to Heroku:
-   ```
-   git push heroku main
-   ```
+This addon includes a ready-to-use `Dockerfile`. You can deploy it anywhere Docker is supported:
 
-### 2. Deploying to Vercel
+```bash
+# Clone your fork of this repository
+git clone https://github.com/YOUR_USERNAME/AIOLists.git
+cd AIOLists
 
-1. Install Vercel CLI:
-   ```
-   npm i -g vercel
-   ```
-2. Login to Vercel:
-   ```
-   vercel login
-   ```
-3. Deploy:
-   ```
-   vercel --prod
-   ```
+# Build the Docker image
+docker build -t aiolists-addon .
 
-### 3. Deploying to Railway
-
-1. Create a Railway account
-2. Connect your GitHub repository
-3. Set environment variables if needed
-4. Deploy the app
-
-### 4. Running in Production Mode Locally
-
-To run the addon in production mode locally:
-
+# Run the container
+docker run -p 7000:7000 -e NODE_ENV=production aiolists-addon
 ```
+
+Your addon will be available at `http://localhost:7000/manifest.json`.
+
+### 2. Deploy on Your Own Node.js Server
+
+You can also run the addon directly with Node.js:
+
+```bash
+# Clone your fork of this repository
+git clone https://github.com/YOUR_USERNAME/AIOLists.git
+cd AIOLists
+
+# Install dependencies
+npm install --production
+
+# Start the server
 npm run prod
 ```
 
-### 5. Docker Deployment
+The server will start on port 7000 by default.
 
-You can also use Docker to deploy the addon:
+### 3. Deploy to Cloud Platforms
 
-1. Build the Docker image:
-   ```
-   docker build -t aiolists-addon .
-   ```
+You can deploy to any platform that supports Node.js and Docker, such as:
+- **Railway**
+- **Render**
+- **Fly.io**
+- **Heroku** (with Docker support)
+- **Vercel** (as a Node.js serverless function, with some adaptation)
 
-2. Run the container:
-   ```
-   docker run -p 7000:7000 -e NODE_ENV=production aiolists-addon
-   ```
+> **Tip:** Fork the repo, configure your deployment, and set up your own admin panel at `/configure`.
 
-## Configuration
+---
 
-After deployment, you need to configure the addon:
+## Support
 
-1. Access the admin panel at `http://your-deployment-url/configure`
-2. Add your MDBList API key
-3. Optionally add your RPDB API key for posters
-4. Configure Trakt integration if needed
+If you find this project useful, the best way to support me is to **star this repository** on GitHub!  
+Your stars help others discover the project and motivate further development. Thank you!
 
-## Using the Addon in Stremio
-
-1. Open Stremio
-2. Go to the addons page
-3. Paste your addon URL (e.g., `https://your-deployment-url/manifest.json`)
-4. Click "Install"
+---
 
 ## License
 

@@ -93,46 +93,140 @@ async function fetchAllLists(apiKey) {
  * @param {string} apiKey - MDBList API key
  * @param {Object} listsMetadata - Metadata for all lists
  * @param {number} skip - Number of items to skip for pagination
+ * @param {string} [sort='rank'] - Sort field
+ * @param {string} [order='desc'] - Sort order (asc or desc)
  * @returns {Promise<Object>} Object with movies and shows
  */
-async function fetchListItems(listId, apiKey, listsMetadata, skip = 0) {
+async function fetchListItems(listId, apiKey, listsMetadata, skip = 0, sort = 'rank', order = 'desc') {
   if (!apiKey) return null;
   
   try {
     // Remove aiolists- prefix if present
     const id = listId.replace(/^aiolists-/, '');    
+    
     // Special case for watchlist
     if (id === 'watchlist') {
-      const response = await axios.get(`https://api.mdblist.com/watchlist/items?apikey=${apiKey}&limit=100&offset=${skip}`);
-      return processApiResponse(response.data);
-    }
-
-    // Check if this is an internal or external list using metadata
-    const metadata = listsMetadata?.[id];
-    const isExternal = metadata?.isExternalList;
-
-    // Try external first
-    try {
-      const response = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
-      if (response.status === 200 && !response.data.error) {
-        const processedResponse = processApiResponse(response.data);
-        if (processedResponse && (processedResponse.movies.length > 0 || processedResponse.shows.length > 0)) {
-          return processedResponse;
+      try {
+        console.log('Fetching watchlist items (W)');
+        const response = await axios.get(`https://api.mdblist.com/watchlist/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
+        if (response.status === 429) {
+          console.error('Rate limited by MDBList API. Please wait a moment before trying again.');
+          return null;
         }
+        return processApiResponse(response.data);
+      } catch (error) {
+        if (error.response?.status === 429) {
+          console.error('Rate limited by MDBList API. Please wait a moment before trying again.');
+          return null;
+        }
+        throw error;
       }
-    } catch (externalErr) {
     }
     
-    // If external fails or returns no items, try internal
-    try {
-      const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&limit=100&offset=${skip}`);
-      if (response.status === 200 && !response.data.error) {
+    // Also handle watchlist with W type suffix
+    if (id === 'watchlist-W') {
+      try {
+        console.log('Fetching watchlist items with type suffix (W)');
+        const response = await axios.get(`https://api.mdblist.com/watchlist/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
+        if (response.status === 429) {
+          console.error('Rate limited by MDBList API. Please wait a moment before trying again.');
+          return null;
+        }
         return processApiResponse(response.data);
+      } catch (error) {
+        if (error.response?.status === 429) {
+          console.error('Rate limited by MDBList API. Please wait a moment before trying again.');
+          return null;
+        }
+        throw error;
       }
-    } catch (internalErr) {
-      console.error(`Error fetching internal list ${id}:`, internalErr.message);
     }
 
+    // When importing from URL, use internal endpoint
+    if (listsMetadata && listsMetadata._importingUrl) {
+      console.log(`Fetching INTERNAL list for URL import: ${id}`);
+      try {
+        const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
+        if (response.status === 200 && !response.data.error) {
+          console.log(`Successfully fetched internal list ${id} for URL import`);
+          return processApiResponse(response.data);
+        }
+      } catch (error) {
+        console.error(`Error fetching internal list ${id} for URL import:`, error.message);
+        return null;
+      }
+    }
+
+    // Get metadata for this list
+    const metadata = listsMetadata && listsMetadata[id];
+    if (!metadata) {
+      console.log(`No metadata for list ${id}, fetching all lists to determine type...`);
+      // Fetch list metadata if not available
+      const allLists = await fetchAllLists(apiKey);
+      const list = allLists.find(l => l.id === id);
+      
+      if (!list) {
+        console.error(`List ${id} not found in user's lists`);
+        return null;
+      }
+      
+      console.log(`List ${id} found with listType: ${list.listType}`);
+      
+      // Use the listType from fetchAllLists
+      if (list.listType === 'E') {
+        console.log(`Fetching EXTERNAL list ${id}`);
+        try {
+          const response = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
+          if (response.status === 200 && !response.data.error) {
+            console.log(`Successfully fetched external list ${id}`);
+            return processApiResponse(response.data);
+          }
+        } catch (error) {
+          console.error(`Error fetching external list ${id}:`, error.message);
+          return null;
+        }
+      } else if (list.listType === 'L') {
+        console.log(`Fetching INTERNAL list ${id}`);
+        try {
+          const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
+          if (response.status === 200 && !response.data.error) {
+            console.log(`Successfully fetched internal list ${id}`);
+            return processApiResponse(response.data);
+          }
+        } catch (error) {
+          console.error(`Error fetching internal list ${id}:`, error.message);
+          return null;
+        }
+      }
+    } else {
+      // Use the metadata listType directly
+      if (metadata.listType === 'E') {
+        console.log(`Fetching EXTERNAL list ${id} (Type E)`);
+        try {
+          const response = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
+          if (response.status === 200 && !response.data.error) {
+            console.log(`Successfully fetched external list ${id}`);
+            return processApiResponse(response.data);
+          }
+        } catch (error) {
+          console.error(`Error fetching external list ${id}:`, error.message);
+          return null;
+        }
+      } else if (metadata.listType === 'L') {
+        console.log(`Fetching INTERNAL list ${id} (Type L)`);
+        try {
+          const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
+          if (response.status === 200 && !response.data.error) {
+            console.log(`Successfully fetched internal list ${id}`);
+            return processApiResponse(response.data);
+          }
+        } catch (error) {
+          console.error(`Error fetching internal list ${id}:`, error.message);
+          return null;
+        }
+      }
+    }
+    
     console.error(`Failed to fetch list ${id}`);
     return null;
   } catch (error) {
@@ -189,6 +283,7 @@ function processApiResponse(data) {
  */
 async function extractListFromUrl(url, apiKey) {
   try {
+    console.log(`DEBUG: Extracting list from URL: ${url}`);
     // Validate URL format
     const urlPattern = /^https?:\/\/mdblist\.com\/lists\/([\w-]+)\/([\w-]+)$/;
     const urlMatch = url.match(urlPattern);
@@ -197,6 +292,7 @@ async function extractListFromUrl(url, apiKey) {
     }
 
     const [, username, listSlug] = urlMatch;
+    console.log(`DEBUG: URL matched pattern. Username: ${username}, Slug: ${listSlug}`);
 
     // First scrape the page to get the list ID
     const response = await axios.get(url);
@@ -207,6 +303,7 @@ async function extractListFromUrl(url, apiKey) {
     if (!ogImage) {
       throw new Error('Could not find list image metadata');
     }
+    console.log(`DEBUG: Found og:image: ${ogImage}`);
 
     // Extract list ID from the image URL
     const idMatch = ogImage.match(/[?&]id=(\d+)/);
@@ -215,6 +312,7 @@ async function extractListFromUrl(url, apiKey) {
     }
 
     const listId = idMatch[1];
+    console.log(`DEBUG: Extracted list ID: ${listId}`);
 
     // Now fetch list details from API to get name
     const apiResponse = await axios.get(`https://api.mdblist.com/lists/${listId}?apikey=${apiKey}`);
@@ -223,10 +321,12 @@ async function extractListFromUrl(url, apiKey) {
     }
 
     const listData = apiResponse.data[0];
+    console.log(`DEBUG: List name from API: ${listData.name}`);
     
     return {
       listId: listId,
-      listName: listData.name
+      listName: listData.name,
+      isUrlImport: true
     };
   } catch (error) {
     console.error('Error extracting list from URL:', error);

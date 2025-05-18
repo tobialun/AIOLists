@@ -1,3 +1,31 @@
+// Default configuration with sort options
+const defaultConfig = {
+  availableSortOptions: [
+    { value: 'rank', label: 'Rank' },
+    { value: 'score', label: 'Score' },
+    { value: 'score_average', label: 'Score Average' },
+    { value: 'released', label: 'Released' },
+    { value: 'releasedigital', label: 'Digital Release' },
+    { value: 'imdbrating', label: 'IMDb Rating' },
+    { value: 'imdbvotes', label: 'IMDb Votes' },
+    { value: 'last_air_date', label: 'Last Air Date' },
+    { value: 'imdbpopular', label: 'IMDb Popular' },
+    { value: 'tmdbpopular', label: 'TMDB Popular' },
+    { value: 'rogerebert', label: 'Roger Ebert' },
+    { value: 'rtomatoes', label: 'Rotten Tomatoes' },
+    { value: 'rtaudience', label: 'RT Audience' },
+    { value: 'metacritic', label: 'Metacritic' },
+    { value: 'myanimelist', label: 'MyAnimeList' },
+    { value: 'letterrating', label: 'Letterboxd Rating' },
+    { value: 'lettervotes', label: 'Letterboxd Votes' },
+    { value: 'budget', label: 'Budget' },
+    { value: 'revenue', label: 'Revenue' },
+    { value: 'runtime', label: 'Runtime' },
+    { value: 'title', label: 'Title' },
+    { value: 'random', label: 'Random' }
+  ]
+};
+
 document.addEventListener('DOMContentLoaded', function() {
   // ==================== STATE MANAGEMENT ====================
   const state = {
@@ -6,7 +34,32 @@ document.addEventListener('DOMContentLoaded', function() {
       listOrder: [],
       hiddenLists: new Set(),
       listsMetadata: {},
-      lastUpdated: null
+      lastUpdated: null,
+      sortPreferences: {}, // Default sort preferences will be set when creating list items
+      availableSortOptions: [
+        { value: 'score', label: 'Score' },
+        { value: 'score_average', label: 'Score Average' },
+        { value: 'rank', label: 'Rank' },
+        { value: 'released', label: 'Released' },
+        { value: 'releasedigital', label: 'Digital Release' },
+        { value: 'imdbrating', label: 'IMDb Rating' },
+        { value: 'imdbvotes', label: 'IMDb Votes' },
+        { value: 'last_air_date', label: 'Last Air Date' },
+        { value: 'imdbpopular', label: 'IMDb Popular' },
+        { value: 'tmdbpopular', label: 'TMDB Popular' },
+        { value: 'rogerebert', label: 'Roger Ebert' },
+        { value: 'rtomatoes', label: 'Rotten Tomatoes' },
+        { value: 'rtaudience', label: 'RT Audience' },
+        { value: 'metacritic', label: 'Metacritic' },
+        { value: 'myanimelist', label: 'MyAnimeList' },
+        { value: 'letterrating', label: 'Letterboxd Rating' },
+        { value: 'lettervotes', label: 'Letterboxd Votes' },
+        { value: 'budget', label: 'Budget' },
+        { value: 'revenue', label: 'Revenue' },
+        { value: 'runtime', label: 'Runtime' },
+        { value: 'title', label: 'Title' },
+        { value: 'random', label: 'Random' }
+      ]
     },
     addons: {},  // Store imported addons for reference
     currentLists: []  // Store current list data for immediate UI updates
@@ -329,79 +382,203 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   function createListItem(list) {
-    const listId = String(list.id);
-    const isHidden = state.userConfig.hiddenLists.has(listId);
-    
-    const li = document.createElement('li');
-    li.className = 'list-item';
-    li.setAttribute('data-id', listId);
-    if (isHidden) li.classList.add('hidden');
-    
+    const container = document.createElement('li');
+    container.className = 'list-item';
+    container.dataset.id = list.id;
+
     const dragHandle = document.createElement('span');
     dragHandle.className = 'drag-handle';
     dragHandle.innerHTML = '☰';
+    container.appendChild(dragHandle);
+
+    const tag = document.createElement('span');
+    tag.className = `tag ${list.tag?.toLowerCase()}`;
     
-    const nameContainer = document.createElement('div');
-    nameContainer.className = 'list-name';
-    
-    let listIdentifier;
-    
-    if (list.addonId?.startsWith('mdblist_')) {
-      // For MDBList items
-      listIdentifier = document.createElement('img');
-      listIdentifier.className = 'list-logo';
-      listIdentifier.src = 'https://mdblist.com/static/mdblist_logo.png';
-      listIdentifier.alt = 'MDBList';
-    } else if (list.addonLogo) {
-      // For other addon items with logo
-      listIdentifier = document.createElement('img');
-      listIdentifier.className = 'list-logo';
-      listIdentifier.src = list.addonLogo;
-      listIdentifier.alt = list.addonName || 'Addon Logo';
-    } else if (list.listType === 'T') {
-      // For Trakt lists
-      listIdentifier = document.createElement('img');
-      listIdentifier.className = 'list-logo';
-      listIdentifier.src = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico';
-      listIdentifier.alt = 'Trakt.tv';
+    // Handle different types of lists
+    if (list.id.startsWith('trakt_') || list.isTraktList || list.isTraktWatchlist || 
+        list.isTraktRecommendations || list.isTraktTrending || list.isTraktPopular) {
+        // Use Trakt logo for all Trakt lists
+        const img = document.createElement('img');
+        img.src = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico';
+        img.alt = 'Trakt.tv';
+        tag.appendChild(img);
+    } else if (list.addonId?.startsWith('mdblist_')) {
+        // For MDBList imported lists
+        const img = document.createElement('img');
+        img.src = 'https://mdblist.com/static/mdblist_logo.png';
+        img.alt = 'MDBList';
+        tag.appendChild(img);
+    } else if (list.addonId) {
+        // For other external addons
+        if (list.tagImage) {
+            const img = document.createElement('img');
+            img.src = list.tagImage;
+            img.alt = list.addonName || '';
+            tag.appendChild(img);
+        } else {
+            tag.textContent = list.tag;
+        }
     } else {
-      // For regular lists, use letter badges
-      listIdentifier = document.createElement('div');
-      listIdentifier.className = `list-type-badge list-type-${list.listType || 'L'}`;
-      listIdentifier.textContent = list.listType || 'L';
+        // Regular MDBList lists
+        tag.textContent = list.tag;
     }
+    container.appendChild(tag);
+
+    const nameContainer = document.createElement('div');
+    nameContainer.className = 'name-container';
     
-    const nameSpan = document.createElement('span');
-    nameSpan.textContent = list.customName || list.name;
+    const name = document.createElement('span');
+    name.className = 'list-name';
+    name.textContent = list.customName || list.name;
+    nameContainer.appendChild(name);
+    container.appendChild(nameContainer);
+
+    // Show sort controls only for MDBList items and MDBList imported lists
+    const isMDBList = !list.id.startsWith('trakt_') && !list.isTraktList && !list.isTraktWatchlist && 
+                     !list.isTraktRecommendations && !list.isTraktTrending && !list.isTraktPopular && 
+                     (!list.addonId || list.addonId.startsWith('mdblist_'));
     
-    const editBtn = document.createElement('button');
-    editBtn.className = 'edit-name-btn';
-    editBtn.innerHTML = '✏️';
-    editBtn.title = 'Edit list name';
-    editBtn.onclick = () => startEditingName(nameContainer, list);
-    
-    nameContainer.append(listIdentifier, nameSpan, editBtn);
-    
+    if (isMDBList) {
+        // Add sort controls container
+        const sortControls = document.createElement('div');
+        sortControls.className = 'sort-controls';
+
+        // Add sort dropdown
+        const sortSelect = document.createElement('select');
+        sortSelect.className = 'sort-select';
+        
+        // Get sort options from config
+        const sortOptions = state.userConfig.availableSortOptions || defaultConfig.availableSortOptions;
+
+        // Set default sort preferences if none exist
+        if (!list.sortPreferences) {
+            list.sortPreferences = { sort: 'score', order: 'asc' };
+        }
+
+        sortOptions.forEach(option => {
+            const optionElement = document.createElement('option');
+            optionElement.value = option.value;
+            optionElement.textContent = option.label;
+            if (option.value === (list.sortPreferences?.sort || 'score')) {
+                optionElement.selected = true;
+            }
+            sortSelect.appendChild(optionElement);
+        });
+
+        // Add order toggle
+        const orderToggle = document.createElement('div');
+        orderToggle.className = 'order-toggle';
+        orderToggle.innerHTML = `
+            <label class="switch">
+                <input type="checkbox" ${(list.sortPreferences?.order || 'asc') === 'asc' ? 'checked' : ''}>
+                <span class="slider round"></span>
+            </label>
+            <span class="order-label">${(list.sortPreferences?.order || 'asc') === 'asc' ? 'Asc.' : 'Des.'}</span>
+        `;
+
+        sortControls.appendChild(sortSelect);
+        sortControls.appendChild(orderToggle);
+        container.appendChild(sortControls);
+
+        // Add event listeners for sort controls
+        sortSelect.addEventListener('change', async (e) => {
+            const newSort = e.target.value;
+            const currentOrder = list.sortPreferences?.order || 'asc';
+            await updateSortPreferences(list.id, newSort, currentOrder);
+        });
+
+        orderToggle.querySelector('input').addEventListener('change', async (e) => {
+            const newOrder = e.target.checked ? 'asc' : 'desc';
+            const currentSort = list.sortPreferences?.sort || 'score';
+            orderToggle.querySelector('.order-label').textContent = e.target.checked ? 'Asc.' : 'Des.';
+            await updateSortPreferences(list.id, currentSort, newOrder);
+        });
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+
+    const editButton = document.createElement('button');
+    editButton.className = 'edit-button';
+    editButton.innerHTML = '✏️';
+    editButton.addEventListener('click', () => startEditingName(container, list));
+    actions.appendChild(editButton);
+
     const visibilityToggle = document.createElement('button');
     visibilityToggle.className = 'visibility-toggle';
-    visibilityToggle.setAttribute('data-id', listId);
-    visibilityToggle.innerHTML = isHidden ? 
-      '<span class="eye-icon eye-closed"></span>' : 
-      '<span class="eye-icon eye-open"></span>';
-    
-    li.append(dragHandle, nameContainer, visibilityToggle);
-    return li;
+    visibilityToggle.innerHTML = '<span class="eye-icon ' + (list.isHidden ? 'eye-closed' : 'eye-open') + '"></span>';
+    visibilityToggle.dataset.listId = list.id;
+    visibilityToggle.addEventListener('click', toggleListVisibility);
+    actions.appendChild(visibilityToggle);
+
+    container.appendChild(actions);
+    return container;
   }
+
+  // Add debounce function at the top with other utility functions
+  function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  }
+
+  // Add debouncedSaveListOrder function
+  const debouncedSaveListOrder = debounce(async (order) => {
+    showSectionNotification('lists', 'Saving order changes...', true);
+    
+    try {
+      const response = await fetch(`/api/config/${state.configHash}/lists/order`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        state.configHash = data.configHash;
+        updateURL();
+        showSectionNotification('lists', 'Order Changes Saved ✅');
+      } else {
+        throw new Error(data.error || 'Unknown error');
+      }
+    } catch (error) {
+      showStatus(`Failed to save order: ${error.message}`, 'error');
+    }
+  }, 1000); // 1 second delay
 
   function initSortable() {
     if (window.Sortable) {
-      Sortable.create(elements.listItems, {
+      if (elements.listItems._sortable) {
+        elements.listItems._sortable.destroy();
+      }
+      
+      elements.listItems._sortable = Sortable.create(elements.listItems, {
         animation: 150,
+        handle: '.drag-handle',
         ghostClass: 'sortable-ghost',
+        dragClass: 'sortable-drag',
+        forceFallback: false,
+        removeCloneOnHide: true,
+        sort: true,
+        fallbackOnBody: true,
+        onStart: (evt) => {
+          document.body.style.cursor = 'grabbing';
+        },
         onEnd: async (evt) => {
-          const items = elements.listItems.querySelectorAll('.list-item');
-          const order = Array.from(items).map(item => item.dataset.id);
-          await saveListOrder(order);
+          document.body.style.cursor = '';
+          if (evt.oldIndex !== evt.newIndex) {
+            const items = elements.listItems.querySelectorAll('.list-item');
+            const order = Array.from(items).map(item => {
+              return item.dataset.id.replace(/^aiolists-/, '');
+            });
+            debouncedSaveListOrder(order);
+          }
         }
       });
     }
@@ -449,78 +626,115 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   }
 
+  function handleCancel(container, list, originalContent) {
+    container.innerHTML = originalContent;
+    // Re-attach event listeners after restoring original content
+    const editBtn = container.querySelector('.edit-button');
+    if (editBtn) {
+      editBtn.addEventListener('click', () => startEditingName(container, list));
+    }
+    const visibilityToggle = container.querySelector('.visibility-toggle');
+    if (visibilityToggle) {
+      visibilityToggle.addEventListener('click', toggleListVisibility);
+    }
+  }
+
   async function startEditingName(container, list) {
     const currentName = list.customName || list.name;
     const originalContent = container.innerHTML;
     
     container.innerHTML = '';
     
-    // Create and add the list identifier (logo or badge)
-    let listIdentifier;
-    if (list.addonId?.startsWith('mdblist_')) {
-      listIdentifier = document.createElement('img');
-      listIdentifier.className = 'list-logo';
-      listIdentifier.src = 'https://mdblist.com/static/mdblist_logo.png';
-      listIdentifier.alt = 'MDBList';
-    } else if (list.addonLogo) {
-      listIdentifier = document.createElement('img');
-      listIdentifier.className = 'list-logo';
-      listIdentifier.src = list.addonLogo;
-      listIdentifier.alt = list.addonName || 'Addon Logo';
-    } else if (list.listType === 'T') {
-      listIdentifier = document.createElement('img');
-      listIdentifier.className = 'list-logo';
-      listIdentifier.src = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico';
-      listIdentifier.alt = 'Trakt.tv';
+    // Recreate the drag handle
+    const dragHandle = document.createElement('span');
+    dragHandle.className = 'drag-handle';
+    dragHandle.innerHTML = '☰';
+    container.appendChild(dragHandle);
+
+    // Recreate the tag/badge
+    const tag = document.createElement('span');
+    tag.className = `tag ${list.tag?.toLowerCase()}`;
+    
+    // Handle different types of lists
+    if (list.id.startsWith('trakt_') || list.isTraktList || list.isTraktWatchlist || 
+        list.isTraktRecommendations || list.isTraktTrending || list.isTraktPopular) {
+        const img = document.createElement('img');
+        img.src = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico';
+        img.alt = 'Trakt.tv';
+        tag.appendChild(img);
+    } else if (list.addonId?.startsWith('mdblist_')) {
+        const img = document.createElement('img');
+        img.src = 'https://mdblist.com/static/mdblist_logo.png';
+        img.alt = 'MDBList';
+        tag.appendChild(img);
+    } else if (list.addonId) {
+        if (list.tagImage) {
+            const img = document.createElement('img');
+            img.src = list.tagImage;
+            img.alt = list.addonName || '';
+            tag.appendChild(img);
+        } else {
+            tag.textContent = list.tag;
+        }
     } else {
-      listIdentifier = document.createElement('div');
-      listIdentifier.className = `list-type-badge list-type-${list.listType || 'L'}`;
-      listIdentifier.textContent = list.listType || 'L';
+        tag.textContent = list.tag;
     }
+    container.appendChild(tag);
+    
+    // Create name container with input
+    const nameContainer = document.createElement('div');
+    nameContainer.className = 'name-container';
     
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'edit-name-input';
     input.value = currentName;
+    nameContainer.appendChild(input);
+    container.appendChild(nameContainer);
+    
+    // Add sort controls if needed
+    const isMDBList = !list.id.startsWith('trakt_') && !list.isTraktList && !list.isTraktWatchlist && 
+                     !list.isTraktRecommendations && !list.isTraktTrending && !list.isTraktPopular && 
+                     (!list.addonId || list.addonId.startsWith('mdblist_'));
+    
+    if (isMDBList) {
+        const sortControls = document.createElement('div');
+        sortControls.className = 'sort-controls';
+        sortControls.innerHTML = originalContent.match(/<div class="sort-controls">(.*?)<\/div>/s)?.[1] || '';
+        container.appendChild(sortControls);
+    }
+    
+    // Create actions container
+    const actions = document.createElement('div');
+    actions.className = 'actions';
     
     const saveBtn = document.createElement('button');
     saveBtn.className = 'save-name-btn';
     saveBtn.textContent = '✓';
+    actions.appendChild(saveBtn);
     
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'cancel-name-btn';
     cancelBtn.textContent = '✕';
+    actions.appendChild(cancelBtn);
+    
+    container.appendChild(actions);
     
     const handleSave = async () => {
       const newName = input.value.trim();
       const success = await updateListName(list.id, newName);
       if (success) {
-        const nameSpan = document.createElement('span');
-        nameSpan.textContent = newName || list.name;
-        
-        const editBtn = document.createElement('button');
-        editBtn.className = 'edit-name-btn';
-        editBtn.innerHTML = '✏️';
-        editBtn.title = 'Edit list name';
-        editBtn.onclick = () => startEditingName(container, { ...list, customName: newName });
-        
-        container.innerHTML = '';
-        container.append(listIdentifier, nameSpan, editBtn);
+        // Recreate the entire list item to ensure correct layout
+        const updatedList = { ...list, customName: newName };
+        const newListItem = createListItem(updatedList);
+        container.parentNode.replaceChild(newListItem, container);
       } else {
-        container.innerHTML = originalContent;
-      }
-    };
-    
-    const handleCancel = () => {
-      container.innerHTML = originalContent;
-      const editBtn = container.querySelector('.edit-name-btn');
-      if (editBtn) {
-        editBtn.onclick = () => startEditingName(container, list);
+        handleCancel(container, list, originalContent);
       }
     };
     
     saveBtn.onclick = handleSave;
-    cancelBtn.onclick = handleCancel;
+    cancelBtn.onclick = () => handleCancel(container, list, originalContent);
     
     // Handle Enter and Escape keys
     input.addEventListener('keydown', async (e) => {
@@ -529,18 +743,17 @@ document.addEventListener('DOMContentLoaded', function() {
         await handleSave();
       } else if (e.key === 'Escape') {
         e.preventDefault();
-        handleCancel();
+        handleCancel(container, list, originalContent);
       }
     });
     
-    container.append(listIdentifier, input, saveBtn, cancelBtn);
     input.focus();
     input.select();
   }
 
   async function toggleListVisibility(event) {
     const toggleEl = event.currentTarget;
-    const listId = String(toggleEl.dataset.id);
+    const listId = String(toggleEl.dataset.listId);
     const listItem = document.querySelector(`.list-item[data-id="${listId}"]`);
     const eyeIcon = toggleEl.querySelector('.eye-icon');
     
@@ -585,29 +798,6 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     } catch (error) {
       showStatus(`Failed to save visibility settings: ${error.message}`, 'error');
-    }
-  }
-
-  async function saveListOrder(order) {
-    showSectionNotification('lists', 'Saving order changes...', true);
-    
-    try {
-      const response = await fetch(`/api/config/${state.configHash}/lists/order`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order })
-      });
-
-      const data = await response.json();
-      if (data.success) {
-        state.configHash = data.configHash;
-        updateURL();
-        showSectionNotification('lists', 'Order Changes Saved ✅');
-      } else {
-        throw new Error(data.error || 'Unknown error');
-      }
-    } catch (error) {
-      showStatus(`Failed to save order: ${error.message}`, 'error');
     }
   }
 
@@ -1094,6 +1284,32 @@ document.addEventListener('DOMContentLoaded', function() {
     } catch (err) {
       console.error('Failed to copy manifest URL:', err);
       showStatus('Failed to copy URL. Please try again.', 'error');
+    }
+  }
+
+  // Add the updateSortPreferences function
+  async function updateSortPreferences(listId, sort, order) {
+    try {
+      const response = await fetch(`/api/config/${state.configHash}/lists/sort`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ listId, sort, order })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        state.configHash = data.configHash;
+        updateURL();
+        showSectionNotification('lists', 'Sort preferences updated ✅');
+        // Update the list's sort preferences in state
+        const list = state.currentLists.find(l => l.id === listId);
+        if (list) {
+          list.sortPreferences = { sort, order };
+        }
+      }
+    } catch (error) {
+      console.error('Error updating sort preferences:', error);
+      showStatus('Failed to update sort preferences', 'error');
     }
   }
 

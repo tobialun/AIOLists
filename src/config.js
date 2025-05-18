@@ -14,7 +14,32 @@ const defaultConfig = {
   listsMetadata: {},
   hiddenLists: [],
   customListNames: {},   // Store custom names for lists
-  importedAddons: {}     // Store imported addon configurations
+  importedAddons: {},    // Store imported addon configurations
+  sortPreferences: {},   // Store sorting preferences for each list (e.g., { "list_id": { sort: "rank", order: "desc" } })
+  availableSortOptions: [
+    { value: 'rank', label: 'Rank' },
+    { value: 'score', label: 'Score' },
+    { value: 'score_average', label: 'Average Score' },
+    { value: 'released', label: 'Release Date' },
+    { value: 'releasedigital', label: 'Digital Release' },
+    { value: 'imdbrating', label: 'IMDb Rating' },
+    { value: 'imdbvotes', label: 'IMDb Votes' },
+    { value: 'last_air_date', label: 'Last Air Date' },
+    { value: 'imdbpopular', label: 'IMDb Popularity' },
+    { value: 'tmdbpopular', label: 'TMDB Popularity' },
+    { value: 'rogerebert', label: 'Roger Ebert Rating' },
+    { value: 'rtomatoes', label: 'Rotten Tomatoes' },
+    { value: 'rtaudience', label: 'RT Audience Score' },
+    { value: 'metacritic', label: 'Metacritic' },
+    { value: 'myanimelist', label: 'MyAnimeList' },
+    { value: 'letterrating', label: 'Letterboxd Rating' },
+    { value: 'lettervotes', label: 'Letterboxd Votes' },
+    { value: 'budget', label: 'Budget' },
+    { value: 'revenue', label: 'Revenue' },
+    { value: 'runtime', label: 'Runtime' },
+    { value: 'title', label: 'Title' },
+    { value: 'random', label: 'Random' }
+  ]
 };
 
 /**
@@ -33,7 +58,8 @@ function storeListsMetadata(lists, config) {
       isExternalList: !!list.isExternalList,
       isInternalList: !!list.isInternalList,
       isWatchlist: !!list.isWatchlist,
-      name: list.name
+      name: list.name,
+      listType: list.listType || (list.isExternalList ? 'E' : list.isInternalList ? 'L' : list.isWatchlist ? 'W' : null)
     };
   });
   

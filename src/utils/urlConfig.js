@@ -82,8 +82,6 @@ async function decompressConfig(compressed) {
 const defaultConfig = {
   apiKey: '',            // MDBList API key
   rpdbApiKey: '',        // RPDB API key for posters
-  traktClientId: '',     // Trakt Client ID
-  traktClientSecret: '', // Trakt Client Secret
   traktAccessToken: '',  // Trakt Access Token
   traktRefreshToken: '', // Trakt Refresh Token
   traktExpiresAt: null,  // Trakt token expiration date
