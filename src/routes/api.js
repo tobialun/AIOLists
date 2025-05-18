@@ -142,7 +142,7 @@ function setupApiRoutes(app) {
       }
 
       // Get sort preferences for this list
-      const sortPrefs = config.sortPreferences?.[listId] || { sort: 'rank', order: 'desc' };
+      const sortPrefs = config.sortPreferences?.[listId] || { sort: 'imdbvotes', order: 'desc' };
 
       // For watchlists, don't cache the response
       if (listId === 'watchlist' || listId === 'watchlist-W' || listId === 'trakt_watchlist') {
@@ -452,7 +452,7 @@ function setupApiRoutes(app) {
         isTraktList: list.isTraktList,
         isWatchlist: list.isWatchlist,
         tag: list.listType || 'L',
-        sortPreferences: config.sortPreferences?.[String(list.id)] || { sort: 'rank', order: 'desc' }
+        sortPreferences: config.sortPreferences?.[String(list.id)] || { sort: 'imdbvotes', order: 'desc' }
       }));
       
       // Add imported addon lists
@@ -472,7 +472,7 @@ function setupApiRoutes(app) {
             addonLogo: addon.logo || null,
             tag: 'A',
             tagImage: addon.logo,
-            sortPreferences: config.sortPreferences?.[String(catalog.id)] || { sort: 'rank', order: 'desc' }
+            sortPreferences: config.sortPreferences?.[String(catalog.id)] || { sort: 'imdbvotes', order: 'desc' }
           }));
           lists.push(...addonLists);
         }

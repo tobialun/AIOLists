@@ -201,11 +201,11 @@ async function convertToStremioFormat(items, skip = 0, limit = ITEMS_PER_PAGE, r
  * @param {Object} userConfig - User configuration
  * @param {Object} importedAddons - Imported addons
  * @param {number} skip - Number of items to skip
- * @param {string} [sort='rank'] - Sort field
+ * @param {string} [sort='imdbvotes'] - Sort field
  * @param {string} [order='desc'] - Sort order
  * @returns {Promise<Object>} List items
  */
-async function fetchListContent(listId, userConfig, importedAddons, skip = 0, sort = 'rank', order = 'desc') {
+async function fetchListContent(listId, userConfig, importedAddons, skip = 0, sort = 'imdbvotes', order = 'desc') {
   // Check if this is an imported addon catalog
   if (importedAddons) {
     for (const addon of Object.values(importedAddons)) {

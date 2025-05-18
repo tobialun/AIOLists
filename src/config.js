@@ -15,7 +15,7 @@ const defaultConfig = {
   hiddenLists: [],
   customListNames: {},   // Store custom names for lists
   importedAddons: {},    // Store imported addon configurations
-  sortPreferences: {},   // Store sorting preferences for each list (e.g., { "list_id": { sort: "rank", order: "desc" } })
+  sortPreferences: {},   // Store sorting preferences for each list (e.g., { "list_id": { sort: "imdbvotes", order: "desc" } })
   availableSortOptions: [
     { value: 'rank', label: 'Rank' },
     { value: 'score', label: 'Score' },

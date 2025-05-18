@@ -93,11 +93,11 @@ async function fetchAllLists(apiKey) {
  * @param {string} apiKey - MDBList API key
  * @param {Object} listsMetadata - Metadata for all lists
  * @param {number} skip - Number of items to skip for pagination
- * @param {string} [sort='rank'] - Sort field
+ * @param {string} [sort='imdbvotes'] - Sort field
  * @param {string} [order='desc'] - Sort order (asc or desc)
  * @returns {Promise<Object>} Object with movies and shows
  */
-async function fetchListItems(listId, apiKey, listsMetadata, skip = 0, sort = 'rank', order = 'desc') {
+async function fetchListItems(listId, apiKey, listsMetadata, skip = 0, sort = 'imdbvotes', order = 'desc') {
   if (!apiKey) return null;
   
   try {

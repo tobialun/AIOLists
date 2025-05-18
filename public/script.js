@@ -452,14 +452,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Set default sort preferences if none exist
         if (!list.sortPreferences) {
-            list.sortPreferences = { sort: 'score', order: 'asc' };
+            list.sortPreferences = { sort: 'imdbvotes', order: 'desc' };
         }
 
         sortOptions.forEach(option => {
             const optionElement = document.createElement('option');
             optionElement.value = option.value;
             optionElement.textContent = option.label;
-            if (option.value === (list.sortPreferences?.sort || 'score')) {
+            if (option.value === (list.sortPreferences?.sort || 'imdbvotes')) {
                 optionElement.selected = true;
             }
             sortSelect.appendChild(optionElement);
@@ -470,10 +470,10 @@ document.addEventListener('DOMContentLoaded', function() {
         orderToggle.className = 'order-toggle';
         orderToggle.innerHTML = `
             <label class="switch">
-                <input type="checkbox" ${(list.sortPreferences?.order || 'asc') === 'asc' ? 'checked' : ''}>
+                <input type="checkbox" ${(list.sortPreferences?.order || 'desc') === 'desc' ? 'checked' : ''}>
                 <span class="slider round"></span>
             </label>
-            <span class="order-label">${(list.sortPreferences?.order || 'asc') === 'asc' ? 'Asc.' : 'Des.'}</span>
+            <span class="order-label">${(list.sortPreferences?.order || 'desc') === 'desc' ? 'Desc.' : 'Asc.'}</span>
         `;
 
         sortControls.appendChild(sortSelect);
@@ -483,14 +483,14 @@ document.addEventListener('DOMContentLoaded', function() {
         // Add event listeners for sort controls
         sortSelect.addEventListener('change', async (e) => {
             const newSort = e.target.value;
-            const currentOrder = list.sortPreferences?.order || 'asc';
+            const currentOrder = list.sortPreferences?.order || 'desc';
             await updateSortPreferences(list.id, newSort, currentOrder);
         });
 
         orderToggle.querySelector('input').addEventListener('change', async (e) => {
-            const newOrder = e.target.checked ? 'asc' : 'desc';
-            const currentSort = list.sortPreferences?.sort || 'score';
-            orderToggle.querySelector('.order-label').textContent = e.target.checked ? 'Asc.' : 'Des.';
+            const newOrder = e.target.checked ? 'desc' : 'asc';
+            const currentSort = list.sortPreferences?.sort || 'imdbvotes';
+            orderToggle.querySelector('.order-label').textContent = e.target.checked ? 'Desc.' : 'Asc.';
             await updateSortPreferences(list.id, currentSort, newOrder);
         });
     }
