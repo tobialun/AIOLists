@@ -1,5 +1,5 @@
 const { addonBuilder } = require('stremio-addon-sdk');
-const { fetchPosterFromRPDB, batchFetchPosters } = require('../utils/posters');
+const { batchFetchPosters } = require('../utils/posters');
 const { fetchTraktListItems, fetchTraktLists } = require('../integrations/trakt');
 const { fetchListItems: fetchMDBListItems, fetchAllLists } = require('../integrations/mdblist');
 const { fetchExternalAddonItems } = require('../integrations/externalAddons');
@@ -224,11 +224,6 @@ async function fetchListContent(listId, userConfig, importedAddons, skip = 0, so
         if (catalog.url && addon.id.startsWith('mdblist_')) {
           try {
             const listType = catalog.listType || 'L'; // Default to Internal list type (L) for URL imports
-            console.log(`Found list ${listId} as URL import with listType: ${listType}`);
-            
-            if (!userConfig.listsMetadata) {
-              userConfig.listsMetadata = {};
-            }
             
             // Add or update metadata in userConfig to properly set this as an internal list
             userConfig.listsMetadata[listId] = {
@@ -259,7 +254,6 @@ async function fetchListContent(listId, userConfig, importedAddons, skip = 0, so
   if (listTypeMatch) {
     const actualId = listTypeMatch[1];
     const listType = listTypeMatch[2];
-    console.log(`Extracted listType ${listType} from list ID ${listId}`);
     
     // Create a temporary metadata for this request
     const tempMetadata = {};
@@ -355,20 +349,16 @@ async function createAddon(userConfig) {
           catalogId = `aiolists-${listId}-${list.listType || 'L'}`;
         }
         
-        // Fetch list content to determine types
-        const listContent = await fetchListContent(listId, userConfig, userConfig.importedAddons);
-        if (!listContent) {
-          return [];
-        }
-
-        // Determine which types to include based on actual content
-        const hasMovies = listContent.movies && listContent.movies.length > 0;
-        const hasShows = listContent.shows && listContent.shows.length > 0;
-
         const catalogs = [];
-
-        // For MDBList watchlist, if both movies and shows, create a single custom-type catalog
-        if (hasMovies && hasShows) {
+        
+        // Check if we have cached content type information
+        const metadata = userConfig.listsMetadata?.[listId] || {};
+        const hasMovies = metadata.hasMovies !== false; // Default to true if not specified
+        const hasShows = metadata.hasShows !== false;   // Default to true if not specified
+        
+        // For most lists, create both movie and series catalogs by default
+        // or use the cached type information if available
+        if (hasMovies && hasShows && !listId.startsWith('trakt_')) {
           catalogs.push({
             type: 'all', // custom type for merged row
             id: catalogId,
@@ -379,7 +369,7 @@ async function createAddon(userConfig) {
             listType: list.listType || 'L' // Add listType
           });
         } else {
-          if (hasMovies) {
+          if (hasMovies || list.isMovieList) {
             catalogs.push({
               type: 'movie',
               id: catalogId,
@@ -390,7 +380,7 @@ async function createAddon(userConfig) {
               listType: list.listType || 'L' // Add listType
             });
           }
-          if (hasShows) {
+          if (hasShows || list.isShowList) {
             catalogs.push({
               type: 'series',
               id: catalogId,
@@ -592,6 +582,26 @@ async function createAddon(userConfig) {
         // Log how many items we got back
         const totalMovies = items.movies?.length || 0;
         const totalShows = items.shows?.length || 0;
+        
+        // Store content type information for future manifest generation
+        // Extract the real list ID from catalog ID if needed
+        let realListId = id;
+        const listTypeMatch = id.match(/^aiolists-(\d+)-([ELW])$/);
+        if (listTypeMatch) {
+          realListId = listTypeMatch[1];
+        } else if (id === 'aiolists-watchlist-W') {
+          realListId = 'watchlist';
+        }
+        
+        // Update metadata with content type information
+        if (!userConfig.listsMetadata) {
+          userConfig.listsMetadata = {};
+        }
+        if (!userConfig.listsMetadata[realListId]) {
+          userConfig.listsMetadata[realListId] = {};
+        }
+        userConfig.listsMetadata[realListId].hasMovies = totalMovies > 0;
+        userConfig.listsMetadata[realListId].hasShows = totalShows > 0;
         
         // When we fetch items with skip parameter, we don't need to skip again in convertToStremioFormat
         const allMetas = await convertToStremioFormat(items, 0, ITEMS_PER_PAGE, userConfig.rpdbApiKey);

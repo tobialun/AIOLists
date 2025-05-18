@@ -116,7 +116,6 @@ function setupApiRoutes(app) {
       if (listWithTypeMatch) {
         listId = listWithTypeMatch[1];
         listType = listWithTypeMatch[2];
-        console.log(`Extracted ID ${listId} with type ${listType}`);
       } else if (listId.startsWith('aiolists-')) {
         listId = listId.substring(9);
       }
@@ -173,7 +172,6 @@ function setupApiRoutes(app) {
               listType
             };
           }
-          
           const items = await fetchListItems(listId, config.apiKey, config.listsMetadata, skip, sortPrefs.sort, sortPrefs.order);
           if (!items) {
             return res.json({ metas: [] });
@@ -215,7 +213,6 @@ function setupApiRoutes(app) {
           listType
         };
       }
-      
       const items = await fetchListContent(listId, config, config.importedAddons, skip, sortPrefs.sort, sortPrefs.order);
       if (!items) {
         console.error(`No items returned for list ${listId}`);
