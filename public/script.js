@@ -383,7 +383,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
   function createListItem(list) {
     const container = document.createElement('li');
-    container.className = 'list-item';
+    container.className = `list-item ${list.isHidden ? 'hidden' : ''}`;
     container.dataset.id = list.id;
 
     const dragHandle = document.createElement('span');
