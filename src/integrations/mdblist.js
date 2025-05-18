@@ -247,11 +247,16 @@ function processApiResponse(data) {
   
   // Handle direct movies/shows response
   if (data.movies !== undefined || data.shows !== undefined) {
+    const hasMovies = Array.isArray(data.movies) && data.movies.length > 0;
+    const hasShows = Array.isArray(data.shows) && data.shows.length > 0;
+    
+    console.log(`MDBList API direct response - hasMovies: ${hasMovies}, hasShows: ${hasShows}`);
+    
     return {
       movies: Array.isArray(data.movies) ? data.movies : [],
       shows: Array.isArray(data.shows) ? data.shows : [],
-      hasMovies: Array.isArray(data.movies) && data.movies.length > 0,
-      hasShows: Array.isArray(data.shows) && data.shows.length > 0
+      hasMovies: hasMovies,
+      hasShows: hasShows
     };
   }
   
@@ -268,12 +273,16 @@ function processApiResponse(data) {
   const movies = items.filter(item => item && (item.type === 'movie' || item.mediatype === 'movie'));
   const shows = items.filter(item => item && (item.type === 'show' || item.mediatype === 'show'));
   
+  const hasMovies = movies.length > 0;
+  const hasShows = shows.length > 0;
+  
+  console.log(`MDBList API items response - hasMovies: ${hasMovies}, hasShows: ${hasShows}`);
   
   return {
     movies: movies,
     shows: shows,
-    hasMovies: movies.length > 0,
-    hasShows: shows.length > 0
+    hasMovies: hasMovies,
+    hasShows: hasShows
   };
 }
 

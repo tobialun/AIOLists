@@ -15,6 +15,7 @@ const defaultConfig = {
   hiddenLists: [],       // Lists hidden from main view but visible in Discovery
   removedLists: [],      // Lists completely removed from the addon
   customListNames: {},   // Store custom names for lists
+  mergedLists: {},       // Store merge/split preference for each list (true = merged, false = split)
   importedAddons: {},    // Store imported addon configurations
   sortPreferences: {},   // Store sorting preferences for each list (e.g., { "list_id": { sort: "imdbvotes", order: "desc" } })
   availableSortOptions: [

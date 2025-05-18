@@ -944,8 +944,7 @@ input:checked + .slider:before {
 }
 
 .remove-list-button:hover {
-  color: #fff;
-  background-color: #ff3b30;
+  background-color: rgba(244, 67, 54, 0.15);
 }
 
 /* Icon Legend Styles */
@@ -983,4 +982,37 @@ input:checked + .slider:before {
     flex-direction: column;
     gap: 10px;
   }
+}
+
+/* Merge/Split toggle styles */
+.merge-toggle {
+  cursor: pointer;
+  padding: 5px 8px;
+  background-color: #f2f2f2;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  color: #555;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  margin-left: auto;
+  margin-right: 5px;
+}
+
+.merge-toggle:hover {
+  background-color: #e5e5e5;
+}
+
+.merge-toggle.merged {
+  background-color: #e3f2fd;
+  border-color: #bbdefb;
+  color: #1976d2;
+}
+
+.merge-toggle.split {
+  background-color: #e8f5e9;
+  border-color: #c8e6c9;
+  color: #388e3c;
 } 

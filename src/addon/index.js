@@ -389,18 +389,48 @@ async function createAddon(userConfig) {
         // Determine if this list should be hidden from main view
         const isHidden = hiddenLists.has(listId);
         
-        // Create catalogs based on content types
-        if (hasMovies && hasShows && !listId.startsWith('trakt_')) {
-          catalogs.push({
-            type: 'all', // custom type for merged row
-            id: catalogId,
-            name: safeName,
-            extra: [{ name: "skip" }],
-            extraSupported: ["skip"],
-            originalListId: listId,
-            listType: list.listType || 'L', // Add listType
-            visibleInMainView: !isHidden // Stremio can use this to hide from main view
-          });
+        // Check if we have a merge preference
+        const mergedLists = userConfig.mergedLists || {};
+        const shouldMerge = mergedLists[listId] !== false; // Default to merged if not specified
+        
+        // Create catalogs based on content types and merge preference
+        if (hasMovies && hasShows) {
+          if (shouldMerge) {
+            // If merged, create a single "all" catalog
+            catalogs.push({
+              type: 'all', // custom type for merged row
+              id: catalogId,
+              name: safeName,
+              extra: [{ name: "skip" }],
+              extraSupported: ["skip"],
+              originalListId: listId,
+              listType: list.listType || 'L', // Add listType
+              visibleInMainView: !isHidden // Stremio can use this to hide from main view
+            });
+          } else {
+            // If split, create separate movie and series catalogs
+            catalogs.push({
+              type: 'movie',
+              id: catalogId,
+              name: safeName,
+              extra: [{ name: "skip" }],
+              extraSupported: ["skip"],
+              originalListId: listId,
+              listType: list.listType || 'L', // Add listType
+              visibleInMainView: !isHidden // Stremio can use this to hide from main view
+            });
+            
+            catalogs.push({
+              type: 'series',
+              id: catalogId,
+              name: safeName,
+              extra: [{ name: "skip" }],
+              extraSupported: ["skip"],
+              originalListId: listId,
+              listType: list.listType || 'L', // Add listType
+              visibleInMainView: !isHidden // Stremio can use this to hide from main view
+            });
+          }
         } else {
           if (hasMovies || list.isMovieList) {
             catalogs.push({
@@ -641,12 +671,17 @@ async function createAddon(userConfig) {
         
         // Check if the response has the content type information
         if (items.hasMovies !== undefined && items.hasShows !== undefined) {
-          userConfig.listsMetadata[realListId].hasMovies = items.hasMovies;
-          userConfig.listsMetadata[realListId].hasShows = items.hasShows;
+          // Explicitly set the values based on actual content
+          userConfig.listsMetadata[realListId].hasMovies = !!items.hasMovies;
+          userConfig.listsMetadata[realListId].hasShows = !!items.hasShows;
+          console.log(`Setting content types for ${realListId}: movies=${!!items.hasMovies}, shows=${!!items.hasShows}`);
         } else {
           // If not explicitly specified, determine from content counts
-          userConfig.listsMetadata[realListId].hasMovies = totalMovies > 0;
-          userConfig.listsMetadata[realListId].hasShows = totalShows > 0;
+          const hasMovies = Array.isArray(items.movies) && items.movies.length > 0;
+          const hasShows = Array.isArray(items.shows) && items.shows.length > 0;
+          userConfig.listsMetadata[realListId].hasMovies = hasMovies;
+          userConfig.listsMetadata[realListId].hasShows = hasShows;
+          console.log(`Determined content types for ${realListId}: movies=${hasMovies}, shows=${hasShows}`);
         }
         
         // When we fetch items with skip parameter, we don't need to skip again in convertToStremioFormat

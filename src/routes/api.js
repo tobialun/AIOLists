@@ -207,6 +207,21 @@ function setupApiRoutes(app) {
             return res.json({ metas: [] });
           }
 
+          // Save content type information to config
+          if (!config.listsMetadata) config.listsMetadata = {};
+          if (!config.listsMetadata[listId]) config.listsMetadata[listId] = {};
+          
+          const hasMovies = items.hasMovies === true || (Array.isArray(items.movies) && items.movies.length > 0);
+          const hasShows = items.hasShows === true || (Array.isArray(items.shows) && items.shows.length > 0);
+          
+          config.listsMetadata[listId].hasMovies = hasMovies;
+          config.listsMetadata[listId].hasShows = hasShows;
+          
+          console.log(`Catalog endpoint - updating metadata for ${listId}: hasMovies=${hasMovies}, hasShows=${hasShows}`);
+          
+          // Save the updated config with new metadata
+          await compressConfig(config);
+
           // Convert to Stremio format
           const allMetas = await convertToStremioFormat(items, 0, ITEMS_PER_PAGE, config.rpdbApiKey);
 
@@ -220,7 +235,10 @@ function setupApiRoutes(app) {
 
           const result = {
             metas: filteredMetas,
-            cacheMaxAge: listId.includes('watchlist') ? 0 : 86400
+            cacheMaxAge: listId.includes('watchlist') ? 0 : 86400,
+            // Include content type information
+            hasMovies: items.hasMovies === true || (Array.isArray(items.movies) && items.movies.length > 0),
+            hasShows: items.hasShows === true || (Array.isArray(items.shows) && items.shows.length > 0)
           };
           
           // Cache the result if it's not a watchlist
@@ -237,7 +255,10 @@ function setupApiRoutes(app) {
         // Cache the result and return it
         const result = {
           metas: items,
-          cacheMaxAge: listId.includes('watchlist') ? 0 : 86400
+          cacheMaxAge: listId.includes('watchlist') ? 0 : 86400,
+          // Include content type information
+          hasMovies: items.hasMovies === true || (Array.isArray(items.movies) && items.movies.length > 0),
+          hasShows: items.hasShows === true || (Array.isArray(items.shows) && items.shows.length > 0)
         };
         
         // Cache the result if it's not a watchlist
@@ -263,6 +284,21 @@ function setupApiRoutes(app) {
         return res.json({ metas: [] });
       }
 
+      // Save content type information to config
+      if (!config.listsMetadata) config.listsMetadata = {};
+      if (!config.listsMetadata[listId]) config.listsMetadata[listId] = {};
+      
+      const hasMovies = items.hasMovies === true || (Array.isArray(items.movies) && items.movies.length > 0);
+      const hasShows = items.hasShows === true || (Array.isArray(items.shows) && items.shows.length > 0);
+      
+      config.listsMetadata[listId].hasMovies = hasMovies;
+      config.listsMetadata[listId].hasShows = hasShows;
+      
+      console.log(`Catalog endpoint - updating metadata for ${listId}: hasMovies=${hasMovies}, hasShows=${hasShows}`);
+      
+      // Save the updated config with new metadata
+      await compressConfig(config);
+
       // Convert to Stremio format with RPDB posters
       const allMetas = await convertToStremioFormat(items, 0, ITEMS_PER_PAGE, config.rpdbApiKey);
 
@@ -277,7 +313,10 @@ function setupApiRoutes(app) {
       // Prepare response
       const result = {
         metas: filteredMetas,
-        cacheMaxAge: listId.includes('watchlist') ? 0 : 86400
+        cacheMaxAge: listId.includes('watchlist') ? 0 : 86400,
+        // Include content type information
+        hasMovies: items.hasMovies === true || (Array.isArray(items.movies) && items.movies.length > 0),
+        hasShows: items.hasShows === true || (Array.isArray(items.shows) && items.shows.length > 0)
       };
       
       // Cache the result if it's not a watchlist
@@ -497,21 +536,63 @@ function setupApiRoutes(app) {
       // Filter out completely removed lists
       allLists = allLists.filter(list => !removedLists.has(String(list.id)));
       
-      // Process lists
-      const lists = allLists.map(list => ({
-        id: String(list.id),
-        name: list.name,
-        customName: config.customListNames?.[String(list.id)] || null,
-        isHidden: (config.hiddenLists || []).includes(String(list.id)),
-        isMovieList: list.isMovieList,
-        isShowList: list.isShowList,
-        isExternalList: list.isExternalList,
-        listType: list.listType || 'L',
-        isTraktList: list.isTraktList,
-        isWatchlist: list.isWatchlist,
-        tag: list.listType || 'L',
-        sortPreferences: config.sortPreferences?.[String(list.id)] || { sort: 'imdbvotes', order: 'desc' }
-      }));
+      // For lists that don't have content type info, try to fetch it
+      for (const list of allLists) {
+        const listId = String(list.id);
+        
+        // Check if we already have metadata for this list
+        if (!config.listsMetadata?.[listId]?.hasOwnProperty('hasMovies') ||
+            !config.listsMetadata?.[listId]?.hasOwnProperty('hasShows')) {
+          
+          try {
+            console.log(`Fetching content types for list ${listId}`);
+            // Fetch first page to determine content types
+            const listContent = await fetchListContent(listId, config, config.importedAddons, 0);
+            
+            if (listContent) {
+              if (!config.listsMetadata) config.listsMetadata = {};
+              if (!config.listsMetadata[listId]) config.listsMetadata[listId] = {};
+              
+              // Set content type flags based on actual content
+              config.listsMetadata[listId].hasMovies = !!(listContent.hasMovies === true || 
+                (Array.isArray(listContent.movies) && listContent.movies.length > 0));
+              
+              config.listsMetadata[listId].hasShows = !!(listContent.hasShows === true || 
+                (Array.isArray(listContent.shows) && listContent.shows.length > 0));
+              
+              console.log(`Set content types for ${listId}: movies=${config.listsMetadata[listId].hasMovies}, shows=${config.listsMetadata[listId].hasShows}`);
+            }
+          } catch (error) {
+            console.error(`Failed to fetch content types for list ${listId}:`, error);
+          }
+        }
+      }
+      
+      // Process lists with updated metadata
+      const lists = allLists.map(list => {
+        const listId = String(list.id);
+        const metadata = config.listsMetadata?.[listId] || {};
+        
+        return {
+          id: listId,
+          name: list.name,
+          customName: config.customListNames?.[listId] || null,
+          isHidden: (config.hiddenLists || []).includes(listId),
+          isMovieList: list.isMovieList,
+          isShowList: list.isShowList,
+          isExternalList: list.isExternalList,
+          listType: list.listType || 'L',
+          isTraktList: list.isTraktList,
+          isWatchlist: list.isWatchlist,
+          tag: list.listType || 'L',
+          // Add content type information - only set to true when explicitly true
+          hasMovies: metadata.hasMovies === true,
+          hasShows: metadata.hasShows === true,
+          // Add merged preference
+          isMerged: config.mergedLists?.[listId] !== false, // Default to merged if not specified
+          sortPreferences: config.sortPreferences?.[listId] || { sort: 'imdbvotes', order: 'desc' }
+        };
+      });
       
       // Add imported addon lists (filtering out removed ones)
       if (config.importedAddons) {
@@ -532,6 +613,9 @@ function setupApiRoutes(app) {
               addonLogo: addon.logo || null,
               tag: 'A',
               tagImage: addon.logo,
+              // Set hasMovies and hasShows based on catalog type
+              hasMovies: catalog.type === 'movie' || catalog.type === 'all',
+              hasShows: catalog.type === 'series' || catalog.type === 'anime' || catalog.type === 'all',
               sortPreferences: config.sortPreferences?.[String(catalog.id)] || { sort: 'imdbvotes', order: 'desc' }
             }));
           lists.push(...addonLists);
@@ -1043,6 +1127,43 @@ function setupApiRoutes(app) {
     } catch (error) {
       console.error('Error updating sort preferences:', error);
       res.status(500).json({ error: 'Failed to update sort preferences' });
+    }
+  });
+
+  // Update list merge/split preference
+  app.post('/api/config/:configHash/lists/merge', async (req, res) => {
+    try {
+      const { configHash } = req.params;
+      const { listId, merged } = req.body;
+      
+      if (!listId || merged === undefined) {
+        return res.status(400).json({ error: 'List ID and merged preference are required' });
+      }
+      
+      const config = await decompressConfig(configHash);
+      const updatedConfig = { ...config };
+      
+      if (!updatedConfig.mergedLists) {
+        updatedConfig.mergedLists = {};
+      }
+      
+      // Store the merge preference (true = merged, false = split)
+      updatedConfig.mergedLists[listId] = !!merged;
+      
+      updatedConfig.lastUpdated = new Date().toISOString();
+      const newConfigHash = await compressConfig(updatedConfig);
+      
+      // Rebuild the addon to update the catalogs
+      await rebuildAddonWithConfig(updatedConfig);
+      
+      res.json({
+        success: true,
+        configHash: newConfigHash,
+        message: `List ${merged ? 'merged' : 'split'} successfully`
+      });
+    } catch (error) {
+      console.error('Error updating list merge preference:', error);
+      res.status(500).json({ error: 'Failed to update list merge preference' });
     }
   });
 

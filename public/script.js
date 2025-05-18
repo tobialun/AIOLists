@@ -392,6 +392,9 @@ document.addEventListener('DOMContentLoaded', function() {
     container.className = `list-item ${list.isHidden ? 'hidden' : ''}`;
     container.dataset.id = list.id;
 
+    // Debug logging for content types
+    console.log(`List ${list.name} (${list.id}): hasMovies=${!!list.hasMovies}, hasShows=${!!list.hasShows}, showing merge button=${Boolean(list.hasMovies) && Boolean(list.hasShows)}`);
+
     const dragHandle = document.createElement('span');
     dragHandle.className = 'drag-handle';
     dragHandle.innerHTML = '☰';
@@ -438,6 +441,23 @@ document.addEventListener('DOMContentLoaded', function() {
     name.textContent = list.customName || list.name;
     nameContainer.appendChild(name);
     container.appendChild(nameContainer);
+
+    // Add merge/split toggle button for lists that have both movies and shows
+    if (Boolean(list.hasMovies) && Boolean(list.hasShows)) {
+        // Check if we have a merge preference in state
+        const mergePreference = state.userConfig.mergedLists ? state.userConfig.mergedLists[list.id] : true; // Default to merged
+        
+        const mergeToggle = document.createElement('button');
+        mergeToggle.className = `merge-toggle ${mergePreference !== false ? 'merged' : 'split'}`;
+        mergeToggle.textContent = mergePreference !== false ? 'Merged' : 'Split';
+        mergeToggle.title = mergePreference !== false ? 
+            'Click to split this list into separate Movie and Series catalogs' : 
+            'Click to merge this list into a single "All" catalog';
+        mergeToggle.dataset.listId = list.id;
+        mergeToggle.addEventListener('click', toggleListMerge);
+        
+        container.appendChild(mergeToggle);
+    }
 
     // Show sort controls only for MDBList items and MDBList imported lists
     const isMDBList = !list.id.startsWith('trakt_') && !list.isTraktList && !list.isTraktWatchlist && 
@@ -1350,26 +1370,21 @@ document.addEventListener('DOMContentLoaded', function() {
         state.configHash = data.configHash;
         updateURL();
         
-        // Remove from state - handle both Array and Set cases
+        // Remove from state 
         if (!state.userConfig.removedLists) {
           state.userConfig.removedLists = new Set();
         }
+        state.userConfig.removedLists.add(listId);
         
-        // If removedLists is an Array, use push, otherwise use add (for Set)
-        if (Array.isArray(state.userConfig.removedLists)) {
-          state.userConfig.removedLists.push(listId);
-        } else {
-          // Assume it's a Set
-          state.userConfig.removedLists.add(listId);
-        }
+        // Remove the list item from UI with animation
+        listItem.style.opacity = '0';
+        listItem.style.height = '0';
+        listItem.style.marginBottom = '0';
+        listItem.style.transition = 'opacity 0.3s, height 0.3s, margin 0.3s';
         
-        // Remove from hiddenLists if it's there
-        if (state.userConfig.hiddenLists && state.userConfig.hiddenLists instanceof Set) {
-          state.userConfig.hiddenLists.delete(listId);
-        }
-        
-        // Remove from UI
-        listItem.remove();
+        setTimeout(() => {
+          listItem.remove();
+        }, 300);
         
         showSectionNotification('lists', 'List removed successfully ✅');
       } else {
@@ -1377,7 +1392,67 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     } catch (error) {
       console.error('Error removing list:', error);
-      showStatus(`Failed to remove list: ${error.message}`, 'error');
+      showSectionNotification('lists', 'Failed to remove list ❌', false, 'error');
+    }
+  }
+
+  // Toggle list between merged and split view
+  async function toggleListMerge(event) {
+    const button = event.currentTarget;
+    const listId = button.dataset.listId;
+    const isMerged = button.classList.contains('merged');
+    
+    try {
+      // Show loading state
+      const originalText = button.textContent;
+      button.textContent = 'Saving...';
+      button.disabled = true;
+      
+      // Update server config
+      const response = await fetch(`/api/config/${state.configHash}/lists/merge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          listId: listId,
+          merged: !isMerged // Toggle the state
+        })
+      });
+      
+      const data = await response.json();
+      if (data.success) {
+        // Update UI
+        if (isMerged) {
+          button.classList.remove('merged');
+          button.classList.add('split');
+          button.textContent = 'Split';
+          button.title = 'Click to merge this list into a single "All" catalog';
+        } else {
+          button.classList.remove('split');
+          button.classList.add('merged');
+          button.textContent = 'Merged';
+          button.title = 'Click to split this list into separate Movie and Series catalogs';
+        }
+        
+        // Update state
+        state.configHash = data.configHash;
+        updateURL();
+        
+        // Update the mergedLists in user config
+        if (!state.userConfig.mergedLists) {
+          state.userConfig.mergedLists = {};
+        }
+        state.userConfig.mergedLists[listId] = !isMerged;
+        
+        showSectionNotification('lists', `List ${!isMerged ? 'merged' : 'split'} successfully ✅`);
+      } else {
+        throw new Error(data.error || 'Failed to update list merge state');
+      }
+    } catch (error) {
+      console.error('Error toggling list merge state:', error);
+      button.textContent = originalText;
+      showSectionNotification('lists', 'Failed to update list ❌', false, 'error');
+    } finally {
+      button.disabled = false;
     }
   }
 

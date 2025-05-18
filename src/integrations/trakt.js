@@ -278,6 +278,11 @@ async function fetchTraktListItems(listId, userConfig, skip = 0) {
         }
       });
       
+      const hasMovies = movies.data.length > 0;
+      const hasShows = shows.data.length > 0;
+      
+      console.log(`Trakt watchlist - hasMovies: ${hasMovies}, hasShows: ${hasShows}`);
+      
       return {
         movies: movies.data.map(item => ({
           imdb_id: item.movie.ids.imdb,
@@ -291,8 +296,8 @@ async function fetchTraktListItems(listId, userConfig, skip = 0) {
           year: item.show.year,
           type: 'show'
         })),
-        hasMovies: movies.data.length > 0,
-        hasShows: shows.data.length > 0
+        hasMovies: hasMovies,
+        hasShows: hasShows
       };
     }
     
@@ -459,11 +464,16 @@ async function fetchTraktListItems(listId, userConfig, skip = 0) {
         type: 'show'
       }));
     
+    const hasMovies = moviesFromList.length > 0;
+    const hasShows = showsFromList.length > 0;
+    
+    console.log(`Trakt list ${listId} - hasMovies: ${hasMovies}, hasShows: ${hasShows}`);
+    
     return {
       movies: moviesFromList,
       shows: showsFromList,
-      hasMovies: moviesFromList.length > 0,
-      hasShows: showsFromList.length > 0
+      hasMovies: hasMovies,
+      hasShows: hasShows
     };
   } catch (error) {
     console.error(`Error fetching Trakt list ${listId}:`, error.message);
