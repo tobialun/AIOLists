@@ -5,6 +5,25 @@ const Cache = require('../cache');
 const posterCache = new Cache({ defaultTTL: 7 * 24 * 3600 * 1000 });
 
 /**
+ * Generate a cache key that includes the API key
+ * @param {string} imdbId - IMDb ID
+ * @param {string} rpdbApiKey - RPDB API key
+ * @returns {string} Cache key
+ */
+function getPosterCacheKey(imdbId, rpdbApiKey) {
+  // If no API key, use a special prefix to prevent mixing with authenticated requests
+  const keyPrefix = rpdbApiKey ? rpdbApiKey.substring(0, 8) : 'no_key';
+  return `poster_${keyPrefix}_${imdbId}`;
+}
+
+/**
+ * Clear all cached posters
+ */
+function clearPosterCache() {
+  posterCache.clear();
+}
+
+/**
  * Test RPDB key with a validation endpoint
  * @param {string} rpdbApiKey - RPDB API key
  * @returns {Promise<boolean>} Whether the key is valid
@@ -38,7 +57,7 @@ async function batchFetchPosters(imdbIds, rpdbApiKey) {
   
   // Check cache first for all IDs
   for (const imdbId of imdbIds) {
-    const cacheKey = `poster_${imdbId}`;
+    const cacheKey = getPosterCacheKey(imdbId, rpdbApiKey);
     const cachedPoster = posterCache.get(cacheKey);
     if (cachedPoster) {
       results[imdbId] = cachedPoster === 'null' ? null : cachedPoster;
@@ -84,7 +103,7 @@ async function fetchPosterFromRPDB(imdbId, rpdbApiKey) {
   }
   
   // Check cache first
-  const cacheKey = `poster_${imdbId}`;
+  const cacheKey = getPosterCacheKey(imdbId, rpdbApiKey);
   const cachedPoster = posterCache.get(cacheKey);
   if (cachedPoster) {
     return cachedPoster === 'null' ? null : cachedPoster; // Handle cached null values
@@ -140,5 +159,6 @@ async function fetchPosterFromRPDB(imdbId, rpdbApiKey) {
 module.exports = {
   validateRPDBKey,
   fetchPosterFromRPDB,
-  batchFetchPosters
+  batchFetchPosters,
+  clearPosterCache
 }; 

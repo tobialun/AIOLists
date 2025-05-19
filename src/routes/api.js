@@ -27,10 +27,13 @@ function getListsCacheKey(configHash) {
  * @param {string} listId - List ID
  * @param {number} skip - Skip value
  * @param {string} type - Content type
+ * @param {string} rpdbApiKey - RPDB API key
  * @returns {string} Cache key
  */
-function getMetadataCacheKey(listId, skip, type) {
-  return `metadata_${listId}_${skip}_${type}`;
+function getMetadataCacheKey(listId, skip, type, rpdbApiKey) {
+  // Include a prefix based on RPDB API key
+  const keyPrefix = rpdbApiKey ? rpdbApiKey.substring(0, 8) : 'no_key';
+  return `metadata_${keyPrefix}_${listId}_${skip}_${type}`;
 }
 
 /**
@@ -169,7 +172,7 @@ function setupApiRoutes(app) {
       }
 
       // Create cache key based on all relevant parameters
-      const cacheKey = getMetadataCacheKey(listId, skip, type);
+      const cacheKey = getMetadataCacheKey(listId, skip, type, config.rpdbApiKey);
       
       // Add sort preferences to cache key if available
       const fullCacheKey = sortPrefs 
@@ -486,6 +489,16 @@ function setupApiRoutes(app) {
       
       // Remove validation check to allow empty API key for disconnection
       const config = await decompressConfig(configHash);
+      
+      // Check if RPDB API key has changed
+      if (config.rpdbApiKey !== rpdbApiKey) {
+        // Clear both poster and metadata caches when RPDB API key changes
+        const { clearPosterCache } = require('../utils/posters');
+        clearPosterCache();
+        metadataCache.clear();
+        console.log('Cleared both poster and metadata caches due to RPDB API key change');
+      }
+      
       const updatedConfig = {
         ...config,
         apiKey: apiKey || '', // Ensure empty string if apiKey is null/undefined
