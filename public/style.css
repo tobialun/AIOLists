@@ -113,6 +113,7 @@ button:hover {
   transition: background-color 0.2s;
   border-top-left-radius: 8px;
   border-bottom-left-radius: 8px;
+  touch-action: none;
 }
 
 .drag-handle:hover {
@@ -159,7 +160,7 @@ button:hover {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   gap: 10px;
   user-select: none;
-  touch-action: none;
+  touch-action: auto;
 }
 
 .list-item:hover {
@@ -1015,4 +1016,161 @@ input:checked + .slider:before {
   background-color: #e8f5e9;
   border-color: #c8e6c9;
   color: #388e3c;
+}
+
+/* --- Responsive 2-row list item layout --- */
+.list-item-content {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  align-items: stretch;
+}
+.list-item-main {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  min-width: 0;
+}
+.list-item-row-desktop {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+.list-item-row-top,
+.list-item-row-bottom {
+  display: none;
+}
+@media (max-width: 600px) {
+  .list-item {
+    flex-direction: row;
+    align-items: flex-start;
+    padding: 8px 4px;
+    gap: 0;
+    touch-action: auto;
+  }
+  .list-item-content {
+    flex-direction: row;
+    width: 100%;
+    align-items: stretch;
+    touch-action: auto;
+  }
+  .list-item-main {
+    flex-direction: column;
+  }
+  .list-item-row-desktop {
+    display: none;
+  }
+  .list-item-row-top,
+  .list-item-row-bottom {
+    display: flex;
+    width: 100%;
+  }
+  .drag-handle {
+    min-width: 32px;
+    min-height: 60px;
+    margin: 0 6px 0 0;
+    padding: 0 4px;
+    font-size: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: none;
+  }
+  .list-item-row {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .list-item-row-top {
+    margin-bottom: 0;
+    align-items: center;
+    gap: 8px;
+  }
+  .list-item-row-bottom {
+    margin-top: 2px;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .name-container {
+    min-width: 0;
+    flex: 1 1 60%;
+    max-width: 100%;
+  }
+  .list-name {
+    font-size: 15px;
+    white-space: normal;
+    word-break: break-word;
+  }
+  .edit-button {
+    font-size: 18px;
+    padding: 4px 6px;
+  }
+  .sort-controls {
+    flex: 1 1 100%;
+    min-width: 120px;
+    margin: 0;
+    gap: 6px;
+  }
+  .sort-select {
+    min-width: 90px;
+    font-size: 13px;
+    padding: 4px 6px;
+  }
+  .order-toggle {
+    gap: 4px;
+  }
+  .merge-toggle {
+    font-size: 12px;
+    padding: 4px 8px;
+    margin: 0 4px 0 0;
+  }
+  .actions {
+    gap: 4px;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+  .remove-list-button, .visibility-toggle {
+    width: 28px;
+    height: 28px;
+    font-size: 15px;
+    padding: 4px;
+  }
+  .edit-name-input {
+    font-size: 15px;
+    padding: 7px 6px;
+    min-width: 0;
+    width: 100%;
+  }
+}
+
+.order-toggle-btn {
+  cursor: pointer;
+  padding: 5px 12px;
+  background-color: #f2f2f2;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  color: #555;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  margin-left: 6px;
+  margin-right: 0;
+  min-width: 56px;
+}
+.order-toggle-btn:hover, .order-toggle-btn:focus {
+  background-color: #e5e5e5;
+  color: #222;
+  outline: none;
+}
+@media (max-width: 600px) {
+  .order-toggle-btn {
+    font-size: 12px;
+    padding: 4px 10px;
+    min-width: 48px;
+    margin-left: 4px;
+  }
 } 

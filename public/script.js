@@ -1,13 +1,13 @@
 // Default configuration with sort options
 const defaultConfig = {
   availableSortOptions: [
+    { value: 'imdbvotes', label: 'IMDb Votes' },
     { value: 'rank', label: 'Rank' },
     { value: 'score', label: 'Score' },
     { value: 'score_average', label: 'Score Average' },
     { value: 'released', label: 'Released' },
     { value: 'releasedigital', label: 'Digital Release' },
     { value: 'imdbrating', label: 'IMDb Rating' },
-    { value: 'imdbvotes', label: 'IMDb Votes' },
     { value: 'last_air_date', label: 'Last Air Date' },
     { value: 'imdbpopular', label: 'IMDb Popular' },
     { value: 'tmdbpopular', label: 'TMDB Popular' },
@@ -392,163 +392,174 @@ document.addEventListener('DOMContentLoaded', function() {
     container.className = `list-item ${list.isHidden ? 'hidden' : ''}`;
     container.dataset.id = list.id;
 
-    // Debug logging for content types
-    console.log(`List ${list.name} (${list.id}): hasMovies=${!!list.hasMovies}, hasShows=${!!list.hasShows}, showing merge button=${Boolean(list.hasMovies) && Boolean(list.hasShows)}`);
+    // --- Main flex row wrapper ---
+    const contentWrapper = document.createElement('div');
+    contentWrapper.className = 'list-item-content';
+    contentWrapper.style.display = 'flex';
+    contentWrapper.style.flexDirection = 'row';
 
+    // Drag handle (always on the left)
     const dragHandle = document.createElement('span');
     dragHandle.className = 'drag-handle';
     dragHandle.innerHTML = '☰';
-    container.appendChild(dragHandle);
+    contentWrapper.appendChild(dragHandle);
 
+    // --- Main area ---
+    const mainCol = document.createElement('div');
+    mainCol.className = 'list-item-main';
+    mainCol.style.display = 'flex';
+    mainCol.style.flex = '1';
+    mainCol.style.minWidth = '0';
+
+    // Responsive: check if mobile
+    const isMobile = window.matchMedia('(max-width: 600px)').matches;
+
+    // Tag
     const tag = document.createElement('span');
     tag.className = `tag ${list.tag?.toLowerCase()}`;
-    
-    // Handle different types of lists
     if (list.id.startsWith('trakt_') || list.isTraktList || list.isTraktWatchlist || 
         list.isTraktRecommendations || list.isTraktTrending || list.isTraktPopular) {
-        // Use Trakt logo for all Trakt lists
-        const img = document.createElement('img');
-        img.src = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico';
-        img.alt = 'Trakt.tv';
-        tag.appendChild(img);
+      const img = document.createElement('img');
+      img.src = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico';
+      img.alt = 'Trakt.tv';
+      tag.appendChild(img);
     } else if (list.addonId?.startsWith('mdblist_')) {
-        // For MDBList imported lists
-        const img = document.createElement('img');
-        img.src = 'https://mdblist.com/static/mdblist_logo.png';
-        img.alt = 'MDBList';
-        tag.appendChild(img);
+      const img = document.createElement('img');
+      img.src = 'https://mdblist.com/static/mdblist_logo.png';
+      img.alt = 'MDBList';
+      tag.appendChild(img);
     } else if (list.addonId) {
-        // For other external addons
-        if (list.tagImage) {
-            const img = document.createElement('img');
-            img.src = list.tagImage;
-            img.alt = list.addonName || '';
-            tag.appendChild(img);
-        } else {
-            tag.textContent = list.tag;
-        }
-    } else {
-        // Regular MDBList lists
+      if (list.tagImage) {
+        const img = document.createElement('img');
+        img.src = list.tagImage;
+        img.alt = list.addonName || '';
+        tag.appendChild(img);
+      } else {
         tag.textContent = list.tag;
+      }
+    } else {
+      tag.textContent = list.tag;
     }
-    container.appendChild(tag);
 
+    // Name
     const nameContainer = document.createElement('div');
     nameContainer.className = 'name-container';
-    
     const name = document.createElement('span');
     name.className = 'list-name';
     name.textContent = list.customName || list.name;
     nameContainer.appendChild(name);
-    container.appendChild(nameContainer);
 
-    // Add merge/split toggle button for lists that have both movies and shows
-    if (Boolean(list.hasMovies) && Boolean(list.hasShows)) {
-        // Check if we have a merge preference in state
-        const mergePreference = state.userConfig.mergedLists ? state.userConfig.mergedLists[list.id] : true; // Default to merged
-        
-        const mergeToggle = document.createElement('button');
-        mergeToggle.className = `merge-toggle ${mergePreference !== false ? 'merged' : 'split'}`;
-        mergeToggle.textContent = mergePreference !== false ? 'Merged' : 'Split';
-        mergeToggle.title = mergePreference !== false ? 
-            'Click to split this list into separate Movie and Series catalogs' : 
-            'Click to merge this list into a single "All" catalog';
-        mergeToggle.dataset.listId = list.id;
-        mergeToggle.addEventListener('click', toggleListMerge);
-        
-        container.appendChild(mergeToggle);
-    }
-
-    // Show sort controls only for MDBList items and MDBList imported lists
-    const isMDBList = !list.id.startsWith('trakt_') && !list.isTraktList && !list.isTraktWatchlist && 
-                     !list.isTraktRecommendations && !list.isTraktTrending && !list.isTraktPopular && 
-                     (!list.addonId || list.addonId.startsWith('mdblist_'));
-    
-    if (isMDBList) {
-        // Add sort controls container
-        const sortControls = document.createElement('div');
-        sortControls.className = 'sort-controls';
-
-        // Add sort dropdown
-        const sortSelect = document.createElement('select');
-        sortSelect.className = 'sort-select';
-        
-        // Get sort options from config
-        const sortOptions = state.userConfig.availableSortOptions || defaultConfig.availableSortOptions;
-
-        // Set default sort preferences if none exist
-        if (!list.sortPreferences) {
-            list.sortPreferences = { sort: 'imdbvotes', order: 'desc' };
-        }
-
-        sortOptions.forEach(option => {
-            const optionElement = document.createElement('option');
-            optionElement.value = option.value;
-            optionElement.textContent = option.label;
-            if (option.value === (list.sortPreferences?.sort || 'imdbvotes')) {
-                optionElement.selected = true;
-            }
-            sortSelect.appendChild(optionElement);
-        });
-
-        // Add order toggle
-        const orderToggle = document.createElement('div');
-        orderToggle.className = 'order-toggle';
-        orderToggle.innerHTML = `
-            <label class="switch">
-                <input type="checkbox" ${(list.sortPreferences?.order || 'desc') === 'desc' ? 'checked' : ''}>
-                <span class="slider round"></span>
-            </label>
-            <span class="order-label">${(list.sortPreferences?.order || 'desc') === 'desc' ? 'Desc.' : 'Asc.'}</span>
-        `;
-
-        sortControls.appendChild(sortSelect);
-        sortControls.appendChild(orderToggle);
-        container.appendChild(sortControls);
-
-        // Add event listeners for sort controls
-        sortSelect.addEventListener('change', async (e) => {
-            const newSort = e.target.value;
-            const currentOrder = list.sortPreferences?.order || 'desc';
-            await updateSortPreferences(list.id, newSort, currentOrder);
-        });
-
-        orderToggle.querySelector('input').addEventListener('change', async (e) => {
-            const newOrder = e.target.checked ? 'desc' : 'asc';
-            const currentSort = list.sortPreferences?.sort || 'imdbvotes';
-            orderToggle.querySelector('.order-label').textContent = e.target.checked ? 'Desc.' : 'Asc.';
-            await updateSortPreferences(list.id, currentSort, newOrder);
-        });
-    }
-
-    const actions = document.createElement('div');
-    actions.className = 'actions';
-
+    // Edit button
     const editButton = document.createElement('button');
     editButton.className = 'edit-button';
     editButton.innerHTML = '✏️';
     editButton.title = 'Edit List Name';
     editButton.addEventListener('click', () => startEditingName(container, list));
-    actions.appendChild(editButton);
 
+    // Sort controls (MDBList only)
+    const isMDBList = !list.id.startsWith('trakt_') && !list.isTraktList && !list.isTraktWatchlist && 
+                     !list.isTraktRecommendations && !list.isTraktTrending && !list.isTraktPopular && 
+                     (!list.addonId || list.addonId.startsWith('mdblist_'));
+    let sortControls = null;
+    if (isMDBList) {
+      sortControls = document.createElement('div');
+      sortControls.className = 'sort-controls';
+      const sortSelect = document.createElement('select');
+      sortSelect.className = 'sort-select';
+      const sortOptions = state.userConfig.availableSortOptions || defaultConfig.availableSortOptions;
+      if (!list.sortPreferences) {
+        list.sortPreferences = { sort: 'imdbvotes', order: 'desc' };
+      }
+      sortOptions.forEach(option => {
+        const optionElement = document.createElement('option');
+        optionElement.value = option.value;
+        optionElement.textContent = option.label;
+        if (option.value === (list.sortPreferences?.sort || 'imdbvotes')) {
+          optionElement.selected = true;
+        }
+        sortSelect.appendChild(optionElement);
+      });
+      // Order toggle as a button
+      const orderToggleBtn = document.createElement('button');
+      orderToggleBtn.className = 'order-toggle-btn merge-toggle';
+      orderToggleBtn.textContent = (list.sortPreferences?.order || 'desc') === 'desc' ? 'Desc.' : 'Asc.';
+      orderToggleBtn.title = 'Toggle sort order';
+      sortControls.appendChild(sortSelect);
+      sortControls.appendChild(orderToggleBtn);
+      sortSelect.addEventListener('change', async (e) => {
+        const newSort = e.target.value;
+        const currentOrder = list.sortPreferences?.order || 'desc';
+        await updateSortPreferences(list.id, newSort, currentOrder);
+      });
+      orderToggleBtn.addEventListener('click', async (e) => {
+        const currentOrder = list.sortPreferences?.order || 'desc';
+        const newOrder = currentOrder === 'desc' ? 'asc' : 'desc';
+        const currentSort = list.sortPreferences?.sort || 'imdbvotes';
+        orderToggleBtn.textContent = newOrder === 'desc' ? 'Desc.' : 'Asc.';
+        await updateSortPreferences(list.id, currentSort, newOrder);
+      });
+    }
+
+    // Merge toggle (if both movies and shows)
+    let mergeToggle = null;
+    if (Boolean(list.hasMovies) && Boolean(list.hasShows)) {
+      const mergePreference = state.userConfig.mergedLists ? state.userConfig.mergedLists[list.id] : true;
+      mergeToggle = document.createElement('button');
+      mergeToggle.className = `merge-toggle ${mergePreference !== false ? 'merged' : 'split'}`;
+      mergeToggle.textContent = mergePreference !== false ? 'Merged' : 'Split';
+      mergeToggle.title = mergePreference !== false ? 
+        'Click to split this list into separate Movie and Series catalogs' : 
+        'Click to merge this list into a single "All" catalog';
+      mergeToggle.dataset.listId = list.id;
+      mergeToggle.addEventListener('click', toggleListMerge);
+    }
+
+    // Actions (visibility, remove)
     const visibilityToggle = document.createElement('button');
     visibilityToggle.className = 'visibility-toggle';
     visibilityToggle.innerHTML = '<span class="eye-icon ' + (list.isHidden ? 'eye-closed' : 'eye-open') + '"></span>';
     visibilityToggle.dataset.listId = list.id;
     visibilityToggle.title = list.isHidden ? 'Show in Main View (currently hidden, but still accessible in Discover)' : 'Hide from Main View (will still be accessible in Discover)';
     visibilityToggle.addEventListener('click', toggleListVisibility);
-    actions.appendChild(visibilityToggle);
-    
-    // Add remove list button (red X)
     const removeButton = document.createElement('button');
     removeButton.className = 'remove-list-button';
     removeButton.innerHTML = '❌';
     removeButton.title = 'Remove List';
     removeButton.dataset.listId = list.id;
     removeButton.addEventListener('click', removeList);
-    actions.appendChild(removeButton);
 
-    container.appendChild(actions);
+    if (isMobile) {
+      // --- Top row: tag, name, edit ---
+      const topRow = document.createElement('div');
+      topRow.className = 'list-item-row list-item-row-top';
+      topRow.appendChild(tag);
+      topRow.appendChild(nameContainer);
+      topRow.appendChild(editButton);
+      // --- Bottom row: sort, merge, actions (all inline) ---
+      const bottomRow = document.createElement('div');
+      bottomRow.className = 'list-item-row list-item-row-bottom';
+      if (sortControls) bottomRow.appendChild(sortControls);
+      if (mergeToggle) bottomRow.appendChild(mergeToggle);
+      bottomRow.appendChild(visibilityToggle);
+      bottomRow.appendChild(removeButton);
+      mainCol.appendChild(topRow);
+      mainCol.appendChild(bottomRow);
+    } else {
+      // Desktop: all in one row
+      const row = document.createElement('div');
+      row.className = 'list-item-row list-item-row-desktop';
+      row.appendChild(tag);
+      row.appendChild(nameContainer);
+      row.appendChild(editButton);
+      if (sortControls) row.appendChild(sortControls);
+      if (mergeToggle) row.appendChild(mergeToggle);
+      row.appendChild(visibilityToggle);
+      row.appendChild(removeButton);
+      mainCol.appendChild(row);
+    }
+
+    contentWrapper.appendChild(mainCol);
+    container.appendChild(contentWrapper);
     return container;
   }
 
@@ -682,81 +693,182 @@ document.addEventListener('DOMContentLoaded', function() {
     
     container.innerHTML = '';
     
-    // Recreate the drag handle
+    // --- Main flex row wrapper ---
+    const contentWrapper = document.createElement('div');
+    contentWrapper.className = 'list-item-content';
+    contentWrapper.style.display = 'flex';
+    contentWrapper.style.flexDirection = 'row';
+
+    // Drag handle (always on the left)
     const dragHandle = document.createElement('span');
     dragHandle.className = 'drag-handle';
     dragHandle.innerHTML = '☰';
-    container.appendChild(dragHandle);
+    contentWrapper.appendChild(dragHandle);
 
-    // Recreate the tag/badge
+    // --- Main area ---
+    const mainCol = document.createElement('div');
+    mainCol.className = 'list-item-main';
+    mainCol.style.display = 'flex';
+    mainCol.style.flex = '1';
+    mainCol.style.minWidth = '0';
+
+    // Responsive: check if mobile
+    const isMobile = window.matchMedia('(max-width: 600px)').matches;
+
+    // Tag
     const tag = document.createElement('span');
     tag.className = `tag ${list.tag?.toLowerCase()}`;
-    
-    // Handle different types of lists
     if (list.id.startsWith('trakt_') || list.isTraktList || list.isTraktWatchlist || 
         list.isTraktRecommendations || list.isTraktTrending || list.isTraktPopular) {
-        const img = document.createElement('img');
-        img.src = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico';
-        img.alt = 'Trakt.tv';
-        tag.appendChild(img);
+      const img = document.createElement('img');
+      img.src = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico';
+      img.alt = 'Trakt.tv';
+      tag.appendChild(img);
     } else if (list.addonId?.startsWith('mdblist_')) {
-        const img = document.createElement('img');
-        img.src = 'https://mdblist.com/static/mdblist_logo.png';
-        img.alt = 'MDBList';
-        tag.appendChild(img);
+      const img = document.createElement('img');
+      img.src = 'https://mdblist.com/static/mdblist_logo.png';
+      img.alt = 'MDBList';
+      tag.appendChild(img);
     } else if (list.addonId) {
-        if (list.tagImage) {
-            const img = document.createElement('img');
-            img.src = list.tagImage;
-            img.alt = list.addonName || '';
-            tag.appendChild(img);
-        } else {
-            tag.textContent = list.tag;
-        }
-    } else {
+      if (list.tagImage) {
+        const img = document.createElement('img');
+        img.src = list.tagImage;
+        img.alt = list.addonName || '';
+        tag.appendChild(img);
+      } else {
         tag.textContent = list.tag;
+      }
+    } else {
+      tag.textContent = list.tag;
     }
-    container.appendChild(tag);
-    
-    // Create name container with input
+
+    // Name input
     const nameContainer = document.createElement('div');
     nameContainer.className = 'name-container';
-    
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'edit-name-input';
     input.value = currentName;
     nameContainer.appendChild(input);
-    container.appendChild(nameContainer);
-    
-    // Add sort controls if needed
-    const isMDBList = !list.id.startsWith('trakt_') && !list.isTraktList && !list.isTraktWatchlist && 
-                     !list.isTraktRecommendations && !list.isTraktTrending && !list.isTraktPopular && 
-                     (!list.addonId || list.addonId.startsWith('mdblist_'));
-    
-    if (isMDBList) {
-        const sortControls = document.createElement('div');
-        sortControls.className = 'sort-controls';
-        sortControls.innerHTML = originalContent.match(/<div class="sort-controls">(.*?)<\/div>/s)?.[1] || '';
-        container.appendChild(sortControls);
-    }
-    
-    // Create actions container
+
+    // Save/cancel buttons
     const actions = document.createElement('div');
     actions.className = 'actions';
-    
     const saveBtn = document.createElement('button');
     saveBtn.className = 'save-name-btn';
     saveBtn.textContent = '✓';
     actions.appendChild(saveBtn);
-    
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'cancel-name-btn';
     cancelBtn.textContent = '✕';
     actions.appendChild(cancelBtn);
-    
-    container.appendChild(actions);
-    
+
+    // Sort controls (MDBList only)
+    const isMDBList = !list.id.startsWith('trakt_') && !list.isTraktList && !list.isTraktWatchlist && 
+                     !list.isTraktRecommendations && !list.isTraktTrending && !list.isTraktPopular && 
+                     (!list.addonId || list.addonId.startsWith('mdblist_'));
+    let sortControls = null;
+    if (isMDBList) {
+      sortControls = document.createElement('div');
+      sortControls.className = 'sort-controls';
+      const sortSelect = document.createElement('select');
+      sortSelect.className = 'sort-select';
+      const sortOptions = state.userConfig.availableSortOptions || defaultConfig.availableSortOptions;
+      if (!list.sortPreferences) {
+        list.sortPreferences = { sort: 'imdbvotes', order: 'desc' };
+      }
+      sortOptions.forEach(option => {
+        const optionElement = document.createElement('option');
+        optionElement.value = option.value;
+        optionElement.textContent = option.label;
+        if (option.value === (list.sortPreferences?.sort || 'imdbvotes')) {
+          optionElement.selected = true;
+        }
+        sortSelect.appendChild(optionElement);
+      });
+      // Order toggle as a button
+      const orderToggleBtn = document.createElement('button');
+      orderToggleBtn.className = 'order-toggle-btn merge-toggle';
+      orderToggleBtn.textContent = (list.sortPreferences?.order || 'desc') === 'desc' ? 'Desc.' : 'Asc.';
+      orderToggleBtn.title = 'Toggle sort order';
+      sortControls.appendChild(sortSelect);
+      sortControls.appendChild(orderToggleBtn);
+      sortSelect.addEventListener('change', async (e) => {
+        const newSort = e.target.value;
+        const currentOrder = list.sortPreferences?.order || 'desc';
+        await updateSortPreferences(list.id, newSort, currentOrder);
+      });
+      orderToggleBtn.addEventListener('click', async (e) => {
+        const currentOrder = list.sortPreferences?.order || 'desc';
+        const newOrder = currentOrder === 'desc' ? 'asc' : 'desc';
+        const currentSort = list.sortPreferences?.sort || 'imdbvotes';
+        orderToggleBtn.textContent = newOrder === 'desc' ? 'Desc.' : 'Asc.';
+        await updateSortPreferences(list.id, currentSort, newOrder);
+      });
+    }
+
+    // Merge toggle (if both movies and shows)
+    let mergeToggle = null;
+    if (Boolean(list.hasMovies) && Boolean(list.hasShows)) {
+      const mergePreference = state.userConfig.mergedLists ? state.userConfig.mergedLists[list.id] : true;
+      mergeToggle = document.createElement('button');
+      mergeToggle.className = `merge-toggle ${mergePreference !== false ? 'merged' : 'split'}`;
+      mergeToggle.textContent = mergePreference !== false ? 'Merged' : 'Split';
+      mergeToggle.title = mergePreference !== false ? 
+        'Click to split this list into separate Movie and Series catalogs' : 
+        'Click to merge this list into a single "All" catalog';
+      mergeToggle.dataset.listId = list.id;
+      mergeToggle.addEventListener('click', toggleListMerge);
+    }
+
+    // Actions (visibility, remove)
+    const visibilityToggle = document.createElement('button');
+    visibilityToggle.className = 'visibility-toggle';
+    visibilityToggle.innerHTML = '<span class="eye-icon ' + (list.isHidden ? 'eye-closed' : 'eye-open') + '"></span>';
+    visibilityToggle.dataset.listId = list.id;
+    visibilityToggle.title = list.isHidden ? 'Show in Main View (currently hidden, but still accessible in Discover)' : 'Hide from Main View (will still be accessible in Discover)';
+    visibilityToggle.addEventListener('click', toggleListVisibility);
+    const removeButton = document.createElement('button');
+    removeButton.className = 'remove-list-button';
+    removeButton.innerHTML = '❌';
+    removeButton.title = 'Remove List';
+    removeButton.dataset.listId = list.id;
+    removeButton.addEventListener('click', removeList);
+
+    if (isMobile) {
+      // --- Top row: tag, input, save/cancel ---
+      const topRow = document.createElement('div');
+      topRow.className = 'list-item-row list-item-row-top';
+      topRow.appendChild(tag);
+      topRow.appendChild(nameContainer);
+      topRow.appendChild(actions);
+      // --- Bottom row: sort, merge, actions (all inline) ---
+      const bottomRow = document.createElement('div');
+      bottomRow.className = 'list-item-row list-item-row-bottom';
+      if (sortControls) bottomRow.appendChild(sortControls);
+      if (mergeToggle) bottomRow.appendChild(mergeToggle);
+      bottomRow.appendChild(visibilityToggle);
+      bottomRow.appendChild(removeButton);
+      mainCol.appendChild(topRow);
+      mainCol.appendChild(bottomRow);
+    } else {
+      // Desktop: all in one row
+      const row = document.createElement('div');
+      row.className = 'list-item-row list-item-row-desktop';
+      row.appendChild(tag);
+      row.appendChild(nameContainer);
+      row.appendChild(actions);
+      if (sortControls) row.appendChild(sortControls);
+      if (mergeToggle) row.appendChild(mergeToggle);
+      row.appendChild(visibilityToggle);
+      row.appendChild(removeButton);
+      mainCol.appendChild(row);
+    }
+
+    contentWrapper.appendChild(mainCol);
+    container.appendChild(contentWrapper);
+
+    // Save/cancel logic
     const handleSave = async () => {
       const newName = input.value.trim();
       const success = await updateListName(list.id, newName);
@@ -769,10 +881,10 @@ document.addEventListener('DOMContentLoaded', function() {
         handleCancel(container, list, originalContent);
       }
     };
-    
+
     saveBtn.onclick = handleSave;
     cancelBtn.onclick = () => handleCancel(container, list, originalContent);
-    
+
     // Handle Enter and Escape keys
     input.addEventListener('keydown', async (e) => {
       if (e.key === 'Enter') {
@@ -783,7 +895,7 @@ document.addEventListener('DOMContentLoaded', function() {
         handleCancel(container, list, originalContent);
       }
     });
-    
+
     input.focus();
     input.select();
   }
