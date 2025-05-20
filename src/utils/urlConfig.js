@@ -1,5 +1,6 @@
 const zlib = require('zlib');
 const { promisify } = require('util');
+const { defaultConfig } = require('../config');
 
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
@@ -31,7 +32,6 @@ async function compressConfig(config) {
  */
 async function decompressConfig(compressed) {
   try {
-
     if (compressed === 'configure') {
       return { ...defaultConfig };
     }
@@ -78,23 +78,7 @@ async function decompressConfig(compressed) {
   }
 }
 
-// Default configuration structure
-const defaultConfig = {
-  apiKey: '',            // MDBList API key
-  rpdbApiKey: '',        // RPDB API key for posters
-  traktAccessToken: '',  // Trakt Access Token
-  traktRefreshToken: '', // Trakt Refresh Token
-  traktExpiresAt: null,  // Trakt token expiration date
-  listOrder: [],
-  lastUpdated: null,
-  listsMetadata: {},
-  hiddenLists: [],
-  customListNames: {},   // Store custom names for lists
-  importedAddons: {}     // Store imported addon configurations
-};
-
 module.exports = {
   compressConfig,
   decompressConfig,
-  defaultConfig
 }; 

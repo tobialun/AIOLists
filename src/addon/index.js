@@ -334,6 +334,11 @@ async function createAddon(userConfig) {
       // Process lists in parallel and collect all catalogs
       const catalogPromises = filteredLists.map(async list => {
         const listId = String(list.id);
+        // Skip hidden lists for main view
+        if (hiddenLists.has(listId)) {
+          return [];
+        }
+        
         let displayName = list.name;
         if (userConfig.customListNames && userConfig.customListNames[listId]) {
           displayName = userConfig.customListNames[listId];
@@ -517,13 +522,12 @@ async function createAddon(userConfig) {
     // Add imported lists
     if (userConfig.importedAddons) {
       for (const addon of Object.values(userConfig.importedAddons)) {
-        
         addon.catalogs
           .filter(catalog => {
             // Ensure consistent handling of string IDs
             const catalogId = String(catalog.id);
-            // Filter out completely removed lists
-            return !removedLists.has(catalogId);
+            // Filter out completely removed lists and hidden lists
+            return !removedLists.has(catalogId) && !hiddenLists.has(catalogId);
           })
           .forEach(catalog => {
             // Apply custom names if available
@@ -537,9 +541,6 @@ async function createAddon(userConfig) {
             // Determine catalog type
             const catalogType = catalog.type === 'anime' ? 'series' : catalog.type;
             
-            // Determine if this catalog should be hidden from main view
-            const isHidden = hiddenLists.has(catalogId);
-            
             const catalogEntry = {
               type: catalogType,
               id: catalogId,
@@ -547,8 +548,7 @@ async function createAddon(userConfig) {
               extra: [
                 { name: "skip" }
               ],
-              extraSupported: ["skip"],
-              visibleInMainView: !isHidden // Stremio can use this to hide from main view
+              extraSupported: ["skip"]
             };
 
             // Add redirectUrl for MDBList catalogs
@@ -639,8 +639,24 @@ async function createAddon(userConfig) {
         // Find the catalog's position in the manifest
         const catalogIndex = manifest.catalogs.findIndex(c => c.id === id && c.type === type);
         
+        // Extract the real list ID from catalog ID if needed
+        let realListId = id;
+        const listTypeMatch = id.match(/^aiolists-(\d+)-([ELW])$/);
+        if (listTypeMatch) {
+          realListId = listTypeMatch[1];
+        } else if (id === 'aiolists-watchlist-W') {
+          realListId = 'watchlist';
+        }
+        
+        // Check if this list is hidden - but only check against the original ID
+        if (hiddenLists.has(String(realListId))) {
+          console.log(`List ${realListId} is hidden, returning empty result`);
+          return { metas: [] };
+        }
+        
         const items = await fetchListContent(id, userConfig, userConfig.importedAddons, skipValue);
         if (!items) {
+          console.log(`No items found for list ${id}`);
           return { metas: [] };
         }
         
@@ -650,16 +666,7 @@ async function createAddon(userConfig) {
         // Log how many items we got back
         const totalMovies = items.movies?.length || 0;
         const totalShows = items.shows?.length || 0;
-        
-        // Store content type information for future manifest generation
-        // Extract the real list ID from catalog ID if needed
-        let realListId = id;
-        const listTypeMatch = id.match(/^aiolists-(\d+)-([ELW])$/);
-        if (listTypeMatch) {
-          realListId = listTypeMatch[1];
-        } else if (id === 'aiolists-watchlist-W') {
-          realListId = 'watchlist';
-        }
+        console.log(`Fetched ${totalMovies} movies and ${totalShows} shows for list ${id}`);
         
         // Update metadata with content type information
         if (!userConfig.listsMetadata) {
@@ -704,17 +711,14 @@ async function createAddon(userConfig) {
           return orderA - orderB;
         });
         
-        
-        // If we have a full page of results, indicate that there might be more
-        const hasMore = filteredMetas.length >= ITEMS_PER_PAGE;
-        console.log(`Has more pages: ${hasMore}`);
+        console.log(`Returning ${filteredMetas.length} items for list ${id}`);
         
         return {
           metas: filteredMetas,
-          cacheMaxAge: 86400 // 1 day in seconds
+          cacheMaxAge: isWatchlist(id) ? 0 : 86400 // 1 day in seconds
         };
       } catch (error) {
-        console.error(`Error in catalog handler: ${error.message}`);
+        console.error(`Error in catalog handler for ${id}:`, error.message);
         return { metas: [] };
       }
     });

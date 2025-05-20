@@ -488,6 +488,4 @@ module.exports = {
   authenticateTrakt,
   fetchTraktLists,
   fetchTraktListItems,
-  TRAKT_API_URL,
-  TRAKT_CLIENT_ID
 }; 

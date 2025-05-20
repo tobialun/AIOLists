@@ -4,7 +4,7 @@
 class Cache {
   constructor(options = {}) {
     this.cache = new Map();
-    this.defaultTTL = options.defaultTTL || 86400000; // 1 day in milliseconds
+    this.defaultTTL = options.defaultTTL || 3600000; // 1 hour in milliseconds (increased from 1 day)
     this.cleanupInterval = options.cleanupInterval || 300000; // 5 minutes
     this._startCleanupInterval();
   }
@@ -35,6 +35,25 @@ class Cache {
         this.cache.delete(key);
       }
     }
+  }
+
+  /**
+   * Get remaining TTL for a key in milliseconds
+   * @param {string} key - Cache key
+   * @returns {number} Remaining TTL in milliseconds, or -1 if expired/not found
+   */
+  getRemainingTTL(key) {
+    if (!this.cache.has(key)) return -1;
+    
+    const item = this.cache.get(key);
+    const now = Date.now();
+    
+    if (item.expiry < now) {
+      this.cache.delete(key);
+      return -1;
+    }
+    
+    return item.expiry - now;
   }
 
   /**

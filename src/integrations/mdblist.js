@@ -101,31 +101,17 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0, sort = 'i
   if (!apiKey) return null;
   
   try {
-    // Remove aiolists- prefix if present
-    const id = listId.replace(/^aiolists-/, '');    
+    // Remove aiolists- prefix and extract type if present
+    const match = listId.match(/^aiolists-(\d+)-([ELW])$/);
+    const id = match ? match[1] : listId.replace(/^aiolists-/, '');
+    const listType = match ? match[2] : null;
+    
+    console.log(`Fetching list items for ID: ${id}, type: ${listType}, skip: ${skip}`);
     
     // Special case for watchlist
-    if (id === 'watchlist') {
+    if (id === 'watchlist' || id === 'watchlist-W') {
       try {
-        console.log('Fetching watchlist items (W)');
-        const response = await axios.get(`https://api.mdblist.com/watchlist/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
-        if (response.status === 429) {
-          console.error('Rate limited by MDBList API. Please wait a moment before trying again.');
-          return null;
-        }
-        return processApiResponse(response.data);
-      } catch (error) {
-        if (error.response?.status === 429) {
-          console.error('Rate limited by MDBList API. Please wait a moment before trying again.');
-          return null;
-        }
-        throw error;
-      }
-    }
-    
-    // Also handle watchlist with W type suffix
-    if (id === 'watchlist-W') {
-      try {
+        console.log('Fetching watchlist items');
         const response = await axios.get(`https://api.mdblist.com/watchlist/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
         if (response.status === 429) {
           console.error('Rate limited by MDBList API. Please wait a moment before trying again.');
@@ -171,8 +157,11 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0, sort = 'i
       
       console.log(`List ${id} found with listType: ${list.listType}`);
       
-      // Use the listType from fetchAllLists
-      if (list.listType === 'E') {
+      // Use the listType from fetchAllLists or the one from the ID
+      const effectiveListType = listType || list.listType;
+      console.log(`Using list type: ${effectiveListType}`);
+      
+      if (effectiveListType === 'E') {
         console.log(`Fetching EXTERNAL list ${id}`);
         try {
           const response = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
@@ -184,7 +173,7 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0, sort = 'i
           console.error(`Error fetching external list ${id}:`, error.message);
           return null;
         }
-      } else if (list.listType === 'L') {
+      } else if (effectiveListType === 'L') {
         console.log(`Fetching INTERNAL list ${id}`);
         try {
           const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
@@ -198,8 +187,11 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0, sort = 'i
         }
       }
     } else {
-      // Use the metadata listType directly
-      if (metadata.listType === 'E') {
+      // Use the metadata listType or the one from the ID
+      const effectiveListType = listType || metadata.listType;
+      console.log(`Using list type from metadata: ${effectiveListType}`);
+      
+      if (effectiveListType === 'E') {
         console.log(`Fetching EXTERNAL list ${id} (Type E)`);
         try {
           const response = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
@@ -211,7 +203,7 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0, sort = 'i
           console.error(`Error fetching external list ${id}:`, error.message);
           return null;
         }
-      } else if (metadata.listType === 'L') {
+      } else if (effectiveListType === 'L') {
         console.log(`Fetching INTERNAL list ${id} (Type L)`);
         try {
           const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);

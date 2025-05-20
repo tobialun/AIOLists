@@ -3,15 +3,119 @@ const { authenticateTrakt, getTraktAuthUrl, fetchTraktLists } = require('../inte
 const { fetchAllLists, fetchListItems, validateMDBListKey, extractListFromUrl } = require('../integrations/mdblist');
 const { importExternalAddon, fetchExternalAddonItems } = require('../integrations/externalAddons');
 const { rebuildAddon, convertToStremioFormat, fetchListContent } = require('../addon');
-const { compressConfig, decompressConfig, defaultConfig } = require('../utils/urlConfig');
+const { compressConfig, decompressConfig } = require('../utils/urlConfig');
 const path = require('path');
 const { ITEMS_PER_PAGE } = require('../config');
 const Cache = require('../cache');
-const axios = require('axios');
+
+// Cache durations
+const CACHE_DURATIONS = {
+  LISTS: 1800,            // 30 minutes
+  METADATA: 3600,         // 1 hour
+  MANIFEST: 3600,         // 1 hour
+  REGULAR_CONTENT: 86400  // 1 day
+};
 
 // Create cache instances
-const listsCache = new Cache({ defaultTTL: 30 * 60 * 1000 }); // 30 minutes
-const metadataCache = new Cache({ defaultTTL: 60 * 60 * 1000 }); // 1 hour
+const listsCache = new Cache({ defaultTTL: CACHE_DURATIONS.LISTS });
+const metadataCache = new Cache({ defaultTTL: CACHE_DURATIONS.METADATA });
+
+/**
+ * Check if a list ID represents a watchlist
+ * @param {string} listId - List ID to check
+ * @returns {boolean} Whether the list is a watchlist
+ */
+function isWatchlist(listId) {
+  return listId === 'watchlist' || 
+         listId === 'watchlist-W' || 
+         listId === 'trakt_watchlist' ||
+         listId === 'aiolists-watchlist-W';
+}
+
+/**
+ * Check if content has movies or shows
+ * @param {Object} items - Content items
+ * @returns {Object} Object with hasMovies and hasShows flags
+ */
+function checkContentTypes(items) {
+  const hasMovies = items.hasMovies === true || (Array.isArray(items.movies) && items.movies.length > 0);
+  const hasShows = items.hasShows === true || (Array.isArray(items.shows) && items.shows.length > 0);
+  return { hasMovies, hasShows };
+}
+
+/**
+ * Parse and normalize a list ID
+ * @param {string} id - Raw list ID
+ * @returns {Object} Parsed list ID and type
+ */
+function parseListId(id) {
+  let listId = id;
+  let listType = null;
+  
+  // Check for the new ID format that includes list type
+  const listWithTypeMatch = id.match(/^aiolists-(\d+)-([ELW])$/);
+  if (listWithTypeMatch) {
+    listId = listWithTypeMatch[1];
+    listType = listWithTypeMatch[2];
+  } else if (listId.startsWith('aiolists-')) {
+    listId = listId.substring(9);
+  }
+
+  // Check if ID contains skip parameter
+  if (listId.includes('/skip=')) {
+    const parts = listId.split('/');
+    listId = parts[0];
+  }
+
+  return { listId, listType };
+}
+
+/**
+ * Filter metas by content type
+ * @param {Array} allMetas - All metadata items
+ * @param {string} type - Content type to filter by
+ * @returns {Array} Filtered metadata items
+ */
+function filterMetasByType(allMetas, type) {
+  if (type === 'movie') {
+    return allMetas.filter(item => item.type === 'movie');
+  } else if (type === 'series') {
+    return allMetas.filter(item => item.type === 'series');
+  }
+  return allMetas;
+}
+
+/**
+ * Create a standard response object
+ * @param {Array} metas - Metadata items
+ * @param {Object} items - Original items with content type info
+ * @param {string} listId - List ID
+ * @returns {Object} Standardized response object
+ */
+function createResponseObject(metas, items, listId) {
+  const { hasMovies, hasShows } = checkContentTypes(items);
+  return {
+    metas,
+    cacheMaxAge: isWatchlist(listId) ? 0 : CACHE_DURATIONS.REGULAR_CONTENT,
+    hasMovies,
+    hasShows
+  };
+}
+
+/**
+ * Set appropriate cache headers based on list type
+ * @param {Object} res - Response object
+ * @param {string} listId - List ID
+ */
+function setCacheHeaders(res, listId) {
+  if (isWatchlist(listId)) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  } else {
+    res.setHeader('Cache-Control', `max-age=${CACHE_DURATIONS.REGULAR_CONTENT}, public`);
+  }
+}
 
 /**
  * Generate cache key for lists
@@ -51,11 +155,8 @@ async function rebuildAddonWithConfig(config) {
 }
 
 function setupApiRoutes(app) {
-  // Root endpoint - serve the UI
-  app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, '..', '..', 'public', 'index.html'));
-  });
-
+  // Root endpoint is handled in index.js
+  
   // Serve UI for configure endpoint
   app.get('/:configHash/configure', (req, res) => {
     res.sendFile(path.join(__dirname, '..', '..', 'public', 'index.html'));
@@ -72,24 +173,26 @@ function setupApiRoutes(app) {
       const config = await decompressConfig(configHash);
       
       // Create a cache key for this manifest based on relevant config parts
-      // We only need to rebuild if lists, API keys, or imported addons change
       const manifestCacheKey = `manifest_${configHash}`;
       let manifest = null;
       
-      // Check if we have the manifest cached
-      if (metadataCache.has(manifestCacheKey)) {
+      // Check if we have the manifest cached with sufficient TTL (at least 5 minutes)
+      const remainingTTL = metadataCache.getRemainingTTL(manifestCacheKey);
+      if (remainingTTL > 300000) { // 5 minutes in milliseconds
         manifest = metadataCache.get(manifestCacheKey);
-      } else {
-        // If not cached, rebuild the addon interface
+      }
+      
+      if (!manifest) {
+        // If not cached or TTL too low, rebuild the addon interface
         const addonInterface = await rebuildAddonWithConfig(config);
         manifest = addonInterface.manifest;
         
-        // Cache the manifest
-        metadataCache.set(manifestCacheKey, manifest, 3600 * 1000); // Cache for 1 hour
+        // Cache the manifest for 1 hour
+        metadataCache.set(manifestCacheKey, manifest, 3600000); // 1 hour in milliseconds
       }
 
       // Set cache control headers
-      res.setHeader('Cache-Control', 'max-age=3600, public'); // Cache for 1 hour
+      res.setHeader('Cache-Control', 'max-age=3600, public'); // 1 hour
 
       // Add a timestamp to version to prevent aggressive caching
       const timestampedManifest = {
@@ -124,70 +227,37 @@ function setupApiRoutes(app) {
         }
       }
 
-      // Extract the list ID - handle both aiolists- and plain IDs
-      let listId = id;
-      let listType = null;
-      
-      // Check for the new ID format that includes list type
-      const listWithTypeMatch = id.match(/^aiolists-(\d+)-([ELW])$/);
-      if (listWithTypeMatch) {
-        listId = listWithTypeMatch[1];
-        listType = listWithTypeMatch[2];
-      } else if (listId.startsWith('aiolists-')) {
-        listId = listId.substring(9);
-      }
-
-      // Check if ID contains skip parameter
-      if (listId.includes('/skip=')) {
-        const parts = listId.split('/');
-        listId = parts[0];
-        const skipMatch = parts[1]?.match(/skip=(\d+)/);
-        if (skipMatch && skipMatch[1]) {
-          skip = parseInt(skipMatch[1]);
-        }
-      }
+      // Parse and normalize list ID
+      const { listId, listType } = parseListId(id);
 
       // Validate the list ID format
       if (!listId.match(/^[a-zA-Z0-9_-]+$/)) {
         return res.status(400).json({ error: 'Invalid catalog ID format' });
       }
 
-      // Check if this list is hidden - but don't block the content, just mark it for hiding in the main view
-      // This allows hidden lists to still be accessible through the Discover tab
+      // Check if this list is hidden
       const hiddenLists = new Set((config.hiddenLists || []).map(String));
-      // We won't return empty content here, just track if it's hidden
       const isHidden = hiddenLists.has(String(listId));
 
       // Get sort preferences for this list
       const sortPrefs = config.sortPreferences?.[listId] || { sort: 'imdbvotes', order: 'desc' };
 
-      // For watchlists, don't cache the response
-      if (listId === 'watchlist' || listId === 'watchlist-W' || listId === 'trakt_watchlist') {
-        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-        res.setHeader('Pragma', 'no-cache');
-        res.setHeader('Expires', '0');
-      } else {
-        // For regular metadata, cache for 1 day
-        res.setHeader('Cache-Control', `max-age=86400, public`);
-      }
+      // Set cache headers
+      setCacheHeaders(res, listId);
 
-      // Create cache key based on all relevant parameters
+      // Create cache key
       const cacheKey = getMetadataCacheKey(listId, skip, type, config.rpdbApiKey);
-      
-      // Add sort preferences to cache key if available
       const fullCacheKey = sortPrefs 
         ? `${cacheKey}_${sortPrefs.sort}_${sortPrefs.order}` 
         : cacheKey;
         
-      // Skip cache for watchlists which should always be fresh
-      const shouldUseCache = !(listId === 'watchlist' || listId === 'watchlist-W' || listId === 'trakt_watchlist');
-      
-      // Check cache first for non-watchlist items
+      // Check cache for non-watchlist items
+      const shouldUseCache = !isWatchlist(listId);
       if (shouldUseCache && metadataCache.has(fullCacheKey)) {
         return res.json(metadataCache.get(fullCacheKey));
       }
 
-      // For other external addons, fetch from their API
+      // For external addons, fetch from their API
       const addonCatalog = Object.values(config.importedAddons || {}).find(addon => 
         addon.catalogs.some(cat => cat.id === listId || cat.originalId === listId)
       );
@@ -195,9 +265,9 @@ function setupApiRoutes(app) {
       if (addonCatalog) {
         const catalog = addonCatalog.catalogs.find(cat => cat.id === listId || cat.originalId === listId);
         
-        // For MDBList imported URLs, fetch directly using our API
+        // For MDBList imported URLs
         if (addonCatalog.id.startsWith('mdblist_') && catalog?.url) {
-          // If we have a listType, set it in the metadata
+          // Update metadata if we have a listType
           if (listType) {
             if (!config.listsMetadata) config.listsMetadata = {};
             config.listsMetadata[listId] = {
@@ -205,46 +275,30 @@ function setupApiRoutes(app) {
               listType
             };
           }
+
           const items = await fetchListItems(listId, config.apiKey, config.listsMetadata, skip, sortPrefs.sort, sortPrefs.order);
           if (!items) {
             return res.json({ metas: [] });
           }
 
-          // Save content type information to config
+          // Update content type information
+          const { hasMovies, hasShows } = checkContentTypes(items);
           if (!config.listsMetadata) config.listsMetadata = {};
           if (!config.listsMetadata[listId]) config.listsMetadata[listId] = {};
-          
-          const hasMovies = items.hasMovies === true || (Array.isArray(items.movies) && items.movies.length > 0);
-          const hasShows = items.hasShows === true || (Array.isArray(items.shows) && items.shows.length > 0);
-          
           config.listsMetadata[listId].hasMovies = hasMovies;
           config.listsMetadata[listId].hasShows = hasShows;
           
-          console.log(`Catalog endpoint - updating metadata for ${listId}: hasMovies=${hasMovies}, hasShows=${hasShows}`);
-          
-          // Save the updated config with new metadata
+          // Save the updated config
           await compressConfig(config);
 
-          // Convert to Stremio format
+          // Convert and filter content
           const allMetas = await convertToStremioFormat(items, 0, ITEMS_PER_PAGE, config.rpdbApiKey);
-
-          // Filter by type
-          let filteredMetas = allMetas;
-          if (type === 'movie') {
-            filteredMetas = allMetas.filter(item => item.type === 'movie');
-          } else if (type === 'series') {
-            filteredMetas = allMetas.filter(item => item.type === 'series');
-          }
-
-          const result = {
-            metas: filteredMetas,
-            cacheMaxAge: listId.includes('watchlist') ? 0 : 86400,
-            // Include content type information
-            hasMovies: items.hasMovies === true || (Array.isArray(items.movies) && items.movies.length > 0),
-            hasShows: items.hasShows === true || (Array.isArray(items.shows) && items.shows.length > 0)
-          };
+          const filteredMetas = filterMetasByType(allMetas, type);
           
-          // Cache the result if it's not a watchlist
+          // Create response
+          const result = createResponseObject(filteredMetas, items, listId);
+          
+          // Cache if needed
           if (shouldUseCache) {
             metadataCache.set(fullCacheKey, result);
           }
@@ -252,19 +306,13 @@ function setupApiRoutes(app) {
           return res.json(result);
         }
 
-        // For other external addons, fetch from their API
+        // For other external addons
         const items = await fetchExternalAddonItems(listId, addonCatalog, skip, config.rpdbApiKey);
+        const result = createResponseObject(items, { 
+          hasMovies: items.some(i => i.type === 'movie'),
+          hasShows: items.some(i => i.type === 'series')
+        }, listId);
         
-        // Cache the result and return it
-        const result = {
-          metas: items,
-          cacheMaxAge: listId.includes('watchlist') ? 0 : 86400,
-          // Include content type information
-          hasMovies: items.hasMovies === true || (Array.isArray(items.movies) && items.movies.length > 0),
-          hasShows: items.hasShows === true || (Array.isArray(items.shows) && items.shows.length > 0)
-        };
-        
-        // Cache the result if it's not a watchlist
         if (shouldUseCache) {
           metadataCache.set(fullCacheKey, result);
         }
@@ -272,8 +320,7 @@ function setupApiRoutes(app) {
         return res.json(result);
       }
 
-      // For regular lists, fetch content normally
-      // If we have a listType, add it to the metadata
+      // For regular lists
       if (listType) {
         if (!config.listsMetadata) config.listsMetadata = {};
         config.listsMetadata[listId] = {
@@ -281,54 +328,34 @@ function setupApiRoutes(app) {
           listType
         };
       }
+
       const items = await fetchListContent(listId, config, config.importedAddons, skip, sortPrefs.sort, sortPrefs.order);
       if (!items) {
-        console.error(`No items returned for list ${listId}`);
         return res.json({ metas: [] });
       }
 
-      // Save content type information to config
+      // Update content type information
+      const { hasMovies, hasShows } = checkContentTypes(items);
       if (!config.listsMetadata) config.listsMetadata = {};
       if (!config.listsMetadata[listId]) config.listsMetadata[listId] = {};
-      
-      const hasMovies = items.hasMovies === true || (Array.isArray(items.movies) && items.movies.length > 0);
-      const hasShows = items.hasShows === true || (Array.isArray(items.shows) && items.shows.length > 0);
-      
       config.listsMetadata[listId].hasMovies = hasMovies;
       config.listsMetadata[listId].hasShows = hasShows;
       
-      console.log(`Catalog endpoint - updating metadata for ${listId}: hasMovies=${hasMovies}, hasShows=${hasShows}`);
-      
-      // Save the updated config with new metadata
       await compressConfig(config);
 
-      // Convert to Stremio format with RPDB posters
+      // Convert and filter content
       const allMetas = await convertToStremioFormat(items, 0, ITEMS_PER_PAGE, config.rpdbApiKey);
-
-      // Filter by type
-      let filteredMetas = allMetas;
-      if (type === 'movie') {
-        filteredMetas = allMetas.filter(item => item.type === 'movie');
-      } else if (type === 'series') {
-        filteredMetas = allMetas.filter(item => item.type === 'series');
-      }
-
-      // Prepare response
-      const result = {
-        metas: filteredMetas,
-        cacheMaxAge: listId.includes('watchlist') ? 0 : 86400,
-        // Include content type information
-        hasMovies: items.hasMovies === true || (Array.isArray(items.movies) && items.movies.length > 0),
-        hasShows: items.hasShows === true || (Array.isArray(items.shows) && items.shows.length > 0)
-      };
+      const filteredMetas = filterMetasByType(allMetas, type);
       
-      // Cache the result if it's not a watchlist
+      // Create response
+      const result = createResponseObject(filteredMetas, items, listId);
+      
+      // Cache if needed
       if (shouldUseCache) {
         metadataCache.set(fullCacheKey, result);
       }
       
-      // Return response
-      res.json(result);
+      return res.json(result);
     } catch (error) {
       console.error('Error in catalog endpoint:', error);
       res.status(500).json({ error: 'Internal server error' });
@@ -409,7 +436,41 @@ function setupApiRoutes(app) {
       };
       
       const newConfigHash = await compressConfig(updatedConfig);
-      await rebuildAddonWithConfig(updatedConfig);
+
+      // Only clear the manifest cache since we're only adding Trakt lists
+      const manifestCacheKey = `manifest_${newConfigHash}`;
+      metadataCache.delete(manifestCacheKey);
+      
+      // Don't rebuild the entire addon, just fetch Trakt lists and add them
+      const traktLists = await fetchTraktLists(updatedConfig);
+      
+      // Update lists cache if it exists
+      const listsCacheKey = getListsCacheKey(configHash);
+      const existingListsCache = listsCache.get(listsCacheKey);
+      if (existingListsCache) {
+        // Add Trakt lists to existing cached lists
+        const updatedLists = {
+          ...existingListsCache,
+          lists: [...existingListsCache.lists, ...traktLists.map(list => ({
+            id: list.id,
+            name: list.name,
+            customName: null,
+            isHidden: false,
+            isMovieList: true, // Trakt lists can contain both by default
+            isShowList: true,
+            isExternalList: false,
+            listType: list.listType || 'T',
+            isTraktList: true,
+            isWatchlist: list.isWatchlist,
+            tag: list.listType || 'T',
+            hasMovies: true,
+            hasShows: true,
+            isMerged: true,
+            sortPreferences: { sort: 'imdbvotes', order: 'desc' }
+          }))]
+        };
+        listsCache.set(listsCacheKey, updatedLists);
+      }
       
       res.json({
         success: true,
@@ -439,13 +500,22 @@ function setupApiRoutes(app) {
         lastUpdated: new Date().toISOString()
       };
 
-      // Remove Trakt lists from manifest
-      if (updatedConfig.lists) {
-        updatedConfig.lists = updatedConfig.lists.filter(list => !list.isTraktList);
-      }
-      
       const newConfigHash = await compressConfig(updatedConfig);
-      await rebuildAddonWithConfig(updatedConfig);
+
+      // Only clear the manifest cache since we're only removing Trakt lists
+      const manifestCacheKey = `manifest_${newConfigHash}`;
+      metadataCache.delete(manifestCacheKey);
+      
+      // Update lists cache if it exists by removing Trakt lists
+      const listsCacheKey = getListsCacheKey(configHash);
+      const existingListsCache = listsCache.get(listsCacheKey);
+      if (existingListsCache) {
+        const updatedLists = {
+          ...existingListsCache,
+          lists: existingListsCache.lists.filter(list => !list.isTraktList)
+        };
+        listsCache.set(listsCacheKey, updatedLists);
+      }
       
       res.json({
         success: true,
@@ -487,16 +557,21 @@ function setupApiRoutes(app) {
       const { configHash } = req.params;
       const { apiKey, rpdbApiKey } = req.body;
       
-      // Remove validation check to allow empty API key for disconnection
       const config = await decompressConfig(configHash);
       
-      // Check if RPDB API key has changed
+      // Only clear caches if the keys have actually changed
       if (config.rpdbApiKey !== rpdbApiKey) {
         // Clear both poster and metadata caches when RPDB API key changes
         const { clearPosterCache } = require('../utils/posters');
         clearPosterCache();
         metadataCache.clear();
-        console.log('Cleared both poster and metadata caches due to RPDB API key change');
+        console.log('Cleared poster and metadata caches due to RPDB API key change');
+      }
+
+      // Only clear list cache if MDBList API key changes
+      if (config.apiKey !== apiKey) {
+        listsCache.clear();
+        console.log('Cleared lists cache due to MDBList API key change');
       }
       
       const updatedConfig = {
@@ -533,14 +608,22 @@ function setupApiRoutes(app) {
       
       // Fetch MDBList lists if API key is provided
       if (config.apiKey) {
-        const mdbLists = await fetchAllLists(config.apiKey);
-        allLists = [...allLists, ...mdbLists];
+        try {
+          const mdbLists = await fetchAllLists(config.apiKey);
+          allLists = [...allLists, ...mdbLists];
+        } catch (error) {
+          console.error('Error fetching MDBList lists:', error);
+        }
       }
       
       // Fetch Trakt lists if token is provided
       if (config.traktAccessToken) {
-        const traktLists = await fetchTraktLists(config);
-        allLists = [...allLists, ...traktLists];
+        try {
+          const traktLists = await fetchTraktLists(config);
+          allLists = [...allLists, ...traktLists];
+        } catch (error) {
+          console.error('Error fetching Trakt lists:', error);
+        }
       }
       
       // Convert removed lists to a Set for quicker lookup
@@ -549,60 +632,45 @@ function setupApiRoutes(app) {
       // Filter out completely removed lists
       allLists = allLists.filter(list => !removedLists.has(String(list.id)));
       
-      // For lists that don't have content type info, try to fetch it
-      for (const list of allLists) {
-        const listId = String(list.id);
-        
-        // Check if we already have metadata for this list
-        if (!config.listsMetadata?.[listId]?.hasOwnProperty('hasMovies') ||
-            !config.listsMetadata?.[listId]?.hasOwnProperty('hasShows')) {
-          
-          try {
-            console.log(`Fetching content types for list ${listId}`);
-            // Fetch first page to determine content types
-            const listContent = await fetchListContent(listId, config, config.importedAddons, 0);
-            
-            if (listContent) {
-              if (!config.listsMetadata) config.listsMetadata = {};
-              if (!config.listsMetadata[listId]) config.listsMetadata[listId] = {};
-              
-              // Set content type flags based on actual content
-              config.listsMetadata[listId].hasMovies = !!(listContent.hasMovies === true || 
-                (Array.isArray(listContent.movies) && listContent.movies.length > 0));
-              
-              config.listsMetadata[listId].hasShows = !!(listContent.hasShows === true || 
-                (Array.isArray(listContent.shows) && listContent.shows.length > 0));
-              
-              console.log(`Set content types for ${listId}: movies=${config.listsMetadata[listId].hasMovies}, shows=${config.listsMetadata[listId].hasShows}`);
-            }
-          } catch (error) {
-            console.error(`Failed to fetch content types for list ${listId}:`, error);
-          }
-        }
-      }
-      
-      // Process lists with updated metadata
+      // Process lists with metadata
       const lists = allLists.map(list => {
         const listId = String(list.id);
         const metadata = config.listsMetadata?.[listId] || {};
+        
+        // For external lists, we can determine content types from the list type
+        let hasMovies = false;
+        let hasShows = false;
+        
+        if (list.isExternalList) {
+          hasMovies = list.isMovieList || metadata.hasMovies === true;
+          hasShows = list.isShowList || metadata.hasShows === true;
+        } else {
+          // For internal lists and watchlists, use the metadata if available
+          hasMovies = metadata.hasMovies === true;
+          hasShows = metadata.hasShows === true;
+          
+          // If no metadata and it's a watchlist, assume both types are possible
+          if (list.isWatchlist && !metadata.hasOwnProperty('hasMovies')) {
+            hasMovies = true;
+            hasShows = true;
+          }
+        }
         
         return {
           id: listId,
           name: list.name,
           customName: config.customListNames?.[listId] || null,
           isHidden: (config.hiddenLists || []).includes(listId),
-          isMovieList: list.isMovieList,
-          isShowList: list.isShowList,
+          isMovieList: list.isMovieList || hasMovies,
+          isShowList: list.isShowList || hasShows,
           isExternalList: list.isExternalList,
           listType: list.listType || 'L',
           isTraktList: list.isTraktList,
           isWatchlist: list.isWatchlist,
           tag: list.listType || 'L',
-          // Add content type information - only set to true when explicitly true
-          hasMovies: metadata.hasMovies === true,
-          hasShows: metadata.hasShows === true,
-          // Add merged preference
-          isMerged: config.mergedLists?.[listId] !== false, // Default to merged if not specified
+          hasMovies,
+          hasShows,
+          isMerged: config.mergedLists?.[listId] !== false,
           sortPreferences: config.sortPreferences?.[listId] || { sort: 'imdbvotes', order: 'desc' }
         };
       });
@@ -612,25 +680,33 @@ function setupApiRoutes(app) {
         for (const addon of Object.values(config.importedAddons)) {
           const addonLists = addon.catalogs
             .filter(catalog => !removedLists.has(String(catalog.id)))
-            .map(catalog => ({
-              id: String(catalog.id),
-              name: catalog.name,
-              customName: config.customListNames?.[String(catalog.id)] || null,
-              isHidden: (config.hiddenLists || []).includes(String(catalog.id)),
-              isMovieList: catalog.type === 'movie',
-              isShowList: catalog.type === 'series' || catalog.type === 'anime',
-              isExternalList: true,
-              listType: 'A',
-              addonId: addon.id,
-              addonName: addon.name,
-              addonLogo: addon.logo || null,
-              tag: 'A',
-              tagImage: addon.logo,
-              // Set hasMovies and hasShows based on catalog type
-              hasMovies: catalog.type === 'movie' || catalog.type === 'all',
-              hasShows: catalog.type === 'series' || catalog.type === 'anime' || catalog.type === 'all',
-              sortPreferences: config.sortPreferences?.[String(catalog.id)] || { sort: 'imdbvotes', order: 'desc' }
-            }));
+            .map(catalog => {
+              const catalogId = String(catalog.id);
+              const metadata = config.listsMetadata?.[catalogId] || {};
+              
+              // Determine content types based on catalog type
+              const hasMovies = catalog.type === 'movie' || catalog.type === 'all' || metadata.hasMovies === true;
+              const hasShows = catalog.type === 'series' || catalog.type === 'anime' || catalog.type === 'all' || metadata.hasShows === true;
+              
+              return {
+                id: catalogId,
+                name: catalog.name,
+                customName: config.customListNames?.[catalogId] || null,
+                isHidden: (config.hiddenLists || []).includes(catalogId),
+                isMovieList: hasMovies,
+                isShowList: hasShows,
+                isExternalList: true,
+                listType: 'A',
+                addonId: addon.id,
+                addonName: addon.name,
+                addonLogo: addon.logo || null,
+                tag: 'A',
+                tagImage: addon.logo,
+                hasMovies,
+                hasShows,
+                sortPreferences: config.sortPreferences?.[catalogId] || { sort: 'imdbvotes', order: 'desc' }
+              };
+            });
           lists.push(...addonLists);
         }
       }
@@ -753,9 +829,12 @@ function setupApiRoutes(app) {
       
       const newConfigHash = await compressConfig(updatedConfig);
       
-      // Don't rebuild the full addon for visibility changes - these are UI-only changes
-      // and don't require refetching content from APIs
-      // await rebuildAddonWithConfig(updatedConfig);
+      // Clear the manifest cache since visibility affects the manifest
+      const manifestCacheKey = `manifest_${newConfigHash}`;
+      metadataCache.delete(manifestCacheKey);
+      
+      // Rebuild the addon to update the catalogs with new visibility settings
+      await rebuildAddonWithConfig(updatedConfig);
       
       res.json({
         success: true,

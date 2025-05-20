@@ -72,4 +72,4 @@ module.exports = {
   defaultConfig,
   storeListsMetadata,
   ITEMS_PER_PAGE
-}; 
+};

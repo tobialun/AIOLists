@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { fetchPosterFromRPDB, batchFetchPosters } = require('../utils/posters');
+const { batchFetchPosters } = require('../utils/posters');
 
 /**
  * Represents an external addon with its manifest and metadata endpoints

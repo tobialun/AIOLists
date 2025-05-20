@@ -8,6 +8,18 @@ const Cache = require('../cache');
 const addonCache = new Cache({ defaultTTL: 60 * 60 * 1000 }); // 1 hour
 
 /**
+ * Check if a list ID represents a watchlist
+ * @param {string} listId - List ID to check
+ * @returns {boolean} Whether the list is a watchlist
+ */
+function isWatchlist(listId) {
+  return listId === 'watchlist' || 
+         listId === 'watchlist-W' || 
+         listId === 'trakt_watchlist' ||
+         listId === 'aiolists-watchlist-W';
+}
+
+/**
  * Generate cache key for catalog content
  * @param {string} type - Content type
  * @param {string} id - Catalog ID
@@ -16,6 +28,21 @@ const addonCache = new Cache({ defaultTTL: 60 * 60 * 1000 }); // 1 hour
  */
 function getCatalogCacheKey(type, id, skip) {
   return `catalog_${type}_${id}_${skip}`;
+}
+
+/**
+ * Set appropriate cache headers based on list type
+ * @param {Object} res - Response object
+ * @param {string} listId - List ID
+ */
+function setCacheHeaders(res, listId) {
+  if (isWatchlist(listId)) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  } else {
+    res.setHeader('Cache-Control', 'max-age=86400, public');
+  }
 }
 
 function setupAddonRoutes(app, userConfig, cache, addonInterface) {
@@ -56,15 +83,8 @@ function setupAddonRoutes(app, userConfig, cache, addonInterface) {
       const skipMatch = extra.match(/skip=(\d+)/);
       const skip = skipMatch ? parseInt(skipMatch[1]) : 0;
       
-      // For watchlists, don't cache the response
-      if (id === 'watchlist' || id === 'watchlist-W' || id === 'aiolists-watchlist-W' || id === 'trakt_watchlist') {
-        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-        res.setHeader('Pragma', 'no-cache');
-        res.setHeader('Expires', '0');
-      } else {
-        // For regular metadata, cache for 1 day
-        res.setHeader('Cache-Control', `max-age=86400, public`);
-      }
+      // Set cache headers
+      setCacheHeaders(res, id);
       
       // Check cache first
       const cacheKey = getCatalogCacheKey(type, id, skip);
@@ -93,11 +113,11 @@ function setupAddonRoutes(app, userConfig, cache, addonInterface) {
       
       const result = { 
         metas,
-        cacheMaxAge: id.includes('watchlist') ? 0 : 86400
+        cacheMaxAge: isWatchlist(id) ? 0 : 86400
       };
       
       // Cache the result, but don't cache watchlists
-      if (!(id === 'watchlist' || id === 'watchlist-W' || id === 'aiolists-watchlist-W' || id.includes('trakt_watchlist'))) {
+      if (!isWatchlist(id)) {
         addonCache.set(cacheKey, result);
       }
       
