@@ -173,7 +173,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const rpdbApiKey = elements.rpdbApiKeyInput?.value?.trim() || state.userConfig.rpdbApiKey;
         
         // Import a single catalog - type will be determined by content
-        const response = await fetch(`/api/config/${state.configHash}/import-mdblist-url`, {
+        const response = await fetch(`/${state.configHash}/import-mdblist-url`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
@@ -281,7 +281,7 @@ document.addEventListener('DOMContentLoaded', function() {
         elements.mdblistConnectedText.textContent = `Connected as ${results.mdblist.username}`;
         
         // Automatically save the valid API keys
-        const saveResponse = await fetch(`/api/config/${state.configHash}/apikey`, {
+        const saveResponse = await fetch(`/${state.configHash}/apikey`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ apiKey, rpdbApiKey })
@@ -581,7 +581,7 @@ document.addEventListener('DOMContentLoaded', function() {
     showSectionNotification('lists', 'Saving order changes...', true);
     
     try {
-      const response = await fetch(`/api/config/${state.configHash}/lists/order`, {
+      const response = await fetch(`/${state.configHash}/lists/order`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ order })
@@ -641,7 +641,7 @@ document.addEventListener('DOMContentLoaded', function() {
   // ==================== LIST OPERATIONS ====================
   async function updateListName(listId, newName) {
     try {
-      const response = await fetch(`/api/config/${state.configHash}/lists/names`, {
+      const response = await fetch(`/${state.configHash}/lists/names`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ listId, customName: newName })
@@ -927,7 +927,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     try {
       const hiddenLists = Array.from(state.userConfig.hiddenLists).map(String);
-      const response = await fetch(`/api/config/${state.configHash}/lists/visibility`, {
+      const response = await fetch(`/${state.configHash}/lists/visibility`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ hiddenLists })
@@ -960,7 +960,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     try {
-      const response = await fetch(`/api/config/${state.configHash}/trakt/auth`, {
+      const response = await fetch(`/${state.configHash}/trakt/auth`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: pin })
@@ -992,7 +992,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     try {
-      const response = await fetch(`/api/config/${state.configHash}/import-addon`, {
+      const response = await fetch(`/${state.configHash}/import-addon`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ manifestUrl })
@@ -1015,7 +1015,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
   window.removeAddon = async function(addonId) {
     try {
-      const response = await fetch(`/api/config/${state.configHash}/remove-addon`, {
+      const response = await fetch(`/${state.configHash}/remove-addon`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ addonId })
@@ -1262,7 +1262,7 @@ document.addEventListener('DOMContentLoaded', function() {
   window.disconnectMDBList = async function() {
     try {
       // First clear the API key from config
-      const response = await fetch(`/api/config/${state.configHash}/apikey`, {
+      const response = await fetch(`/${state.configHash}/apikey`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -1304,7 +1304,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
   window.disconnectRPDB = async function() {
     try {
-      const response = await fetch(`/api/config/${state.configHash}/apikey`, {
+      const response = await fetch(`/${state.configHash}/apikey`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -1382,7 +1382,7 @@ document.addEventListener('DOMContentLoaded', function() {
   // Add disconnect functions to window scope
   window.disconnectTrakt = async function() {
     try {
-      const response = await fetch(`/api/config/${state.configHash}/trakt/disconnect`, {
+      const response = await fetch(`/${state.configHash}/trakt/disconnect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
@@ -1440,7 +1440,7 @@ document.addEventListener('DOMContentLoaded', function() {
   // Add the updateSortPreferences function
   async function updateSortPreferences(listId, sort, order) {
     try {
-      const response = await fetch(`/api/config/${state.configHash}/lists/sort`, {
+      const response = await fetch(`/${state.configHash}/lists/sort`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ listId, sort, order })
@@ -1471,7 +1471,7 @@ document.addEventListener('DOMContentLoaded', function() {
     try {
       showSectionNotification('lists', 'Removing list...', true);
       
-      const response = await fetch(`/api/config/${state.configHash}/lists/remove`, {
+      const response = await fetch(`/${state.configHash}/lists/remove`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ listIds: [listId] })
@@ -1521,7 +1521,7 @@ document.addEventListener('DOMContentLoaded', function() {
       button.disabled = true;
       
       // Update server config
-      const response = await fetch(`/api/config/${state.configHash}/lists/merge`, {
+      const response = await fetch(`/${state.configHash}/lists/merge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 

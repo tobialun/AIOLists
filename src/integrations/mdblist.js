@@ -97,132 +97,113 @@ async function fetchAllLists(apiKey) {
  * @param {string} [order='desc'] - Sort order (asc or desc)
  * @returns {Promise<Object>} Object with movies and shows
  */
-async function fetchListItems(listId, apiKey, listsMetadata, skip = 0, sort = 'imdbvotes', order = 'desc') {
+async function fetchListItems(listId, apiKey, listsMetadata, skip = 0, sort = 'imdbvotes', order = 'desc', isUrlImported = false) {
   if (!apiKey) return null;
-  
+
   try {
-    // Remove aiolists- prefix and extract type if present
-    const match = listId.match(/^aiolists-(\d+)-([ELW])$/);
-    const id = match ? match[1] : listId.replace(/^aiolists-/, '');
-    const listType = match ? match[2] : null;
-    
-    console.log(`Fetching list items for ID: ${id}, type: ${listType}, skip: ${skip}`);
-    
-    // Special case for watchlist
-    if (id === 'watchlist' || id === 'watchlist-W') {
-      try {
-        console.log('Fetching watchlist items');
-        const response = await axios.get(`https://api.mdblist.com/watchlist/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
-        if (response.status === 429) {
-          console.error('Rate limited by MDBList API. Please wait a moment before trying again.');
-          return null;
-        }
-        return processApiResponse(response.data);
-      } catch (error) {
-        if (error.response?.status === 429) {
-          console.error('Rate limited by MDBList API. Please wait a moment before trying again.');
-          return null;
-        }
-        throw error;
-      }
-    }
+      const match = listId.match(/^aiolists-(\d+)-([ELW])$/);
+      const id = match ? match[1] : listId.replace(/^aiolists-/, ''); // Rent ID
+      const listTypeFromIdString = match ? match[2] : null; // Typ från ID-strängen (kan vara null)
 
-    // When importing from URL, use internal endpoint
-    if (listsMetadata && listsMetadata._importingUrl) {
-      console.log(`Fetching INTERNAL list for URL import: ${id}`);
-      try {
-        const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
-        if (response.status === 200 && !response.data.error) {
-          console.log(`Successfully fetched internal list ${id} for URL import`);
-          return processApiResponse(response.data);
-        }
-      } catch (error) {
-        console.error(`Error fetching internal list ${id} for URL import:`, error.message);
-        return null;
-      }
-    }
+      // Utökad loggning för bättre felsökning
+      console.log(`MDBList fetchListItems - Input listId: ${listId}, Cleaned ID: ${id}, Type from ID string: ${listTypeFromIdString}, Skip: ${skip}, isUrlImported: ${isUrlImported}`);
 
-    // Get metadata for this list
-    const metadata = listsMetadata && listsMetadata[id];
-    if (!metadata) {
-      console.log(`No metadata for list ${id}, fetching all lists to determine type...`);
-      // Fetch list metadata if not available
-      const allLists = await fetchAllLists(apiKey);
-      const list = allLists.find(l => l.id === id);
-      
-      if (!list) {
-        console.error(`List ${id} not found in user's lists`);
-        return null;
+      if (id === 'watchlist' || id === 'watchlist-W') {
+          console.log('Fetching MDBList watchlist items');
+          try {
+              const response = await axios.get(`https://api.mdblist.com/watchlist/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
+              if (response.status === 429) {
+                  console.error('Rate limited by MDBList API for watchlist. Please wait a moment before trying again.');
+                  return null;
+              }
+              return processApiResponse(response.data);
+          } catch (error) {
+              if (error.response?.status === 429) {
+                  console.error('Rate limited by MDBList API for watchlist. Please wait a moment before trying again.');
+                  return null;
+              }
+              console.error(`Error fetching MDBList watchlist:`, error.message);
+              return null;
+          }
       }
-      
-      console.log(`List ${id} found with listType: ${list.listType}`);
-      
-      // Use the listType from fetchAllLists or the one from the ID
-      const effectiveListType = listType || list.listType;
-      console.log(`Using list type: ${effectiveListType}`);
-      
-      if (effectiveListType === 'E') {
-        console.log(`Fetching EXTERNAL list ${id}`);
-        try {
-          const response = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
-          if (response.status === 200 && !response.data.error) {
-            console.log(`Successfully fetched external list ${id}`);
-            return processApiResponse(response.data);
+
+      let effectiveListType;
+
+      if (isUrlImported) {
+          // URL-importerade publika MDBLists hämtas alltid via den "interna" list-API:n, vilket motsvarar typ 'L'.
+          effectiveListType = 'L';
+          console.log(`Workspaceing MDBList (URL imported): ${id} as type ${effectiveListType}`);
+          try {
+              const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
+              if (response.status === 200 && !response.data.error) {
+                  console.log(`Successfully fetched MDBList ${id} (URL import)`);
+                  return processApiResponse(response.data);
+              }
+              console.error(`Failed to fetch MDBList ${id} (URL import). Status: ${response.status}, Data: ${JSON.stringify(response.data)}`);
+              return null;
+          } catch (error) {
+              console.error(`Error fetching MDBList ${id} (URL import):`, error.message);
+              return null;
           }
-        } catch (error) {
-          console.error(`Error fetching external list ${id}:`, error.message);
-          return null;
-        }
-      } else if (effectiveListType === 'L') {
-        console.log(`Fetching INTERNAL list ${id}`);
-        try {
-          const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
-          if (response.status === 200 && !response.data.error) {
-            console.log(`Successfully fetched internal list ${id}`);
-            return processApiResponse(response.data);
+      } else {
+          // Logik för användarens personliga listor (ej URL-importerade)
+          const metadata = listsMetadata && listsMetadata[String(id)]; // Säkerställ att id är en sträng för lookup
+
+          if (metadata && metadata.listType) {
+              effectiveListType = metadata.listType;
+              console.log(`Using MDBList type from metadata: ${effectiveListType} for list ${id}`);
+          } else if (listTypeFromIdString) { // Använd typen från ID-strängen om den finns
+              effectiveListType = listTypeFromIdString;
+              console.log(`Using MDBList type from ID string: ${effectiveListType} for list ${id}`);
+          } else {
+              // Om ingen metadata och ingen typ i ID-strängen, hämta alla listor för att bestämma typ
+              console.log(`No MDBList metadata for list ${id} and no type in ID string, fetching all lists to determine type...`);
+              const allLists = await fetchAllLists(apiKey);
+              const listObj = allLists.find(l => String(l.id) === String(id));
+
+              if (!listObj || !listObj.listType) {
+                  console.error(`MDBList ${id} not found in user's personal lists or listType missing in fetched object.`);
+                  return null;
+              }
+              effectiveListType = listObj.listType;
+              console.log(`MDBList ${id} found in allLists with listType: ${effectiveListType}`);
           }
-        } catch (error) {
-          console.error(`Error fetching internal list ${id}:`, error.message);
-          return null;
-        }
+
+          // Använd nu effectiveListType för API-anrop
+          if (effectiveListType === 'E') {
+              console.log(`Workspaceing EXTERNAL MDBList ${id}`);
+              try {
+                  const response = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
+                  if (response.status === 200 && !response.data.error) {
+                      return processApiResponse(response.data);
+                  }
+                  console.error(`Failed to fetch EXTERNAL MDBList ${id}. Status: ${response.status}, Data: ${JSON.stringify(response.data)}`);
+                  return null;
+              } catch (error) {
+                  console.error(`Error fetching EXTERNAL MDBList ${id}:`, error.message);
+                  return null;
+              }
+          } else if (effectiveListType === 'L') {
+              console.log(`Workspaceing INTERNAL MDBList ${id}`);
+               try {
+                  const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
+                  if (response.status === 200 && !response.data.error) {
+                      return processApiResponse(response.data);
+                  }
+                  console.error(`Failed to fetch INTERNAL MDBList ${id}. Status: ${response.status}, Data: ${JSON.stringify(response.data)}`);
+                  return null;
+              } catch (error) {
+                  console.error(`Error fetching INTERNAL MDBList ${id}:`, error.message);
+                  return null;
+              }
+          } else {
+              console.error(`Unknown or undefined effectiveListType ('${effectiveListType}') for MDBList ID ${id}`);
+              return null;
+          }
       }
-    } else {
-      // Use the metadata listType or the one from the ID
-      const effectiveListType = listType || metadata.listType;
-      console.log(`Using list type from metadata: ${effectiveListType}`);
-      
-      if (effectiveListType === 'E') {
-        console.log(`Fetching EXTERNAL list ${id} (Type E)`);
-        try {
-          const response = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
-          if (response.status === 200 && !response.data.error) {
-            console.log(`Successfully fetched external list ${id}`);
-            return processApiResponse(response.data);
-          }
-        } catch (error) {
-          console.error(`Error fetching external list ${id}:`, error.message);
-          return null;
-        }
-      } else if (effectiveListType === 'L') {
-        console.log(`Fetching INTERNAL list ${id} (Type L)`);
-        try {
-          const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
-          if (response.status === 200 && !response.data.error) {
-            console.log(`Successfully fetched internal list ${id}`);
-            return processApiResponse(response.data);
-          }
-        } catch (error) {
-          console.error(`Error fetching internal list ${id}:`, error.message);
-          return null;
-        }
-      }
-    }
-    
-    console.error(`Failed to fetch list ${id}`);
-    return null;
   } catch (error) {
-    console.error(`Error in fetchListItems for ${listId}:`, error);
-    return null;
+      console.error(`Critical error in fetchListItems for MDBList ID ${listId}:`, error);
+      return null;
   }
 }
 

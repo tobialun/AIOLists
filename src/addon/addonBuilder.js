@@ -14,13 +14,13 @@ async function fetchListContent(listId, userConfig, skip = 0) {
   const { apiKey, traktAccessToken, listsMetadata, sortPreferences, importedAddons } = userConfig;
   const sortPrefs = sortPreferences?.[listId] || { sort: 'imdbvotes', order: 'desc' };
 
-  // Hantera importerade externa tillägg
   if (importedAddons) {
     for (const addon of Object.values(importedAddons)) {
       const catalog = addon.catalogs.find(c => c.id === listId || c.originalId === listId);
       if (catalog) {
-        if (addon.id.startsWith('mdblist_') && catalog.url && apiKey) { // MDBList URL import
-          return fetchMDBListItems(catalog.originalId || listId, apiKey, listsMetadata, skip, sortPrefs.sort, sortPrefs.order);
+        if (addon.id.startsWith('mdblisturl_') && catalog.url && apiKey) { // MDBList URL import
+          // Skicka med true för en ny parameter, t.ex. isUrlImported
+          return fetchMDBListItems(catalog.originalId || listId, apiKey, listsMetadata, skip, sortPrefs.sort, sortPrefs.order, true);
         }
         return fetchExternalAddonItems(catalog.originalId || listId, addon, skip, userConfig.rpdbApiKey);
       }
@@ -93,36 +93,54 @@ async function createAddon(userConfig) {
 
     let displayName = customListNames[listIdStr] || list.name;
     let catalogId = listIdStr;
-
-    // Skapa unika katalog-ID för MDBList för att undvika konflikter, behåll Trakt-ID som de är
     if (list.source === 'mdblist') {
         catalogId = list.id === 'watchlist' ? `aiolists-watchlist-W` : `aiolists-${list.id}-${list.listType || 'L'}`;
     }
     
     const metadata = userConfig.listsMetadata?.[listIdStr] || {};
-    let hasMovies = metadata.hasMovies !== false; // Anta true om inte specificerat
-    let hasShows = metadata.hasShows !== false;  // Anta true om inte specificerat
+    let hasMovies = metadata.hasMovies;
+    let hasShows = metadata.hasShows; 
 
-    // Om metadata saknas, försök att bestämma typer (kräver API-anrop, kan vara långsamt)
-    // För optimering: förlita dig på att frontend uppdaterar listsMetadata
-    if (!metadata.hasOwnProperty('hasMovies') || !metadata.hasOwnProperty('hasShows')) {
+    if (typeof hasMovies !== 'boolean' || typeof hasShows !== 'boolean') {
+        console.log(`Metadata for ${listIdStr} types (hasMovies/hasShows) is missing or incomplete. Attempting to fetch content to determine types.`);
         const tempContent = await fetchListContent(listIdStr, userConfig, 0);
+
         if (tempContent) {
             hasMovies = tempContent.movies?.length > 0 || tempContent.hasMovies === true;
             hasShows = tempContent.shows?.length > 0 || tempContent.hasShows === true;
-            if (userConfig.listsMetadata) { // Se till att listsMetadata existerar
-                 userConfig.listsMetadata[listIdStr] = { ...metadata, hasMovies, hasShows };
+            if (userConfig.listsMetadata) {
+                userConfig.listsMetadata[listIdStr] = { ...(userConfig.listsMetadata[listIdStr] || {}), hasMovies, hasShows };
             }
+            console.log(`For list ${listIdStr}, determined hasMovies: ${hasMovies}, hasShows: ${hasShows}`);
+        } else {
+            console.warn(`Could not fetch tempContent for list ${listIdStr} to determine types. Defaulting to allow catalog creation based on list properties or general assumptions.`);
+            
+            if (list.isMovieList === true) {
+                hasMovies = true;
+                hasShows = false;
+            } else if (list.isShowList === true) {
+                hasMovies = false;
+                hasShows = true;
+            } else {
+                hasMovies = true;
+                hasShows = true; 
+            }
+            console.log(`Defaulted for ${listIdStr} - hasMovies: ${hasMovies}, hasShows: ${hasShows}`);
         }
     }
     
-    const shouldMerge = mergedLists[listIdStr] !== false; // Standard till merged
+    // Lägg bara till katalogen om den antas ha antingen filmer eller serier
+    if (hasMovies || hasShows) {
+        const shouldMerge = mergedLists[listIdStr] !== false; // Standard till merged
 
-    if (hasMovies && hasShows && shouldMerge) {
-      manifest.catalogs.push({ type: 'all', id: catalogId, name: displayName, extraSupported: ["skip"], extraRequired: ["skip"] });
+        if (hasMovies && hasShows && shouldMerge) {
+          manifest.catalogs.push({ type: 'all', id: catalogId, name: displayName, extraSupported: ["skip"], extraRequired: [] });
+        } else {
+          if (hasMovies) manifest.catalogs.push({ type: 'movie', id: catalogId, name: displayName, extraSupported: ["skip"], extraRequired: [] });
+          if (hasShows) manifest.catalogs.push({ type: 'series', id: catalogId, name: displayName, extraSupported: ["skip"], extraRequired: [] });
+        }
     } else {
-      if (hasMovies) manifest.catalogs.push({ type: 'movie', id: catalogId, name: displayName, extraSupported: ["skip"], extraRequired: ["skip"] });
-      if (hasShows) manifest.catalogs.push({ type: 'series', id: catalogId, name: displayName, extraSupported: ["skip"], extraRequired: ["skip"] });
+        console.log(`Skipping catalog for ${listIdStr} as it was determined to have no content after initial check.`);
     }
   }
 
