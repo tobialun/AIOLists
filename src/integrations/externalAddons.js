@@ -1,20 +1,16 @@
+// src/integrations/externalAddons.js
 const axios = require('axios');
-const { batchFetchPosters } = require('../utils/posters');
+const { batchFetchPosters } = require('../utils/posters'); // Assuming posters.js is in the same utils directory
 
-/**
- * Represents an external addon with its manifest and metadata endpoints
- */
+// ... rest of your externalAddons.js file
 class ExternalAddon {
   constructor(manifestUrl) {
     this.manifestUrl = this.normalizeUrl(manifestUrl);
     this.manifest = null;
     this.baseUrl = '';
-    this.configPath = '';
+    this.configPath = ''; // Stores the /<configHash> part if present in the original manifest URL
   }
 
-  /**
-   * Normalize Stremio URLs to HTTPS
-   */
   normalizeUrl(url) {
     if (url.startsWith('stremio://')) {
       return 'https://' + url.substring(10);
@@ -22,286 +18,147 @@ class ExternalAddon {
     return url;
   }
 
-  /**
-   * Extract base URL and config path from manifest URL
-   */
   parseManifestUrl() {
-    const urlParts = this.manifestUrl.split('/manifest.json')[0].split('/');
-    this.baseUrl = urlParts.slice(0, 3).join('/');
-    this.configPath = urlParts.length > 3 ? '/' + urlParts.slice(3).join('/') : '';
+    const url = new URL(this.manifestUrl);
+    this.baseUrl = `${url.protocol}//${url.host}`;
+    // Pathname might be /<config>/manifest.json or just /manifest.json
+    // We want to capture the part between the host and /manifest.json
+    const pathSegments = url.pathname.split('/');
+    const manifestIndex = pathSegments.lastIndexOf('manifest.json');
+    if (manifestIndex > 1) { // At least one segment before manifest.json (e.g., /configHash/manifest.json)
+        this.configPath = '/' + pathSegments.slice(1, manifestIndex).join('/');
+    } else {
+        this.configPath = ''; // No extra path segments like a config hash
+    }
   }
 
-  /**
-   * Import addon from manifest URL
-   */
   async import() {
     try {
       const response = await axios.get(this.manifestUrl);
       this.manifest = response.data;
       
-      this.parseManifestUrl();
+      this.parseManifestUrl(); // Call after fetching manifest to have the URL
 
       if (!this.manifest || !this.manifest.catalogs) {
         throw new Error('Invalid manifest format - missing catalogs');
       }
 
-      // Determine addon type based on manifest content and URL
-      const isAnimeCatalogs = this.detectAnimeCatalogs();
+      const isAnime = this.detectAnimeCatalogs();
 
-      // Process catalogs based on addon type
-      const processedCatalogs = isAnimeCatalogs ? 
-        this.processAnimeCatalogs() : 
-        this.processStandardCatalogs();
+      const processedCatalogs = isAnime 
+        ? this.processAnimeCatalogs() 
+        : this.processStandardCatalogs();
       
-
-      const addonData = {
-        id: this.manifest.id || `addon_${Date.now()}`,
+      return {
+        id: this.manifest.id || `addon_${Date.now()}`, // Fallback ID
         name: this.manifest.name || 'Unknown Addon',
         version: this.manifest.version || '0.0.0',
         description: this.manifest.description || '',
         logo: this.manifest.logo || null,
-        url: this.manifestUrl,
+        url: this.manifestUrl, // Store the original manifest URL
         catalogs: processedCatalogs,
         types: this.manifest.types || [],
         resources: this.manifest.resources || [],
-        isAnimeCatalogs
+        isAnime // Store if it's primarily anime for content fetching logic
       };
-
-      return addonData;
     } catch (error) {
-      console.error('Error importing addon:', error);
-      throw error;
+      console.error(`Error importing addon from ${this.manifestUrl}:`, error.message);
+      throw new Error(`Failed to import addon: ${error.message}`);
     }
   }
 
-  /**
-   * Detect if this is an anime catalogs addon
-   */
   detectAnimeCatalogs() {
-    return (
-      this.manifest.name?.toLowerCase().includes('anime') ||
-      this.manifestUrl.toLowerCase().includes('myanimelist') ||
-      this.manifestUrl.toLowerCase().includes('anilist') ||
-      this.manifestUrl.toLowerCase().includes('anidb') ||
-      this.manifest.catalogs.some(cat => cat.type === 'anime')
-    );
+    // Heuristics to detect anime-focused addons
+    const nameIncludesAnime = this.manifest.name?.toLowerCase().includes('anime');
+    const urlIncludesAnimeSource = ['myanimelist', 'anilist', 'anidb'].some(src => this.manifestUrl.toLowerCase().includes(src));
+    const hasAnimeTypeCatalog = this.manifest.catalogs.some(cat => cat.type === 'anime');
+    return nameIncludesAnime || urlIncludesAnimeSource || hasAnimeTypeCatalog;
   }
 
-  /**
-   * Process standard Stremio addon catalogs
-   */
   processStandardCatalogs() {
+    // Ensure unique IDs if an addon reuses catalog IDs for different types
     const idCounts = {};
     return this.manifest.catalogs.map(catalog => {
-      const id = catalog.id;
-      idCounts[id] = (idCounts[id] || 0) + 1;
+      const baseId = catalog.id;
+      const typeSuffix = catalog.type || 'unknown';
+      idCounts[baseId] = (idCounts[baseId] || 0) + 1;
       
-      const uniqueId = idCounts[id] > 1 ? 
-        `${id}_${catalog.type || 'unknown'}_${idCounts[id]}` : 
-        id;
+      // Create a more unique ID if the same base ID is used multiple times, otherwise keep original
+      const uniqueId = idCounts[baseId] > 1 ? `${baseId}_${typeSuffix}_${idCounts[baseId]}` : baseId;
 
       return {
-        id: uniqueId,
-        originalId: id,
+        id: uniqueId, // This will be used in our addon's manifest
+        originalId: baseId, // The ID used by the external addon's API
         name: catalog.name,
-        type: catalog.type || 'movie',
+        type: catalog.type || 'movie', // Default to movie if type is missing
         extra: catalog.extra || []
       };
     });
   }
 
-  /**
-   * Process anime catalogs
-   */
   processAnimeCatalogs() {
-    try {
-      // Extract config from URL if present
-      const configMatch = this.configPath.match(/%7B(.+?)%7D/);
-      
-      let config = {};
-      if (configMatch) {
-        const encodedJson = configMatch[1];
-        
-        const decodedJson = decodeURIComponent(encodedJson.replace(/\+/g, ' '));
-        
-        // The decoded JSON is missing the outer braces, so let's add them
-        const jsonWithBraces = `{${decodedJson}}`;
-        
-        try {
-          config = JSON.parse(jsonWithBraces);
-        } catch (parseError) {
-          console.error('JSON parse error:', parseError);
-          // If parsing fails, try to clean the string further
-          const cleanedJson = jsonWithBraces
-            .replace(/\\"/g, '"')  // Fix escaped quotes
-            .replace(/\\\\/g, '\\') // Fix escaped backslashes
-            .replace(/\s+/g, ' ')  // Normalize whitespace
-            .trim();
-          config = JSON.parse(cleanedJson);
-        }
-      }
-
-      if (Object.keys(config).length > 0) {
-        // Process enabled catalogs from config
-        const catalogs = Object.entries(config)
-          .filter(([_, value]) => value === 'on')
-          .map(([key]) => {
-            const [source, ...categoryParts] = key.split('_');
-            const category = categoryParts.join(' ');
-            
-            return {
-              id: key,
-              originalId: key,
-              name: this.formatCatalogName(source, category),
-              type: 'series',  // Changed from 'anime' to 'series' for better compatibility
-              extra: []
-            };
-          });
-
-        return catalogs;
-      }
-
-      // Fallback to manifest catalogs if no config
-      const manifestCatalogs = this.manifest.catalogs.map(catalog => ({
-        id: catalog.id,
-        originalId: catalog.id,
-        name: catalog.name,
-        type: 'series',  // Changed from 'anime' to 'series' for better compatibility
-        extra: catalog.extra || []
-      }));
-
-      return manifestCatalogs;
-    } catch (error) {
-      // If all parsing attempts fail, return empty array
-      return [];
-    }
+    return this.manifest.catalogs.map(catalog => ({
+      id: catalog.id, // Use the original ID from the anime addon
+      originalId: catalog.id,
+      name: catalog.name,
+      type: 'series', // Standardize anime to 'series' for Stremio compatibility
+      extra: catalog.extra || []
+    }));
   }
 
-  /**
-   * Format catalog name for better display
-   */
-  formatCatalogName(source, category) {
-    const sourceName = source.charAt(0).toUpperCase() + source.slice(1)
-      .replace(/myanimelist/i, 'MyAnimeList')
-      .replace(/anidb/i, 'AniDB')
-      .replace(/anilist/i, 'AniList');
 
-    return category ? 
-      `${sourceName} - ${category.replace(/-/g, ' ')}` : 
-      sourceName;
-  }
-
-  /**
-   * Build metadata URL for a catalog
-   */
-  buildMetadataUrl(catalogId, type, skip = 0) {
-    // For anime catalogs, the URL structure is different
-    if (this.detectAnimeCatalogs()) {
-      return `${this.baseUrl}${this.configPath}/catalog/anime/${catalogId}.json`;
+  buildCatalogUrl(catalogOriginalId, catalogType, skip = 0) {
+    let url = `${this.baseUrl}${this.configPath}/catalog/${catalogType}/${catalogOriginalId}`;
+    if (skip > 0) {
+      url += `/skip=${skip}`;
     }
-    
-    // For standard Stremio catalogs
-    return `${this.baseUrl}${this.configPath}/catalog/${type}/${catalogId}.json`;
+    url += '.json';
+    return url;
   }
 }
 
-/**
- * Import an external addon from a manifest URL
- * @param {string} manifestUrl - URL to the addon manifest
- * @returns {Promise<Object>} Imported addon metadata
- */
 async function importExternalAddon(manifestUrl) {
-  if (!manifestUrl) {
-    throw new Error('Manifest URL is required');
-  }
-
   const addon = new ExternalAddon(manifestUrl);
   return await addon.import();
 }
 
-/**
- * Fetch items from an external addon catalog
- */
-async function fetchExternalAddonItems(catalogId, addon, skip = 0, rpdbApiKey = null) {
+async function fetchExternalAddonItems(catalogOriginalId, sourceAddonConfig, skip = 0, rpdbApiKey = null) {
   try {
-    if (!addon || !addon.url) {
-      console.error('Invalid addon configuration');
-      return [];
+    if (!sourceAddonConfig || !sourceAddonConfig.url) {
+      console.error('Invalid source addon configuration for fetching items.');
+      return { metas: [] }; // Return structure expected by convertToStremioFormat
     }
 
-    const catalog = addon.catalogs.find(c => c.id === catalogId);
+    const tempAddon = new ExternalAddon(sourceAddonConfig.url);
+    await tempAddon.import(); // Re-import to correctly parse baseUrl and configPath from the stored URL
+
+    const catalog = sourceAddonConfig.catalogs.find(c => c.originalId === catalogOriginalId || c.id === catalogOriginalId);
     if (!catalog) {
-      console.error(`Catalog ${catalogId} not found in addon ${addon.id}`);
-      return [];
+      console.error(`Catalog ${catalogOriginalId} not found in source addon ${sourceAddonConfig.name}`);
+      return { metas: [] };
     }
-
-    // For anime catalogs, we need to use the anime type
-    const type = addon.isAnimeCatalogs ? 'anime' : (catalog.type || 'movie');
     
-    const externalAddon = new ExternalAddon(addon.url);
-    externalAddon.manifest = addon;
-    externalAddon.parseManifestUrl();
-    
-    const metadataUrl = externalAddon.buildMetadataUrl(catalog.originalId || catalog.id, type, skip);
+    // Use the catalog's defined type, defaulting to 'movie'. Anime is handled as 'series'.
+    const typeToFetch = catalog.type === 'anime' ? 'series' : (catalog.type || 'movie');
+    const metadataUrl = tempAddon.buildCatalogUrl(catalog.originalId, typeToFetch, skip);
     
     const response = await axios.get(metadataUrl);
     
-    if (!response.data || !response.data.metas) {
-      console.error('Invalid metadata response:', response.data);
-      return [];
+    if (!response.data || !Array.isArray(response.data.metas)) {
+      console.error(`Invalid metadata response from ${metadataUrl}:`, response.data);
+      return { metas: [] };
     }
 
-    // If we have RPDB API key, update posters
-    if (rpdbApiKey) {
-      const metas = response.data.metas;
-      
-      // Collect all IMDb IDs
-      const imdbIds = metas
-        .map(item => item.imdb_id || item.id)
-        .filter(id => id && id.startsWith('tt'));
-      
-      // Batch fetch all posters
-      const posterMap = await batchFetchPosters(imdbIds, rpdbApiKey);
-      
-      // Update items with fetched posters
-      return metas.map(item => {
-        const imdbId = item.imdb_id || item.id;
-        if (imdbId && posterMap[imdbId]) {
-          return { ...item, poster: posterMap[imdbId] };
-        }
-        return item;
-      });
-    }
+    // Return the raw metas array; poster fetching will be handled by convertToStremioFormat
+    return { metas: response.data.metas }; // Ensure this is an object with a .metas property
 
-    return response.data.metas;
   } catch (error) {
-    console.error('Error fetching external addon items:', error);
-    return [];
+    console.error(`Error fetching items for catalog ${catalogOriginalId} from ${sourceAddonConfig?.name}:`, error.message);
+    return { metas: [] }; // Return structure expected by convertToStremioFormat
   }
-}
-
-/**
- * List all catalogs from imported addons
- * @param {Object} importedAddons - Object with imported addons
- * @returns {Array} Array of all catalogs
- */
-function listAllCatalogs(importedAddons) {
-  if (!importedAddons) return [];
-  
-  return Object.values(importedAddons).flatMap(addon => 
-    addon.catalogs.map(catalog => ({
-      id: catalog.id,
-      name: catalog.name,
-      type: catalog.type,
-      addonId: addon.id,
-      addonName: addon.name,
-      addonLogo: addon.logo
-    }))
-  );
 }
 
 module.exports = {
   importExternalAddon,
-  fetchExternalAddonItems,
-  listAllCatalogs
-}; 
+  fetchExternalAddonItems
+};

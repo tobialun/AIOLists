@@ -310,7 +310,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // If MDBList is not connected, save just the RPDB key
         if (!validationState.mdblist && rpdbApiKey) {
-          const saveResponse = await fetch(`/api/config/${state.configHash}/apikey`, {
+          const saveResponse = await fetch(`/${state.configHash}/apikey`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ apiKey: '', rpdbApiKey })
