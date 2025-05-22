@@ -175,6 +175,16 @@ async function createAddon(userConfig) {
   const builder = new addonBuilder(manifest);
 
   builder.defineCatalogHandler(async ({ type, id, extra }) => {
+    if (id === 'testcatalog') {
+        console.log("Serving test catalog");
+        return Promise.resolve({
+            metas: [
+                { id: 'tt0111161', type: 'movie', name: 'The Shawshank Redemption', poster: 'https://m.media-amazon.com/images/M/MV5BNDE3ODcxYzMtY2YzZC00NmNlLWJiNDMtZDViZWM2MzIxZDYwXkEyXkFqcGdeQXVyNzkwMjQ5NzM@._V1_SX300.jpg', releaseInfo: '1994' },
+                { id: 'tt0068646', type: 'movie', name: 'The Godfather', poster: 'https://m.media-amazon.com/images/M/MV5BM2MyNjYxNmUtYTAwNi00MTYxLWJmNWYtYzZlODY3ZTk3OTFlXkEyXkFqcGdeQXVyNzkwMjQ5NzM@._V1_SX300.jpg', releaseInfo: '1972' }
+            ]
+        });
+    }
+
     const skip = parseInt(extra?.skip) || 0;
     
     // Hämta den fullständiga konfigurationen (inklusive API-nycklar) som är associerad med configHash.

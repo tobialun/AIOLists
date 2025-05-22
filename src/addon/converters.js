@@ -33,7 +33,7 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null) {
       itemsToProcess.push({
         id: imdbId,
         type: 'movie',
-        name: movie.title || movie.name,
+        name: movie.title || movie.name || 'Untitled Movie',
         poster: movie.poster,
         background: movie.backdrop || movie.background,
         description: movie.overview || movie.description,
@@ -55,7 +55,6 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null) {
         behaviorHints: movie.behaviorHints || {
           hasScheduledVideos: false
         },
-        catalogOrder: catalogOrder
       });
     });
 
@@ -67,7 +66,7 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null) {
       itemsToProcess.push({
         id: imdbId,
         type: 'series',
-        name: show.title || show.name,
+        name: show.title || show.name || 'Untitled Series',
         poster: show.poster,
         background: show.backdrop || show.background,
         description: show.overview || show.description,
@@ -90,7 +89,6 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null) {
         behaviorHints: show.behaviorHints || {
           hasScheduledVideos: false
         },
-        catalogOrder: catalogOrder
       });
     });
   }
@@ -104,9 +102,11 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null) {
   });
 
   if (useRPDB && itemsToProcess.length > 0) {
+    console.log('[convertToStremioFormat] Items to process (BEFORE RPDB - first 2):', JSON.stringify(itemsToProcess.slice(0, 2)));
     const imdbIds = itemsToProcess.map(item => item.id).filter(id => id && id.startsWith('tt'));
     if (imdbIds.length > 0) {
       const posterMap = await batchFetchPosters(imdbIds, rpdbApiKey);
+      console.log('[convertToStremioFormat] Poster map FROM RPDB (sample):', JSON.stringify(Object.fromEntries(Object.entries(posterMap).slice(0, 5)))); // Logga några exempel från posterMap
       metas = itemsToProcess.map(item => {
         if (item.id && posterMap[item.id]) {
           return { ...item, poster: posterMap[item.id] };
@@ -119,7 +119,12 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null) {
   } else {
     metas = itemsToProcess;
   }
-  
+  if (metas.length > 0) {
+    console.log(`[convertToStremioFormat] Returnerar ${metas.length} meta-objekt. Första objektet:`, JSON.stringify(metas[0]));
+  } else {
+    console.log(`[convertToStremioFormat] Returnerar 0 meta-objekt.`);
+  }
+
   return metas;
 }
 
