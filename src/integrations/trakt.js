@@ -96,8 +96,8 @@ async function fetchTraktLists(userConfig) {
       id: `trakt_${list.ids.slug}`,
       name: list.name,
       updated: list.updated_at,
-      listType: 'T', 
-      isTraktList: true 
+      listType: 'T',
+      isTraktList: true
     }));
 
     const specialLists = [
@@ -135,7 +135,7 @@ async function fetchPublicTraktListDetails(traktListUrl) {
     const headers = {
       'Content-Type': 'application/json',
       'trakt-api-version': '2',
-      'trakt-api-key': TRAKT_CLIENT_ID 
+      'trakt-api-key': TRAKT_CLIENT_ID
     };
 
     const listDetailsResponse = await axios.get(`${TRAKT_API_URL}/users/${username}/lists/${listSlugOrId}`, { headers });
@@ -146,7 +146,7 @@ async function fetchPublicTraktListDetails(traktListUrl) {
 
     let hasMovies = false;
     let hasShows = false;
-    
+
     if (listData.item_count > 0) {
         const listItemsResponse = await axios.get(`${TRAKT_API_URL}/users/${username}/lists/${listSlugOrId}/items?limit=5&extended=full`, { headers });
         if (listItemsResponse.data && Array.isArray(listItemsResponse.data)) {
@@ -159,7 +159,7 @@ async function fetchPublicTraktListDetails(traktListUrl) {
     }
 
     return {
-      listId: `traktpublic_${username}_${listData.ids.slug}`, 
+      listId: `traktpublic_${username}_${listData.ids.slug}`,
       originalTraktId: String(listData.ids.trakt),
       originalTraktSlug: listData.ids.slug,
       traktUser: username,
@@ -179,7 +179,7 @@ async function fetchPublicTraktListDetails(traktListUrl) {
 async function fetchTraktListItems(listId, userConfig, skip = 0, sortBy = 'rank', sortOrder = 'asc', isPublicImport = false, publicUsername = null, publicItemType = null) {
   const limit = ITEMS_PER_PAGE;
   const page = Math.floor(skip / limit) + 1;
-  
+
   const headers = {
     'Content-Type': 'application/json',
     'trakt-api-version': '2',
@@ -195,82 +195,150 @@ async function fetchTraktListItems(listId, userConfig, skip = 0, sortBy = 'rank'
 
   let requestUrl;
   let params = { limit, page, extended: 'full' };
-  let specificItemType = publicItemType; // 'movie' or 'series'
+  let specificItemType = publicItemType;
+  const result = { movies: [], shows: [], hasMovies: false, hasShows: false };
 
   try {
     if (isPublicImport && publicUsername && publicItemType) {
-        const actualSlugOrId = listId.replace(/^trakt_/, ''); // listId is like trakt_SLUG for public imports
-        const traktApiItemType = publicItemType === 'series' ? 'shows' : 'movies'; // API uses 'shows'/'movies'
+        const actualSlugOrId = listId.replace(/^trakt_/, '');
+        const traktApiItemType = publicItemType === 'series' ? 'shows' : 'movies';
         requestUrl = `${TRAKT_API_URL}/users/${publicUsername}/lists/${actualSlugOrId}/items/${traktApiItemType}`;
         const validPublicSorts = ['rank', 'added', 'title', 'released', 'runtime', 'popularity', 'votes', 'random'];
         if (validPublicSorts.includes(sortBy)) {
-            params.sort_by = sortBy;
+            params.sort_by = sortBy; 
+            if (sortOrder) params.sort_how = sortOrder; 
         }
+        const response = await axios.get(requestUrl, { headers, params });
+        const items = (Array.isArray(response.data) ? response.data : []).map(entry => {
+            const itemData = entry.movie || entry.show; 
+            return {
+                imdb_id: itemData?.ids?.imdb,
+                tmdb_id: itemData?.ids?.tmdb,
+                title: itemData?.title,
+                year: itemData?.year,
+                type: publicItemType, // Use the known type
+            };
+        }).filter(item => item.imdb_id || item.tmdb_id);
+        if (publicItemType === 'movie') result.movies = items;
+        if (publicItemType === 'series') result.shows = items;
 
     } else if (listId === 'trakt_watchlist') {
-      const typePath = sortBy === 'my_rating' ? (specificItemType === 'series' ? 'shows' : 'movies') : (specificItemType === 'series' ? 'shows' : 'movies'); // fallback
-      const validWatchlistSorts = ['rank', 'added', 'released', 'title']; // my_rating not directly for watchlist items sort path
-      const effectiveSortBy = validWatchlistSorts.includes(sortBy) ? sortBy : 'rank';
-      requestUrl = `${TRAKT_API_URL}/users/me/watchlist/${typePath || 'movies'}/${effectiveSortBy}`; // Default to movies if type not clear
+        const validWatchlistSorts = ['rank', 'added', 'released', 'title'];
+        const effectiveSortBy = validWatchlistSorts.includes(sortBy) ? sortBy : 'rank';
+        params.sort = effectiveSortBy; // Watchlist uses 'sort' parameter
+        if (sortOrder) params.order = sortOrder;
+
+
+        if (!specificItemType) { // Fetch both movies and shows for the main watchlist ID
+            const [moviesResponse, showsResponse] = await Promise.all([
+                axios.get(`${TRAKT_API_URL}/users/me/watchlist/movies`, { headers, params }).catch(e => { console.error(`Error fetching watchlist movies: ${e.message}`); return { data: [] }; }),
+                axios.get(`${TRAKT_API_URL}/users/me/watchlist/shows`, { headers, params }).catch(e => { console.error(`Error fetching watchlist shows: ${e.message}`); return { data: [] }; })
+            ]);
+
+            result.movies = (Array.isArray(moviesResponse.data) ? moviesResponse.data : []).map(entry => ({
+                imdb_id: entry.movie?.ids?.imdb,
+                tmdb_id: entry.movie?.ids?.tmdb,
+                title: entry.movie?.title,
+                year: entry.movie?.year,
+                type: 'movie',
+            })).filter(item => item.imdb_id || item.tmdb_id);
+
+            result.shows = (Array.isArray(showsResponse.data) ? showsResponse.data : []).map(entry => ({
+                imdb_id: entry.show?.ids?.imdb,
+                tmdb_id: entry.show?.ids?.tmdb,
+                title: entry.show?.title,
+                year: entry.show?.year,
+                type: 'series',
+            })).filter(item => item.imdb_id || item.tmdb_id);
+        } else { // A specific type (movies or shows) was requested for a watchlist catalog (e.g. trakt_watchlist_movies)
+            const typePath = specificItemType === 'series' ? 'shows' : 'movies';
+            requestUrl = `${TRAKT_API_URL}/users/me/watchlist/${typePath}`;
+            const response = await axios.get(requestUrl, { headers, params });
+            const items = (Array.isArray(response.data) ? response.data : []).map(entry => {
+                const itemData = entry.movie || entry.show;
+                return {
+                    imdb_id: itemData?.ids?.imdb,
+                    tmdb_id: itemData?.ids?.tmdb,
+                    title: itemData?.title,
+                    year: itemData?.year,
+                    type: specificItemType,
+                };
+            }).filter(item => item.imdb_id || item.tmdb_id);
+            if (specificItemType === 'movie') result.movies = items;
+            if (specificItemType === 'series') result.shows = items;
+        }
     } else if (listId.startsWith('trakt_recommendations_')) {
       specificItemType = listId.endsWith('_movies') ? 'movie' : 'series';
       requestUrl = `${TRAKT_API_URL}/recommendations/${specificItemType === 'series' ? 'shows' : 'movies'}`;
-    } else if (listId.startsWith('trakt_trending_')) {
-      specificItemType = listId.endsWith('_movies') ? 'movie' : 'series';
-      delete headers.Authorization;
-      requestUrl = `${TRAKT_API_URL}/${specificItemType === 'series' ? 'shows' : 'movies'}/trending`;
-    } else if (listId.startsWith('trakt_popular_')) {
-      specificItemType = listId.endsWith('_movies') ? 'movie' : 'series';
-      delete headers.Authorization;
-      requestUrl = `${TRAKT_API_URL}/${specificItemType === 'series' ? 'shows' : 'movies'}/popular`;
-    } else if (listId.startsWith('trakt_')) {
+      delete params.sort_by; delete params.sort_how; delete params.sort; delete params.order;
+      const response = await axios.get(requestUrl, { headers, params });
+      const items = (Array.isArray(response.data) ? response.data : []).map(item => ({ // Data is array of movie/show objects
+          imdb_id: item.ids?.imdb,
+          tmdb_id: item.ids?.tmdb,
+          title: item.title,
+          year: item.year,
+          type: specificItemType,
+      })).filter(item => item.imdb_id || item.tmdb_id);
+      if (specificItemType === 'movie') result.movies = items;
+      if (specificItemType === 'series') result.shows = items;
+
+    } else if (listId.startsWith('trakt_trending_') || listId.startsWith('trakt_popular_')) {
+      specificItemType = listId.includes('_movies') ? 'movie' : 'series';
+      const endpointType = listId.startsWith('trakt_trending_') ? 'trending' : 'popular';
+      delete headers.Authorization; // Trending/Popular are public
+      requestUrl = `${TRAKT_API_URL}/${specificItemType === 'series' ? 'shows' : 'movies'}/${endpointType}`;
+      delete params.sort_by; delete params.sort_how; delete params.sort; delete params.order;
+      const response = await axios.get(requestUrl, { headers, params });
+      const items = (Array.isArray(response.data) ? response.data : []).map(entry => {
+          const itemData = entry.movie || entry.show;
+          return {
+              imdb_id: itemData?.ids?.imdb,
+              tmdb_id: itemData?.ids?.tmdb,
+              title: itemData?.title,
+              year: itemData?.year,
+              type: specificItemType,
+          };
+      }).filter(item => item.imdb_id || item.tmdb_id);
+      if (specificItemType === 'movie') result.movies = items;
+      if (specificItemType === 'series') result.shows = items;
+
+    } else if (listId.startsWith('trakt_')) { // User's custom Trakt lists
       const listSlug = listId.replace('trakt_', '');
       requestUrl = `${TRAKT_API_URL}/users/me/lists/${listSlug}/items`;
       params.sort_by = sortBy;
       params.sort_how = sortOrder;
+
+      const response = await axios.get(requestUrl, { headers, params });
+      const items = (Array.isArray(response.data) ? response.data : []).map(entry => {
+          const itemData = entry.movie || entry.show || entry;
+          const type = entry.type === 'show' || itemData?.type === 'show' ? 'series' : 'movie';
+          return {
+              imdb_id: itemData?.ids?.imdb,
+              tmdb_id: itemData?.ids?.tmdb,
+              title: itemData?.title,
+              year: itemData?.year,
+              type: type,
+          };
+      }).filter(item => item.imdb_id || item.tmdb_id);
+
+      items.forEach(item => {
+        if (item.type === 'movie') result.movies.push(item);
+        else if (item.type === 'series') result.shows.push(item);
+      });
     } else {
       console.error(`Unknown Trakt listId format for item fetching: ${listId}`);
       return null;
     }
 
-    const response = await axios.get(requestUrl, { headers, params });
-    
-    let items = [];
-    if (Array.isArray(response.data)) {
-        items = response.data;
-    } else if (response.data && Array.isArray(response.data.items)) {
-        items = response.data.items;
-    }
-
-    const processedItems = items.map(entry => {
-      const itemData = entry.movie || entry.show || entry;
-      const type = specificItemType || (entry.type === 'show' || itemData.type === 'show' ? 'series' : 'movie');
-      return {
-        imdb_id: itemData.ids?.imdb,
-        tmdb_id: itemData.ids?.tmdb,
-        title: itemData.title,
-        year: itemData.year,
-        type: type,
-      };
-    }).filter(item => item.imdb_id || item.tmdb_id);
-
-    const result = { movies: [], shows: [], hasMovies: false, hasShows: false };
-    processedItems.forEach(item => {
-      if (item.type === 'movie') result.movies.push(item);
-      else if (item.type === 'series') result.shows.push(item);
-    });
     result.hasMovies = result.movies.length > 0;
     result.hasShows = result.shows.length > 0;
-    
     return result;
 
   } catch (error) {
-    const errorMessage = `Error fetching Trakt list items for ${listId}${isPublicImport ? ` (public: ${publicUsername}/${listId.replace('trakt_','')})` : ''}: ${error.message}`;
+    const errorMessage = `Error fetching Trakt list items for ${listId}${isPublicImport ? ` (public: ${publicUsername}/${listId.replace(/^trakt(public)?_/,'')})` : ''}: ${error.message}`;
     console.error(errorMessage);
     if (error.response) {
-        console.error("Trakt API Error Response:", error.response.data, error.response.status);
-        if (error.response.status === 404) {
-        }
+        console.error("Trakt API Error Response:", JSON.stringify(error.response.data), error.response.status);
     }
     return null;
   }

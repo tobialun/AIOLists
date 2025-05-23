@@ -437,11 +437,11 @@ module.exports = function(router) {
                 }
 
                 if (typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean') {
-                    const tempContent = await fetchListContent(manifestListId, req.userConfig, 0); 
-                    metadata.hasMovies = tempContent?.movies?.length > 0 || tempContent?.hasMovies === true;
-                    metadata.hasShows = tempContent?.shows?.length > 0 || tempContent?.hasShows === true;
-                    req.userConfig.listsMetadata[listIdStr] = metadata;
-                    configChangedDueToMetadataFetch = true;
+                  const tempContent = await fetchListContent(manifestListId, req.userConfig, 0);
+                  metadata.hasMovies = tempContent?.movies?.length > 0 || tempContent?.hasMovies === true;
+                  metadata.hasShows = tempContent?.shows?.length > 0 || tempContent?.hasShows === true;
+                  req.userConfig.listsMetadata[listIdStr] = metadata;
+                  configChangedDueToMetadataFetch = true;
                 }
 
                 let tagType = listTypeForTag;
@@ -460,7 +460,7 @@ module.exports = function(router) {
                     isTraktPopular: list.isTraktPopular,
                     isWatchlist: !!list.isWatchlist,
                     tag: tagType, listType: list.listType,
-                    tagImage: list.source === 'trakt' ? 'https://trakt.tv/favicon.ico' : null,
+                    tagImage: list.source === 'trakt' ? 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico' : null,
                     sortPreferences: req.userConfig.sortPreferences?.[listIdStr] || 
                                      { sort: (list.source === 'trakt') ? 'rank' : 'imdbvotes', 
                                        order: (list.source === 'trakt') ? 'asc' : 'desc' },
@@ -485,7 +485,7 @@ module.exports = function(router) {
                     }
                     let tagType = 'A'; let tagImage = addon.logo;
                     if(addon.isMDBListUrlImport) { tagType = 'L'; tagImage = null; }
-                    else if (addon.isTraktPublicList) { tagType = 'T'; tagImage = 'https://trakt.tv/favicon.ico'; }
+                    else if (addon.isTraktPublicList) { tagType = 'T'; tagImage = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico'; }
 
                     processedLists.push({
                         id: catalogIdStr, originalId: catalog.originalId || catalogIdStr, name: catalog.name, 

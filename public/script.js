@@ -445,8 +445,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const editBtn = createButton('✏️', 'edit-button action-icon', (e) => { e.stopPropagation(); startNameEditing(li, list); }, 'Edit List Name');
 
     let mergeToggle = null;
-    const canMerge = list.hasMovies && list.hasShows && !list.isTraktWatchlist &&
-                     !(list.isUrlImportedType || list.source === 'mdblist_url' || list.source === 'trakt_public' || list.source === 'addon_manifest');
+    const canMerge = list.hasMovies && list.hasShows;
     if (canMerge) {
       const isMerged = state.userConfig.mergedLists?.[String(list.id)] !== false;
       mergeToggle = createButton(isMerged ? 'Merged' : 'Split', `merge-toggle ${isMerged ? 'merged' : 'split'}`,
