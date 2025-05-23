@@ -127,11 +127,9 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0, sort = 'i
       // If it's a URL imported list, the ID should be the direct MDBList ID.
       // The listType 'L' is assumed for public lists fetched by ID/slug.
       if (isUrlImported) {
-          // console.log(`Workspaceing MDBList (URL imported): ${id} as type L`);
           try {
               const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=${ITEMS_PER_PAGE}&offset=${skip}`);
               if (response.status === 200 && !response.data.error) {
-                  // console.log(`Successfully fetched MDBList ${id} (URL import)`);
                   return processApiResponse(response.data);
               }
               console.error(`Failed to fetch MDBList ${id} (URL import). Status: ${response.status}, Data: ${JSON.stringify(response.data)}`);

@@ -12,7 +12,7 @@ const { authenticateTrakt, getTraktAuthUrl, fetchTraktLists: fetchTraktUserLists
 const { fetchAllLists: fetchAllMDBLists, fetchListItems: fetchMDBListItemsDirect, validateMDBListKey, extractListFromUrl: extractMDBListFromUrl } = require('../integrations/mdblist');
 const { importExternalAddon: importExtAddon } = require('../integrations/externalAddons');
 
-const manifestCache = new Cache({ defaultTTL: 1 * 60 * 1000 });
+const manifestCache = new Cache({ defaultTTL: 1 * 60 * 1000 }); // Re-enable cache with 1 min TTL
 
 module.exports = function(router) {
   router.param('configHash', async (req, res, next, configHash) => {
@@ -21,7 +21,7 @@ module.exports = function(router) {
       req.configHash = configHash;
       next();
     } catch (error) {
-      console.error('Error decompressing configHash:', error);
+      console.error('Error decompressing configHash:', configHash, error);
       if (!res.headersSent) { return res.redirect('/configure'); }
       next(error);
     }
@@ -31,6 +31,7 @@ module.exports = function(router) {
     res.sendFile(path.join(__dirname, '..', '..', 'public', 'index.html'));
   });
 
+  // Re-enable manifest caching
   router.get('/:configHash/manifest.json', async (req, res) => {
     try {
       const cacheKey = `manifest_${req.configHash}`;
@@ -65,7 +66,10 @@ module.exports = function(router) {
   });
 
   router.get('/:configHash/config', (req, res) => {
-    res.json({ success: true, config: req.userConfig });
+    const configToSend = JSON.parse(JSON.stringify(req.userConfig));
+    configToSend.hiddenLists = Array.from(new Set(configToSend.hiddenLists || []));
+    configToSend.removedLists = Array.from(new Set(configToSend.removedLists || []));
+    res.json({ success: true, config: configToSend });
   });
   
   router.post('/:configHash/apikey', async (req, res) => {
@@ -74,6 +78,7 @@ module.exports = function(router) {
       let configChanged = false;
       if (req.userConfig.rpdbApiKey !== rpdbApiKey) { req.userConfig.rpdbApiKey = rpdbApiKey || ''; configChanged = true; }
       if (req.userConfig.apiKey !== apiKey) { req.userConfig.apiKey = apiKey || ''; configChanged = true; }
+      
       if (configChanged) {
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
@@ -82,7 +87,8 @@ module.exports = function(router) {
       }
       return res.json({ success: true, configHash: req.configHash, message: "API keys unchanged" });
     } catch (error) {
-      res.status(500).json({ error: 'Internal server error' });
+      console.error('Error in /apikey:', error);
+      res.status(500).json({ error: 'Internal server error in /apikey' });
     }
   });
 
@@ -97,8 +103,16 @@ module.exports = function(router) {
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
         manifestCache.clear();
-        res.json({ success: true, configHash: newConfigHash, message: 'Authenticated with Trakt' });
+        res.json({ 
+            success: true, 
+            configHash: newConfigHash, 
+            accessToken: traktTokens.accessToken,
+            refreshToken: traktTokens.refreshToken,
+            expiresAt: traktTokens.expiresAt,
+            message: 'Authenticated with Trakt' 
+        });
     } catch (error) {
+        console.error('Error in /trakt/auth:', error);
         res.status(500).json({ error: 'Failed to authenticate with Trakt', details: error.message });
     }
   });
@@ -111,6 +125,7 @@ module.exports = function(router) {
         manifestCache.clear();
         res.json({ success: true, configHash: newConfigHash, message: 'Disconnected from Trakt' });
     } catch (error) {
+        console.error('Error in /trakt/disconnect:', error);
         res.status(500).json({ error: 'Failed to disconnect from Trakt', details: error.message });
     }
   });
@@ -119,12 +134,11 @@ module.exports = function(router) {
     try {
         const { url } = req.body;
         if (!url) return res.status(400).json({ error: 'List URL required' });
-
         let importedListDetails;
         let addonId; 
         let sourceSystem;
         let listNameForDisplay;
-        let isUrlImportedFlag = true; // General flag for any URL import
+        let isUrlImportedFlag = true;
 
         if (url.includes('mdblist.com/lists/')) {
             if (!req.userConfig.apiKey) return res.status(400).json({ error: 'MDBList API key required' });
@@ -132,38 +146,41 @@ module.exports = function(router) {
             addonId = `mdblisturl_${importedListDetails.listId}`;
             listNameForDisplay = importedListDetails.listName;
             sourceSystem = "MDBList";
-            importedListDetails.isMDBListUrlImport = true; // Specific flag
+            importedListDetails.isMDBListUrlImport = true;
         } else if (url.includes('trakt.tv/users/') && url.includes('/lists/')) {
             importedListDetails = await fetchPublicTraktListDetails(url);
             addonId = importedListDetails.listId; 
             listNameForDisplay = importedListDetails.listName;
             sourceSystem = "Trakt Public";
-            importedListDetails.isTraktPublicList = true; // Specific flag
+            importedListDetails.isTraktPublicList = true;
         } else {
             return res.status(400).json({ error: 'Invalid or unsupported URL.' });
         }
         
         if (!req.userConfig.importedAddons) req.userConfig.importedAddons = {};
+        if (req.userConfig.importedAddons[addonId]) {
+             return res.status(400).json({ error: `List "${listNameForDisplay}" from ${sourceSystem} with ID ${addonId} is already imported.` });
+        }
 
         if (!importedListDetails.hasMovies && !importedListDetails.hasShows) {
             return res.status(400).json({ error: `List "${listNameForDisplay}" from ${sourceSystem} contains no movie or show content.` });
         }
 
         const catalogs = [];
-        const idForCatalogOriginalId = sourceSystem === "Trakt Public" ? importedListDetails.originalTraktSlug : importedListDetails.listId;
+        const idPrefixForCatalog = addonId;
 
         if (importedListDetails.hasMovies) {
             catalogs.push({ 
-                id: `${idForCatalogOriginalId}_movies`, 
-                originalId: idForCatalogOriginalId,
+                id: `${idPrefixForCatalog}_movies`, 
+                originalId: importedListDetails.originalTraktSlug || importedListDetails.listId,
                 name: `${listNameForDisplay} (Movies)`, type: 'movie', url: url,
                 traktUser: importedListDetails.traktUser, traktListSlug: importedListDetails.originalTraktSlug 
             });
         }
         if (importedListDetails.hasShows) {
             catalogs.push({ 
-                id: `${idForCatalogOriginalId}_series`, 
-                originalId: idForCatalogOriginalId, 
+                id: `${idPrefixForCatalog}_series`, 
+                originalId: importedListDetails.originalTraktSlug || importedListDetails.listId,
                 name: `${listNameForDisplay} (Series)`, type: 'series', url: url, 
                 traktUser: importedListDetails.traktUser, traktListSlug: importedListDetails.originalTraktSlug 
             });
@@ -186,29 +203,33 @@ module.exports = function(router) {
             isMDBListUrlImport: !!importedListDetails.isMDBListUrlImport,
             mdblistId: sourceSystem === "MDBList" ? importedListDetails.listId : undefined
         };
-        
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
         manifestCache.clear();
         res.json({ success: true, configHash: newConfigHash, addon: req.userConfig.importedAddons[addonId], message: `Imported ${listNameForDisplay} from ${sourceSystem}` });
     } catch (error) {
+        console.error('Error in /import-list-url:', error);
         res.status(500).json({ error: error.message || `Failed to import URL` });
     }
   });
 
-  router.post('/:configHash/import-addon', async (req, res) => { // For manifest based addons
+  router.post('/:configHash/import-addon', async (req, res) => {
     try {
         const { manifestUrl } = req.body;
         if (!manifestUrl) return res.status(400).json({ error: 'Manifest URL required' });
-        const addonInfo = await importExtAddon(manifestUrl); // This function should add isUrlImported: false
+        const addonInfo = await importExtAddon(manifestUrl);
         if (!req.userConfig.importedAddons) req.userConfig.importedAddons = {};
-        addonInfo.isUrlImported = false; // Explicitly set for manifest imports
+        if (req.userConfig.importedAddons[addonInfo.id]) {
+            return res.status(400).json({ error: `Addon with ID ${addonInfo.id} (${addonInfo.name}) is already imported.`});
+        }
+        addonInfo.isUrlImported = false;
         req.userConfig.importedAddons[addonInfo.id] = addonInfo;
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
         manifestCache.clear();
         res.json({ success: true, configHash: newConfigHash, addon: addonInfo, message: `Imported ${addonInfo.name}` });
     } catch (error) {
+        console.error('Error in /import-addon:', error);
         res.status(500).json({ error: 'Failed to import addon by manifest', details: error.message });
     }
   });
@@ -225,21 +246,24 @@ module.exports = function(router) {
         manifestCache.clear();
         res.json({ success: true, configHash: newConfigHash, message: 'Addon group removed' });
     } catch (error) {
+        console.error('Error in /remove-addon:', error);
         res.status(500).json({ error: 'Failed to remove addon group', details: error.message });
     }
   });
 
-  // List management endpoints (order, names, visibility, remove, sort, merge)
   router.post('/:configHash/lists/order', async (req, res) => {
     try {
-        const { order } = req.body;
-        if (!Array.isArray(order)) return res.status(400).json({ error: 'Order must be an array' });
+        const { order } = req.body; 
+        if (!Array.isArray(order)) return res.status(400).json({ error: 'Order must be an array of strings.' });
         req.userConfig.listOrder = order.map(String);
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
         manifestCache.clear(); 
         res.json({ success: true, configHash: newConfigHash, message: 'List order updated' });
-    } catch (error) { res.status(500).json({ error: 'Failed to update list order' }); }
+    } catch (error) { 
+        console.error('Failed to update list order:', error);
+        res.status(500).json({ error: 'Failed to update list order' }); 
+    }
   });
   
   router.post('/:configHash/lists/names', async (req, res) => {
@@ -247,62 +271,81 @@ module.exports = function(router) {
       const { listId, customName } = req.body;
       if (!listId) return res.status(400).json({ error: 'List ID required' });
       if (!req.userConfig.customListNames) req.userConfig.customListNames = {};
-      if (customName?.trim()) { req.userConfig.customListNames[String(listId)] = customName.trim(); }
-      else { delete req.userConfig.customListNames[String(listId)]; }
+      if (customName && customName.trim()) {
+        req.userConfig.customListNames[String(listId)] = customName.trim();
+      } else {
+        delete req.userConfig.customListNames[String(listId)];
+      }
       req.userConfig.lastUpdated = new Date().toISOString();
       const newConfigHash = await compressConfig(req.userConfig);
       manifestCache.clear();
       res.json({ success: true, configHash: newConfigHash, message: 'List name updated' });
-    } catch (error) { res.status(500).json({ error: 'Failed to update list name' }); }
+    } catch (error) { 
+        console.error('Failed to update list name:', error);
+        res.status(500).json({ error: 'Failed to update list name' }); 
+    }
   });
 
   router.post('/:configHash/lists/visibility', async (req, res) => {
     try {
       const { hiddenLists } = req.body; 
-      if (!Array.isArray(hiddenLists)) return res.status(400).json({ error: 'Hidden lists must be an array' });
-      req.userConfig.hiddenLists = hiddenLists.map(String);
+      if (!Array.isArray(hiddenLists)) return res.status(400).json({ error: 'Hidden lists must be an array of strings.' });
+      req.userConfig.hiddenLists = hiddenLists.map(String); 
       req.userConfig.lastUpdated = new Date().toISOString();
       const newConfigHash = await compressConfig(req.userConfig);
       manifestCache.clear();
       res.json({ success: true, configHash: newConfigHash, message: 'List visibility updated' });
-    } catch (error) { res.status(500).json({ error: 'Failed to update list visibility' }); }
+    } catch (error) { 
+        console.error('Failed to update list visibility:', error);
+        res.status(500).json({ error: 'Failed to update list visibility' }); 
+    }
   });
 
   router.post('/:configHash/lists/remove', async (req, res) => {
     try {
       const { listIds } = req.body; 
-      if (!Array.isArray(listIds)) return res.status(400).json({ error: 'List IDs must be an array' });
+      if (!Array.isArray(listIds)) return res.status(400).json({ error: 'List IDs must be an array of strings.' });
       const currentRemoved = new Set(req.userConfig.removedLists || []);
       listIds.forEach(id => currentRemoved.add(String(id)));
       req.userConfig.removedLists = Array.from(currentRemoved);
       if (req.userConfig.hiddenLists) {
-          req.userConfig.hiddenLists = req.userConfig.hiddenLists.filter(id => !listIds.includes(String(id)));
+          req.userConfig.hiddenLists = (req.userConfig.hiddenLists || []).filter(id => !listIds.includes(String(id)));
       }
+      listIds.forEach(listIdToRemove => {
+          if (req.userConfig.customListNames) delete req.userConfig.customListNames[String(listIdToRemove)];
+          if (req.userConfig.mergedLists) delete req.userConfig.mergedLists[String(listIdToRemove)];
+      });
       req.userConfig.lastUpdated = new Date().toISOString();
       const newConfigHash = await compressConfig(req.userConfig);
       manifestCache.clear();
       res.json({ success: true, configHash: newConfigHash, message: 'Lists removed' });
-    } catch (error) { res.status(500).json({ error: 'Failed to remove lists' }); }
+    } catch (error) { 
+        console.error('Failed to remove lists:', error);
+        res.status(500).json({ error: 'Failed to remove lists' });
+    }
   });
 
   router.post('/:configHash/lists/sort', async (req, res) => {
     try {
-      const { listId, sort, order } = req.body; // listId is the key for sortPreferences (e.g. original MDBList ID, Trakt list slug)
-      if (!listId || !sort) return res.status(400).json({ error: 'List ID and sort field required' });
+      const { listId, sort, order } = req.body;
+      if (!listId || !sort) return res.status(400).json({ error: 'List ID (originalId) and sort field required' });
       if (!req.userConfig.sortPreferences) req.userConfig.sortPreferences = {};
       req.userConfig.sortPreferences[String(listId)] = { sort, order: order || 'desc' };
       req.userConfig.lastUpdated = new Date().toISOString();
       const newConfigHash = await compressConfig(req.userConfig);
       manifestCache.clear(); 
       res.json({ success: true, configHash: newConfigHash, message: 'Sort preferences updated' });
-    } catch (error) { res.status(500).json({ error: 'Failed to update sort preferences' }); }
+    } catch (error) { 
+        console.error('Failed to update sort preferences:', error);
+        res.status(500).json({ error: 'Failed to update sort preferences' });
+    }
   });
   
   router.post('/:configHash/lists/merge', async (req, res) => {
     try {
-        const { listId, merged } = req.body; // listId is the catalog ID from manifest
+        const { listId, merged } = req.body;
         if (!listId || typeof merged !== 'boolean') {
-            return res.status(400).json({ error: 'List ID and merge preference required' });
+            return res.status(400).json({ error: 'List ID (manifestId) and merge preference required' });
         }
         if (!req.userConfig.mergedLists) req.userConfig.mergedLists = {};
         req.userConfig.mergedLists[String(listId)] = merged;
@@ -310,16 +353,26 @@ module.exports = function(router) {
         const newConfigHash = await compressConfig(req.userConfig);
         manifestCache.clear();
         res.json({ success: true, configHash: newConfigHash, message: `List ${merged ? 'merged' : 'split'}` });
-    } catch (error) { res.status(500).json({ error: 'Failed to update list merge preference' }); }
+    } catch (error) { 
+        console.error('Failed to update list merge preference:', error);
+        res.status(500).json({ error: 'Failed to update list merge preference' });
+    }
   });
 
-  // ----- Routes under /api (without configHash in URL) -----
   router.post('/config/create', async (req, res) => {
     try {
-      const config = { ...defaultConfig, ...req.body, lastUpdated: new Date().toISOString() };
+      const initialStructure = {
+        listOrder: [], hiddenLists: [], removedLists: [],
+        customListNames: {}, mergedLists: {}, sortPreferences: {},
+        importedAddons: {}, listsMetadata: {}
+      };
+      const config = { ...defaultConfig, ...initialStructure, ...req.body, lastUpdated: new Date().toISOString() };
       const configHash = await compressConfig(config);
       res.json({ success: true, configHash });
-    } catch (error) { res.status(500).json({ error: 'Failed to create configuration' }); }
+    } catch (error) { 
+        console.error('Error in /config/create:', error);
+        res.status(500).json({ error: 'Failed to create configuration' });
+    }
   });
   
   router.post('/validate-keys', async (req, res) => {
@@ -334,12 +387,18 @@ module.exports = function(router) {
         results.rpdb = { valid: await validateRPDBKey(rpdbApiKey) };
       }
       res.json(results);
-    } catch (error) { res.status(500).json({ error: 'Failed to validate keys' }); }
+    } catch (error) { 
+        console.error('Error in /validate-keys:', error);
+        res.status(500).json({ error: 'Failed to validate keys' });
+    }
   });
   
   router.get('/trakt/login', (req, res) => {
     try { res.redirect(getTraktAuthUrl()); }
-    catch (error) { res.status(500).json({ error: 'Internal server error for Trakt login' }); }
+    catch (error) { 
+        console.error('Error in /trakt/login redirect:', error);
+        res.status(500).json({ error: 'Internal server error for Trakt login' });
+    }
   });
 
   router.get('/:configHash/lists', async (req, res) => {
@@ -356,43 +415,43 @@ module.exports = function(router) {
 
         const removedListsSet = new Set(req.userConfig.removedLists || []);
         let configChangedDueToMetadataFetch = false;
-
         if (!req.userConfig.listsMetadata) req.userConfig.listsMetadata = {};
         
         const processedListsPromises = allUserLists
-            .filter(list => !removedListsSet.has(String(list.id)))
+            .filter(list => {
+                let potentialManifestId = String(list.id);
+                 if (list.source === 'mdblist') {
+                    potentialManifestId = list.id === 'watchlist' ? `aiolists-watchlist-W` : `aiolists-${list.id}-${list.listType || 'L'}`;
+                }
+                return !removedListsSet.has(potentialManifestId);
+            })
             .map(async list => {
                 const listIdStr = String(list.id);
                 let metadata = req.userConfig.listsMetadata[listIdStr] || {};
-                
-                if (typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean') {
-                    let idForContentFetch = listIdStr;
-                    if (list.source === 'mdblist') {
-                         idForContentFetch = list.id === 'watchlist' ? `aiolists-watchlist-W` : `aiolists-${list.id}-${list.listType || 'L'}`;
-                    }
+                let manifestListId = listIdStr;
+                let listTypeForTag = list.listType || 'L';
+                if (list.source === 'mdblist') {
+                    manifestListId = list.id === 'watchlist' ? `aiolists-watchlist-W` : `aiolists-${list.id}-${listTypeForTag}`;
+                } else if (list.source === 'trakt'){
+                    manifestListId = list.id;
+                }
 
-                    const tempContent = await fetchListContent(idForContentFetch, req.userConfig, 0); 
+                if (typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean') {
+                    const tempContent = await fetchListContent(manifestListId, req.userConfig, 0); 
                     metadata.hasMovies = tempContent?.movies?.length > 0 || tempContent?.hasMovies === true;
                     metadata.hasShows = tempContent?.shows?.length > 0 || tempContent?.hasShows === true;
                     req.userConfig.listsMetadata[listIdStr] = metadata;
                     configChangedDueToMetadataFetch = true;
                 }
 
-                let tagType = list.listType || (list.source === 'mdblist' ? 'L' : 'A');
+                let tagType = listTypeForTag;
                 if (list.source === 'trakt') tagType = 'T';
                 if (list.isWatchlist) tagType = 'W';
                 
-                let manifestListId = listIdStr;
-                if (list.source === 'mdblist') {
-                    manifestListId = list.id === 'watchlist' ? `aiolists-watchlist-W` : `aiolists-${list.id}-${list.listType || 'L'}`;
-                }
-
                 return {
-                    id: manifestListId,
-                    originalId: listIdStr,
-                    name: list.name,
-                    customName: req.userConfig.customListNames?.[manifestListId] || req.userConfig.customListNames?.[listIdStr] || null,
-                    isHidden: (req.userConfig.hiddenLists || []).includes(manifestListId) || (req.userConfig.hiddenLists || []).includes(listIdStr),
+                    id: manifestListId, originalId: listIdStr, name: list.name,
+                    customName: req.userConfig.customListNames?.[manifestListId] || null,
+                    isHidden: (req.userConfig.hiddenLists || []).includes(manifestListId),
                     hasMovies: metadata.hasMovies, hasShows: metadata.hasShows,   
                     isTraktList: list.source === 'trakt' && list.isTraktList, 
                     isTraktWatchlist: list.source === 'trakt' && list.isTraktWatchlist,
@@ -400,12 +459,12 @@ module.exports = function(router) {
                     isTraktTrending: list.isTraktTrending,
                     isTraktPopular: list.isTraktPopular,
                     isWatchlist: !!list.isWatchlist,
-                    tag: tagType,
+                    tag: tagType, listType: list.listType,
                     tagImage: list.source === 'trakt' ? 'https://trakt.tv/favicon.ico' : null,
                     sortPreferences: req.userConfig.sortPreferences?.[listIdStr] || 
-                                     { sort: (list.isTraktList || list.isTraktWatchlist || list.isTraktPopular || list.isTraktTrending || list.isTraktRecommendations) ? 'rank' : 'imdbvotes', 
-                                       order: (list.isTraktList || list.isTraktWatchlist || list.isTraktPopular || list.isTraktTrending || list.isTraktRecommendations) ? 'asc' : 'desc' },
-                    isMerged: req.userConfig.mergedLists?.[manifestListId] !== false || req.userConfig.mergedLists?.[listIdStr] !== false,
+                                     { sort: (list.source === 'trakt') ? 'rank' : 'imdbvotes', 
+                                       order: (list.source === 'trakt') ? 'asc' : 'desc' },
+                    isMerged: req.userConfig.mergedLists?.[manifestListId] !== false,
                     source: list.source 
                 };
             });
@@ -416,39 +475,34 @@ module.exports = function(router) {
             for (const addonKey in req.userConfig.importedAddons) {
                 const addon = req.userConfig.importedAddons[addonKey];
                 if (removedListsSet.has(addon.id)) continue;
-
                 addon.catalogs.forEach(catalog => {
                     const catalogIdStr = String(catalog.id); 
                     if (removedListsSet.has(catalogIdStr)) return;
-
                     let metadata = req.userConfig.listsMetadata[catalogIdStr] || {};
                     if (typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean') {
                         metadata.hasMovies = catalog.type === 'movie';
                         metadata.hasShows = catalog.type === 'series';
-                        req.userConfig.listsMetadata[catalogIdStr] = metadata;
-                        configChangedDueToMetadataFetch = true;
                     }
-                    
                     let tagType = 'A'; let tagImage = addon.logo;
                     if(addon.isMDBListUrlImport) { tagType = 'L'; tagImage = null; }
                     else if (addon.isTraktPublicList) { tagType = 'T'; tagImage = 'https://trakt.tv/favicon.ico'; }
 
                     processedLists.push({
-                        id: catalogIdStr, 
-                        originalId: catalog.originalId, // Important for sort prefs key
-                        name: catalog.name, 
+                        id: catalogIdStr, originalId: catalog.originalId || catalogIdStr, name: catalog.name, 
                         customName: req.userConfig.customListNames?.[catalogIdStr] || null,
                         isHidden: (req.userConfig.hiddenLists || []).includes(catalogIdStr),
                         hasMovies: metadata.hasMovies, hasShows: metadata.hasShows,
                         addonId: addon.id, addonName: addon.name,
                         tag: tagType, tagImage: tagImage,
-                        sortPreferences: req.userConfig.sortPreferences?.[catalog.originalId] || { sort: (addon.isTraktPublicList ? 'rank' : 'imdbvotes'), order: (addon.isTraktPublicList ? 'asc' : 'desc') },
+                        sortPreferences: req.userConfig.sortPreferences?.[catalog.originalId || catalogIdStr] || 
+                                         { sort: (addon.isTraktPublicList ? 'rank' : 'imdbvotes'), 
+                                           order: (addon.isTraktPublicList ? 'asc' : 'desc') },
                         isMerged: req.userConfig.mergedLists?.[catalogIdStr] !== false,
                         source: addon.isMDBListUrlImport ? 'mdblist_url' : (addon.isTraktPublicList ? 'trakt_public' : 'addon_manifest'),
                         isUrlImportedType: !!addon.isUrlImported,
                         isMDBListUrlImport: !!addon.isMDBListUrlImport,
                         isTraktPublicList: !!addon.isTraktPublicList,
-                        traktUser: addon.traktUser, traktListSlug: addon.traktListSlug // For public Trakt lists
+                        traktUser: addon.traktUser, traktListSlug: addon.traktListSlug
                     });
                 });
             }
@@ -457,11 +511,12 @@ module.exports = function(router) {
         if (req.userConfig.listOrder?.length > 0) {
             const orderMap = new Map(req.userConfig.listOrder.map((id, index) => [String(id), index]));
             processedLists.sort((a, b) => {
-                // a.id is the manifest ID (e.g. aiolists-123-L, trakt_watchlist, originalId_movies)
-                // listOrder should contain these manifest IDs.
-                const indexA = orderMap.get(String(a.id)) ?? Infinity;
-                const indexB = orderMap.get(String(b.id)) ?? Infinity;
-                return indexA - indexB;
+                const indexA = orderMap.get(String(a.id));
+                const indexB = orderMap.get(String(b.id));
+                if (indexA !== undefined && indexB !== undefined) return indexA - indexB;
+                if (indexA !== undefined) return -1; 
+                if (indexB !== undefined) return 1;  
+                return 0; 
             });
         }
         
@@ -470,13 +525,12 @@ module.exports = function(router) {
             importedAddons: req.userConfig.importedAddons || {},
             availableSortOptions: req.userConfig.availableSortOptions || defaultConfig.availableSortOptions,
             traktSortOptions: req.userConfig.traktSortOptions || defaultConfig.traktSortOptions,
-            listsMetadata: req.userConfig.listsMetadata // Send back potentially updated metadata
+            listsMetadata: req.userConfig.listsMetadata
         };
 
         if (configChangedDueToMetadataFetch) {
             req.userConfig.lastUpdated = new Date().toISOString();
             const newConfigHash = await compressConfig(req.userConfig);
-            manifestCache.clear();
             responsePayload.newConfigHash = newConfigHash;
         }
         res.json(responsePayload);
