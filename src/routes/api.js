@@ -173,7 +173,7 @@ module.exports = function(router) {
             catalogs.push({ 
                 id: `${idPrefixForCatalog}_movies`, 
                 originalId: importedListDetails.originalTraktSlug || importedListDetails.listId,
-                name: `${listNameForDisplay} (Movies)`, type: 'movie', url: url,
+                name: `${listNameForDisplay}`, type: 'movie', url: url,
                 traktUser: importedListDetails.traktUser, traktListSlug: importedListDetails.originalTraktSlug 
             });
         }
@@ -181,7 +181,7 @@ module.exports = function(router) {
             catalogs.push({ 
                 id: `${idPrefixForCatalog}_series`, 
                 originalId: importedListDetails.originalTraktSlug || importedListDetails.listId,
-                name: `${listNameForDisplay} (Series)`, type: 'series', url: url, 
+                name: `${listNameForDisplay}`, type: 'series', url: url, 
                 traktUser: importedListDetails.traktUser, traktListSlug: importedListDetails.originalTraktSlug 
             });
         }

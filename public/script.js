@@ -205,10 +205,16 @@ document.addEventListener('DOMContentLoaded', function() {
         traktSortOptions: (Array.isArray(data.config.traktSortOptions) && data.config.traktSortOptions.length > 0) ? data.config.traktSortOptions : [...defaultConfig.traktSortOptions]
       };
 
-      updateApiKeyUI(elements.apiKeyInput, state.userConfig.apiKey, 'mdblist', state.userConfig.mdblistUsername);
-      updateApiKeyUI(elements.rpdbApiKeyInput, state.userConfig.rpdbApiKey, 'rpdb');
-      updateTraktUI(!!state.userConfig.traktAccessToken);
-      await loadUserListsAndAddons(); // Now fetch the lists based on this config
+      const mdblistApiKey = state.userConfig.apiKey;
+      const rpdbApiKey = state.userConfig.rpdbApiKey;
+      updateApiKeyUI(elements.apiKeyInput, mdblistApiKey, 'mdblist', state.userConfig.mdblistUsername);
+      updateApiKeyUI(elements.rpdbApiKeyInput, rpdbApiKey, 'rpdb');
+
+      if (mdblistApiKey || rpdbApiKey) {
+        await validateAndSaveApiKeys(mdblistApiKey, rpdbApiKey, true);
+      }  
+        updateTraktUI(!!state.userConfig.traktAccessToken);
+      await loadUserListsAndAddons();
     } catch (error) { console.error('Load Config Error:', error); showNotification('apiKeys', `Load Config Error: ${error.message}`, 'error', true); }
   }
 
@@ -224,7 +230,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }, 700);
   }
 
-  async function validateAndSaveApiKeys(mdblistApiKeyToValidate, rpdbApiKeyToValidate) {
+  async function validateAndSaveApiKeys(mdblistApiKeyToValidate, rpdbApiKeyToValidate, isInitialLoadOrSilentCheck = false) {
     try {
       const res = await fetch('/api/validate-keys', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -232,52 +238,66 @@ document.addEventListener('DOMContentLoaded', function() {
       });
       const validationResults = await res.json();
       if (!res.ok) throw new Error(validationResults.error || `Validation HTTP error! Status: ${res.status}`);
-
+  
       const mdblistValid = validationResults.mdblist?.valid;
       const rpdbValid = validationResults.rpdb?.valid;
-      state.userConfig.mdblistUsername = mdblistValid ? validationResults.mdblist.username : null;
-
-      updateApiKeyUI(elements.apiKeyInput, mdblistApiKeyToValidate, 'mdblist', state.userConfig.mdblistUsername, mdblistValid);
-      updateApiKeyUI(elements.rpdbApiKeyInput, rpdbApiKeyToValidate, 'rpdb', null, rpdbValid);
-
+      const mdblistUsername = mdblistValid ? validationResults.mdblist.username : null;
+  
+      // Update UI regardless of isInitialLoadOrSilentCheck
+      updateApiKeyUI(elements.apiKeyInput, mdblistApiKeyToValidate, 'mdblist', mdblistUsername, mdblistValid);
+      updateApiKeyUI(elements.rpdbApiKeyInput, rpdbApiKeyToValidate, 'rpdb', null, rpdbValid);  
+  
       const saveResponse = await fetch(`/${state.configHash}/apikey`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiKey: mdblistApiKeyToValidate, rpdbApiKey: rpdbApiKeyToValidate })
       });
       const saveData = await saveResponse.json();
       if (!saveResponse.ok || !saveData.success) throw new Error(saveData.error || "Failed to save API keys");
-
+  
       if (saveData.configHash && saveData.configHash !== state.configHash) {
           state.configHash = saveData.configHash; updateURL(); updateStremioButtonHref();
       }
       state.userConfig.apiKey = mdblistApiKeyToValidate;
       state.userConfig.rpdbApiKey = rpdbApiKeyToValidate;
-      showNotification('apiKeys', 'API keys updated.', 'success');
-
-      // Reload lists if API keys changed and could affect list availability
-      if ((mdblistValid && mdblistApiKeyToValidate) || state.userConfig.traktAccessToken || (rpdbValid && rpdbApiKeyToValidate)) {
+      if (mdblistValid) state.userConfig.mdblistUsername = mdblistUsername; // Persist username if valid
+  
+      if (!isInitialLoadOrSilentCheck) {
+          showNotification('apiKeys', 'API keys updated.', 'success');
+      }
+  
+      if (!isInitialLoadOrSilentCheck && ((mdblistValid && mdblistApiKeyToValidate) || state.userConfig.traktAccessToken || (rpdbValid && rpdbApiKeyToValidate))) {
           await loadUserListsAndAddons();
-      } else if (!mdblistApiKeyToValidate && !state.userConfig.traktAccessToken) {
+      } else if (!isInitialLoadOrSilentCheck && !mdblistApiKeyToValidate && !state.userConfig.traktAccessToken) {
           state.currentLists = []; renderLists(); renderImportedAddons();
       }
-    } catch (error) { console.error('Key Error:', error); showNotification('apiKeys', `Key Error: ${error.message}`, 'error', true); }
+    } catch (error) {
+      console.error('Key Error:', error);
+      if (!isInitialLoadOrSilentCheck || (mdblistApiKeyToValidate || rpdbApiKeyToValidate)) {
+        showNotification('apiKeys', `Key Error: ${error.message}`, 'error', true);
+      }
+    }
   }
-
+  
   function updateApiKeyUI(inputElement, key, keyType, username = null, isValid = null) {
     const connectedDiv = keyType === 'mdblist' ? elements.mdblistConnected : elements.rpdbConnected;
     const connectedText = keyType === 'mdblist' ? elements.mdblistConnectedText : elements.rpdbConnectedText;
     inputElement.classList.remove('valid', 'invalid');
+  
     if (key && isValid === true) {
-      inputElement.style.display = 'none'; connectedDiv.style.display = 'flex';
+      inputElement.style.display = 'none';
+      connectedDiv.style.display = 'flex';
       connectedText.textContent = keyType === 'mdblist' ? `Connected as ${username}` : 'RPDB Key Valid';
-      if(inputElement.classList) inputElement.classList.add('valid');
+      if (inputElement.classList) inputElement.classList.add('valid');
     } else {
-      inputElement.style.display = 'block'; connectedDiv.style.display = 'none';
+      inputElement.style.display = 'block';
+      connectedDiv.style.display = 'none';
       inputElement.value = key || '';
-      if (key && isValid === false && inputElement.classList) inputElement.classList.add('invalid');
+      if (key && isValid === false) {
+          if (inputElement.classList) inputElement.classList.add('invalid');
+      }
     }
   }
-
+  
   function updateTraktUI(isConnected) {
     elements.traktLoginBtn.style.display = isConnected ? 'none' : 'block';
     elements.traktConnectedState.style.display = isConnected ? 'flex' : 'none';
