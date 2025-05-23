@@ -1,8 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const { defaultConfig, PORT, IS_PRODUCTION } = require('./config');
-const configureRoutes = require('./routes'); // Kommer från src/routes/index.js
+const { PORT, IS_PRODUCTION } = require('./config');
+const configureRoutes = require('./routes');
 
 async function initializeApp() {
   try {
@@ -12,20 +12,19 @@ async function initializeApp() {
     app.use(express.json());
     app.use(express.static(path.join(__dirname, '..', 'public')));
 
-    // Konfigurera rutter
     configureRoutes(app);
     
     app.listen(PORT, () => {
       if (!IS_PRODUCTION) {
-        console.log(`AIOLists Stremio Addon körs på port ${PORT}`);
-        console.log(`Konfigurationspanel: http://localhost:${PORT}/configure`);
+        console.log(`AIOLists Stremio Addon running on port ${PORT}`);
+        console.log(`Admin panel: http://localhost:${PORT}/configure`);
       }
     });
     
     return app;
   } catch (err) {
     if (!IS_PRODUCTION) {
-      console.error("Misslyckades med att initiera applikationen:", err);
+      console.error("Failed to initialize application:", err);
     }
     throw err;
   }
@@ -33,7 +32,7 @@ async function initializeApp() {
 
 if (require.main === module) {
   initializeApp().catch(err => {
-    console.error('Applikationen kunde inte starta:', err);
+    console.error('Applikationen failed to start:', err);
     process.exit(1);
   });
 } else {

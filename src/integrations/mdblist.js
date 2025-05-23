@@ -1,5 +1,6 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
+const { ITEMS_PER_PAGE } = require('../config');
 
 /**
  * Validate MDBList API key
@@ -111,7 +112,7 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0, sort = 'i
       if (id === 'watchlist' || id === 'watchlist-W') {
           console.log('Fetching MDBList watchlist items');
           try {
-              const response = await axios.get(`https://api.mdblist.com/watchlist/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
+              const response = await axios.get(`https://api.mdblist.com/watchlist/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=${ITEMS_PER_PAGE}&offset=${skip}`);
               if (response.status === 429) {
                   console.error('Rate limited by MDBList API for watchlist. Please wait a moment before trying again.');
                   return null;
@@ -134,7 +135,7 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0, sort = 'i
           effectiveListType = 'L';
           console.log(`Workspaceing MDBList (URL imported): ${id} as type ${effectiveListType}`);
           try {
-              const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
+              const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=${ITEMS_PER_PAGE}&offset=${skip}`);
               if (response.status === 200 && !response.data.error) {
                   console.log(`Successfully fetched MDBList ${id} (URL import)`);
                   return processApiResponse(response.data);
@@ -173,7 +174,7 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0, sort = 'i
           if (effectiveListType === 'E') {
               console.log(`Workspaceing EXTERNAL MDBList ${id}`);
               try {
-                  const response = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
+                  const response = await axios.get(`https://api.mdblist.com/external/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=${ITEMS_PER_PAGE}&offset=${skip}`);
                   if (response.status === 200 && !response.data.error) {
                       return processApiResponse(response.data);
                   }
@@ -186,7 +187,7 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0, sort = 'i
           } else if (effectiveListType === 'L') {
               console.log(`Workspaceing INTERNAL MDBList ${id}`);
                try {
-                  const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=100&offset=${skip}`);
+                  const response = await axios.get(`https://api.mdblist.com/lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=${ITEMS_PER_PAGE}&offset=${skip}`);
                   if (response.status === 200 && !response.data.error) {
                       return processApiResponse(response.data);
                   }

@@ -1,6 +1,5 @@
 // src/addon/converters.js
 const { batchFetchPosters } = require('../utils/posters');
-const { ITEMS_PER_PAGE } = require('../config'); // Importera om du fortfarande behöver den här
 
 /**
  * Konverterar API-objekt till Stremio-format.
@@ -102,11 +101,9 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null) {
   });
 
   if (useRPDB && itemsToProcess.length > 0) {
-    console.log('[convertToStremioFormat] Items to process (BEFORE RPDB - first 2):', JSON.stringify(itemsToProcess.slice(0, 2)));
     const imdbIds = itemsToProcess.map(item => item.id).filter(id => id && id.startsWith('tt'));
     if (imdbIds.length > 0) {
       const posterMap = await batchFetchPosters(imdbIds, rpdbApiKey);
-      console.log('[convertToStremioFormat] Poster map FROM RPDB (sample):', JSON.stringify(Object.fromEntries(Object.entries(posterMap).slice(0, 5)))); // Logga några exempel från posterMap
       metas = itemsToProcess.map(item => {
         if (item.id && posterMap[item.id]) {
           return { ...item, poster: posterMap[item.id] };
@@ -118,11 +115,6 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null) {
     }
   } else {
     metas = itemsToProcess;
-  }
-  if (metas.length > 0) {
-    console.log(`[convertToStremioFormat] Returnerar ${metas.length} meta-objekt. Första objektet:`, JSON.stringify(metas[0]));
-  } else {
-    console.log(`[convertToStremioFormat] Returnerar 0 meta-objekt.`);
   }
 
   return metas;

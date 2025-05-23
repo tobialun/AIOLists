@@ -1,10 +1,10 @@
 // src/routes/api.js
 const path = require('path');
-const { defaultConfig, ITEMS_PER_PAGE } = require('../config');
+const { defaultConfig } = require('../config');
 const { compressConfig, decompressConfig } = require('../utils/urlConfig');
 const { createAddon, fetchListContent } = require('../addon/addonBuilder');
 const { convertToStremioFormat } = require('../addon/converters');
-const { isWatchlist, setCacheHeaders } = require('../utils/common');
+const { setCacheHeaders } = require('../utils/common');
 const Cache = require('../utils/cache'); // Använd den centraliserade cache-modulen
 
 // Importera integrationsfunktioner

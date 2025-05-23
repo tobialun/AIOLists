@@ -3,7 +3,6 @@ const { addonBuilder } = require('stremio-addon-sdk');
 const { fetchTraktListItems, fetchTraktLists } = require('../integrations/trakt');
 const { fetchListItems: fetchMDBListItems, fetchAllLists: fetchAllMDBLists } = require('../integrations/mdblist');
 const { fetchExternalAddonItems } = require('../integrations/externalAddons');
-const { defaultConfig, ITEMS_PER_PAGE } = require('../config'); // Importera ITEMS_PER_PAGE
 const { convertToStremioFormat } = require('./converters');
 const { isWatchlist } = require('../utils/common');
 
@@ -18,8 +17,7 @@ async function fetchListContent(listId, userConfig, skip = 0) {
     for (const addon of Object.values(importedAddons)) {
       const catalog = addon.catalogs.find(c => c.id === listId || c.originalId === listId);
       if (catalog) {
-        if (addon.id.startsWith('mdblisturl_') && catalog.url && apiKey) { // MDBList URL import
-          // Skicka med true för en ny parameter, t.ex. isUrlImported
+        if (addon.id.startsWith('mdblisturl_') && catalog.url && apiKey) {
           return fetchMDBListItems(catalog.originalId || listId, apiKey, listsMetadata, skip, sortPrefs.sort, sortPrefs.order, true);
         }
         return fetchExternalAddonItems(catalog.originalId || listId, addon, skip, userConfig.rpdbApiKey);
@@ -53,7 +51,7 @@ async function createAddon(userConfig) {
     id: 'org.stremio.aiolists',
     version: `1.0.0-${Date.now()}`, // Dynamisk version för att hjälpa till med cache-busting
     name: 'AIOLists',
-    description: 'Manage all your lists in one place. Access configuration via add-on wrench icon or the /configure endpoint on your server.',
+    description: 'Manage all your lists in one place.',
     resources: ['catalog', 'meta'],
     types: ['movie', 'series'], // Stödjer både film och serier
     idPrefixes: ['tt'],
@@ -175,16 +173,6 @@ async function createAddon(userConfig) {
   const builder = new addonBuilder(manifest);
 
   builder.defineCatalogHandler(async ({ type, id, extra }) => {
-    if (id === 'testcatalog') {
-        console.log("Serving test catalog");
-        return Promise.resolve({
-            metas: [
-                { id: 'tt0111161', type: 'movie', name: 'The Shawshank Redemption', poster: 'https://m.media-amazon.com/images/M/MV5BNDE3ODcxYzMtY2YzZC00NmNlLWJiNDMtZDViZWM2MzIxZDYwXkEyXkFqcGdeQXVyNzkwMjQ5NzM@._V1_SX300.jpg', releaseInfo: '1994' },
-                { id: 'tt0068646', type: 'movie', name: 'The Godfather', poster: 'https://m.media-amazon.com/images/M/MV5BM2MyNjYxNmUtYTAwNi00MTYxLWJmNWYtYzZlODY3ZTk3OTFlXkEyXkFqcGdeQXVyNzkwMjQ5NzM@._V1_SX300.jpg', releaseInfo: '1972' }
-            ]
-        });
-    }
-
     const skip = parseInt(extra?.skip) || 0;
     
     // Hämta den fullständiga konfigurationen (inklusive API-nycklar) som är associerad med configHash.
