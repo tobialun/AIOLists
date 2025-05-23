@@ -43,6 +43,16 @@ const defaultConfig = {
     { value: 'runtime', label: 'Runtime' },
     { value: 'title', label: 'Title' },
     { value: 'random', label: 'Random' }
+  ],
+  traktSortOptions: [ // New array for Trakt-specific sort options
+    { value: 'rank', label: 'Trakt Rank' },
+    { value: 'added', label: 'Date Added' },
+    { value: 'title', label: 'Title' },
+    { value: 'released', label: 'Release Date' },
+    { value: 'runtime', label: 'Runtime' },
+    { value: 'popularity', label: 'Trakt Popularity' },
+    { value: 'votes', label: 'Trakt Votes' },
+    { value: 'my_rating', label: 'My Trakt Rating' },
   ]
 };
 

@@ -345,8 +345,7 @@ module.exports = function(router) {
       req.userConfig.sortPreferences[String(listId)] = { sort, order: order || 'desc' };
       req.userConfig.lastUpdated = new Date().toISOString();
       const newConfigHash = await compressConfig(req.userConfig);
-      // Ingen manifestCache.clear() behövs här då sortering inte direkt påverkar manifeststrukturen,
-      // men det påverkar kataloginnehållet som inte cachas på servern.
+      manifestCache.clear(); //EXPERIMENTAL
       res.json({ success: true, configHash: newConfigHash, message: 'Sorteringspreferenser uppdaterade' });
     } catch (error) {
       console.error('Fel vid uppdatering av sorteringspreferenser:', error);
@@ -430,68 +429,116 @@ module.exports = function(router) {
             allUserLists.push(...mdbLists.map(l => ({...l, source: 'mdblist'})));
         }
         if (req.userConfig.traktAccessToken) {
-            const traktLists = await fetchTraktUserLists(req.userConfig); // Använd fetchTraktUserLists
+            const traktLists = await fetchTraktUserLists(req.userConfig);
             allUserLists.push(...traktLists.map(l => ({...l, source: 'trakt'})));
         }
 
         const removedListsSet = new Set(req.userConfig.removedLists || []);
-        
-        const processedLists = allUserLists
-            .filter(list => !removedListsSet.has(String(list.id)))
-            .map(list => {
-                const listIdStr = String(list.id);
-                const metadata = req.userConfig.listsMetadata?.[listIdStr] || {};
-                const hasMovies = metadata.hasMovies !== false;
-                const hasShows = metadata.hasShows !== false;
+        let configChangedDueToMetadataFetch = false;
 
-                let tagType = list.listType || 'L'; // Default MDBList
+        // Initialize listsMetadata if it doesn't exist
+        if (!req.userConfig.listsMetadata) {
+            req.userConfig.listsMetadata = {};
+        }
+
+        const processedListsPromises = allUserLists
+            .filter(list => !removedListsSet.has(String(list.id)))
+            .map(async list => {
+                const listIdStr = String(list.id);
+                let metadata = req.userConfig.listsMetadata[listIdStr] || {};
+                
+                // Determine hasMovies and hasShows if not already known
+                if (typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean') {
+                    console.log(`Metadata for ${listIdStr} (hasMovies/hasShows) is missing. Determining types.`);
+                    // Use a minimal fetch to determine types; fetchListContent might be too heavy.
+                    // Ideally, fetchListContent would have a lightweight mode or use a dedicated function.
+                    // For now, we use existing fetchListContent but this is what slows down manifest.
+                    const tempContent = await fetchListContent(listIdStr, req.userConfig, 0); // skip 0, use default sort
+
+                    if (tempContent) {
+                        metadata.hasMovies = tempContent.movies?.length > 0 || tempContent.hasMovies === true;
+                        metadata.hasShows = tempContent.shows?.length > 0 || tempContent.hasShows === true;
+                    } else {
+                        // Fallback if content fetch fails or returns null
+                        metadata.hasMovies = list.isMovieList === true; // Use list flags if available
+                        metadata.hasShows = list.isShowList === true;
+                        if (list.isMovieList !== true && list.isShowList !== true) { // If no flags, assume false to be safe
+                            metadata.hasMovies = false;
+                            metadata.hasShows = false;
+                        }
+                    }
+                    req.userConfig.listsMetadata[listIdStr] = metadata;
+                    configChangedDueToMetadataFetch = true;
+                    console.log(`Determined for ${listIdStr} - hasMovies: ${metadata.hasMovies}, hasShows: ${metadata.hasShows}`);
+                }
+
+                let tagType = list.listType || 'L';
                 if (list.source === 'trakt') tagType = 'T';
                 if (list.isWatchlist) tagType = 'W';
-
 
                 return {
                     id: listIdStr,
                     name: list.name,
                     customName: req.userConfig.customListNames?.[listIdStr] || null,
                     isHidden: (req.userConfig.hiddenLists || []).includes(listIdStr),
-                    hasMovies: hasMovies,
-                    hasShows: hasShows,
-                    isExternalList: !!list.isExternalList, // Från MDBList
-                    isTraktList: list.source === 'trakt',
-                    isWatchlist: !!list.isWatchlist, // Från MDBList eller Trakt
+                    hasMovies: metadata.hasMovies, // Use determined/stored metadata
+                    hasShows: metadata.hasShows,   // Use determined/stored metadata
+                    isExternalList: !!list.isExternalList,
+                    isTraktList: list.source === 'trakt' && list.isTraktList, // Ensure it's a custom list
+                    isTraktWatchlist: list.source === 'trakt' && list.isTraktWatchlist,
+                    // Add other Trakt list type flags if needed for sort UI
+                    isTraktRecommendations: list.isTraktRecommendations,
+                    isTraktTrending: list.isTraktTrending,
+                    isTraktPopular: list.isTraktPopular,
+                    isWatchlist: !!list.isWatchlist,
                     tag: tagType,
-                    tagImage: list.source === 'trakt' ? 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico' : null,
-                    sortPreferences: req.userConfig.sortPreferences?.[listIdStr] || { sort: 'imdbvotes', order: 'desc' },
-                    isMerged: req.userConfig.mergedLists?.[listIdStr] !== false, // Default to true
+                    tagImage: list.source === 'trakt' ? 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico' : null, // Simplified
+                    sortPreferences: req.userConfig.sortPreferences?.[listIdStr] || 
+                                     { sort: (list.isTraktList || list.isTraktWatchlist) ? 'rank' : 'imdbvotes', 
+                                       order: (list.isTraktList || list.isTraktWatchlist) ? 'asc' : 'desc' },
+                    isMerged: req.userConfig.mergedLists?.[listIdStr] !== false,
                 };
             });
+        
+        let processedLists = await Promise.all(processedListsPromises);
 
-        // Lägg till importerade addon-listor
+        // Add imported addon-listor (metadata for these should be part of addon manifest)
         if (req.userConfig.importedAddons) {
             for (const addon of Object.values(req.userConfig.importedAddons)) {
                 const addonCatalogs = addon.catalogs
                     .filter(catalog => !removedListsSet.has(String(catalog.id)))
                     .map(catalog => {
                         const catalogIdStr = String(catalog.id);
-                        const metadata = req.userConfig.listsMetadata?.[catalogIdStr] || {};
+                        // For imported addons, hasMovies/hasShows usually derived from catalog.type
                         const catType = catalog.type === 'anime' ? 'series' : catalog.type;
-                        const hasMovies = catType === 'movie' || catType === 'all' || metadata.hasMovies === true;
-                        const hasShows = catType === 'series' || catType === 'all' || metadata.hasShows === true;
+                        const hasMovies = catType === 'movie' || catType === 'all';
+                        const hasShows = catType === 'series' || catType === 'all' || catType === 'anime';
+                         // Ensure metadata is stored if not already
+                        if (!req.userConfig.listsMetadata[catalogIdStr] || 
+                            typeof req.userConfig.listsMetadata[catalogIdStr].hasMovies !== 'boolean') {
+                            req.userConfig.listsMetadata[catalogIdStr] = {
+                                ...req.userConfig.listsMetadata[catalogIdStr],
+                                hasMovies,
+                                hasShows
+                            };
+                            configChangedDueToMetadataFetch = true;
+                        }
+
 
                         return {
                             id: catalogIdStr,
                             name: catalog.name,
                             customName: req.userConfig.customListNames?.[catalogIdStr] || null,
                             isHidden: (req.userConfig.hiddenLists || []).includes(catalogIdStr),
-                            hasMovies: hasMovies,
-                            hasShows: hasShows,
-                            isExternalList: true, // Alla importerade tilläggskataloger är "externa" i denna kontext
+                            hasMovies: req.userConfig.listsMetadata[catalogIdStr].hasMovies,
+                            hasShows: req.userConfig.listsMetadata[catalogIdStr].hasShows,
+                            isExternalList: true, 
                             addonId: addon.id,
                             addonName: addon.name,
-                            tag: 'A', // Typ för Addon
+                            tag: 'A', 
                             tagImage: addon.logo,
                             sortPreferences: req.userConfig.sortPreferences?.[catalogIdStr] || { sort: 'imdbvotes', order: 'desc' },
-                            // isMerged hanteras inte för externa tillägg på samma sätt, de har redan definierade typer.
+                            isMerged: req.userConfig.mergedLists?.[catalogIdStr] !== false, // Default to true for imported unless specified
                         };
                     });
                 processedLists.push(...addonCatalogs);
@@ -500,26 +547,37 @@ module.exports = function(router) {
         
         // Sortera listor baserat på config.listOrder
         if (req.userConfig.listOrder?.length > 0) {
-            const orderMap = new Map(req.userConfig.listOrder.map((id, index) => [String(id), index]));
-            processedLists.sort((a, b) => {
-                // Jämför med det rena ID:t (utan prefix/suffix)
-                const cleanAId = String(a.id).replace(/^aiolists-/, '').replace(/-[ELW]$/, '');
-                const cleanBId = String(b.id).replace(/^aiolists-/, '').replace(/-[ELW]$/, '');
-                const indexA = orderMap.get(cleanAId) ?? Infinity;
-                const indexB = orderMap.get(cleanBId) ?? Infinity;
-                return indexA - indexB;
-            });
-        }
-
-        res.json({
+          const orderMap = new Map(req.userConfig.listOrder.map((id, index) => [String(id), index]));
+          processedLists.sort((a, b) => {
+              // Jämför med det rena ID:t (utan prefix/suffix)
+              const cleanAId = String(a.id).replace(/^aiolists-/, '').replace(/-[ELW]$/, '');
+              const cleanBId = String(b.id).replace(/^aiolists-/, '').replace(/-[ELW]$/, '');
+              const indexA = orderMap.get(cleanAId) ?? Infinity;
+              const indexB = orderMap.get(cleanBId) ?? Infinity;
+              return indexA - indexB;
+          });
+      }
+        
+        let responsePayload = {
             success: true,
             lists: processedLists,
             importedAddons: req.userConfig.importedAddons || {},
-            availableSortOptions: req.userConfig.availableSortOptions || defaultConfig.availableSortOptions
-        });
+            availableSortOptions: req.userConfig.availableSortOptions || defaultConfig.availableSortOptions,
+            traktSortOptions: req.userConfig.traktSortOptions || defaultConfig.traktSortOptions
+        };
+
+        if (configChangedDueToMetadataFetch) {
+            console.log("Lists metadata was updated, re-compressing config.");
+            req.userConfig.lastUpdated = new Date().toISOString();
+            const newConfigHash = await compressConfig(req.userConfig);
+            manifestCache.clear();
+            responsePayload.newConfigHash = newConfigHash;
+        }
+
+        res.json(responsePayload);
     } catch (error) {
         console.error('Fel vid hämtning av listor:', error);
-        res.status(500).json({ error: 'Misslyckades med att hämta listor' });
+        res.status(500).json({ error: 'Misslyckades med att hämta listor', details: error.message });
     }
   });
 };
