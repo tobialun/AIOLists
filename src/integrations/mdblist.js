@@ -5,8 +5,6 @@ const { enrichItemsWithCinemeta } = require('../utils/metadataFetcher'); // Impo
 
 /**
  * Validate MDBList API key
- * @param {string} apiKey - MDBList API key
- * @returns {Promise<Object|null>} User info if valid, null if invalid
  */
 async function validateMDBListKey(apiKey) {
   if (!apiKey) return null;
@@ -14,68 +12,70 @@ async function validateMDBListKey(apiKey) {
     const response = await axios.get(`https://api.mdblist.com/user?apikey=${apiKey}`, { timeout: 5000 });
     return (response.status === 200 && response.data) ? response.data : null;
   } catch (error) {
+    // console.error('MDBList key validation error:', error.message);
     return null;
   }
 }
 
 /**
  * Fetch all user lists from MDBList API
- * @param {string} apiKey - MDBList API key
- * @returns {Promise<Array>} Array of lists
  */
 async function fetchAllLists(apiKey) {
   if (!apiKey) return [];
   let allLists = [];
-  try {
-    const internalResponse = await axios.get(`https://api.mdblist.com/lists/user?apikey=${apiKey}`);
-    if (internalResponse.data && Array.isArray(internalResponse.data)) {
-      allLists.push(...internalResponse.data.map(list => ({ ...list, listType: 'L' })));
-    }
-  } catch (err) { console.error('Error fetching MDBList internal lists:', err.message); }
-  try {
-    const externalResponse = await axios.get(`https://api.mdblist.com/external/lists/user?apikey=${apiKey}`);
-    if (externalResponse.data && Array.isArray(externalResponse.data)) {
-      allLists.push(...externalResponse.data.map(list => ({ ...list, listType: 'E' })));
-    }
-  } catch (err) { console.error('Error fetching MDBList external lists:', err.message); }
+  const listEndpoints = [
+    { url: `https://api.mdblist.com/lists/user?apikey=${apiKey}`, type: 'L', nameSuffix: '' },
+    { url: `https://api.mdblist.com/external/lists/user?apikey=${apiKey}`, type: 'E', nameSuffix: ' (External)' }
+  ];
+  for (const endpoint of listEndpoints) {
+    try {
+      const response = await axios.get(endpoint.url);
+      if (response.data && Array.isArray(response.data)) {
+        allLists.push(...response.data.map(list => ({ ...list, listType: endpoint.type, name: list.name + endpoint.nameSuffix })));
+      }
+    } catch (err) { console.error(`Error fetching MDBList ${endpoint.type} lists:`, err.message); }
+  }
   allLists.push({ id: 'watchlist', name: 'My Watchlist', listType: 'W' });
   return allLists;
 }
 
 /**
  * Process API responses from MDBList to a flat list of items with type
- * @param {Object} data - API response data from MDBList
- * @returns {Array<Object>} A flat array of item objects, each with an 'imdb_id' and 'type'
  */
 function processMDBListApiResponse(data) {
   if (!data || data.error) {
-    console.error('MDBList API error:', data?.error || 'No data received');
+    console.error('MDBList API error:', data?.error || 'No data received from MDBList');
     return [];
   }
 
   let rawItems = [];
+  // Standard MDBList response for list items often has { movies: [], shows: [] }
   if (Array.isArray(data.movies)) rawItems.push(...data.movies.map(m => ({ ...m, type: 'movie' })));
   if (Array.isArray(data.shows)) rawItems.push(...data.shows.map(s => ({ ...s, type: 'series' })));
   
-  if (rawItems.length === 0) { // Fallback for other MDBList response structures
+  // Fallback for direct array responses (e.g., some watchlist endpoints or older API versions)
+  if (rawItems.length === 0) {
     let itemsInput = [];
     if (Array.isArray(data)) itemsInput = data;
-    else if (Array.isArray(data.items)) itemsInput = data.items;
+    else if (Array.isArray(data.items)) itemsInput = data.items; // Common for some MDBList structures
     else if (Array.isArray(data.results)) itemsInput = data.results;
     else {
-      console.warn('MDBList API response format not recognized or empty for fallback:', data);
+      // console.warn('MDBList API response format not directly recognized, attempting generic parse or empty:', data);
     }
+    // Try to determine type if not explicit and it's a flat array
     rawItems = itemsInput.map(item => ({
         ...item,
-        type: (item.type === 'show' || item.mediatype === 'show') ? 'series' : 'movie'
+        // Ensure 'type' is 'movie' or 'series'. MDBList might use 'show'.
+        type: (item.type === 'show' || item.mediatype === 'show') ? 'series' : (item.type === 'movie' || item.mediatype === 'movie' ? 'movie' : 'movie') // Default to movie if unclear
     }));
   }
 
   return rawItems.map(item => ({
     ...item,
-    imdb_id: item.imdb_id || item.imdbid, // Ensure imdb_id field
-    // 'type' should already be set above
-  })).filter(item => item.imdb_id); // Ensure items have an imdb_id
+    imdb_id: item.imdb_id || item.imdbid, // Ensure imdb_id field for enrichment key
+    id: item.imdb_id || item.imdbid,      // Ensure Stremio 'id' is also set
+    // 'type' should be correctly set to 'movie' or 'series' above
+  })).filter(item => item.imdb_id); // Critical: ensure items have an imdb_id for enrichment
 }
 
 /**
@@ -101,25 +101,25 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0, sort = 'i
       if (metadata?.listType) {
         effectiveListType = metadata.listType;
       } else if (!effectiveListType) {
-        const allLists = await fetchAllLists(apiKey);
-        const listObj = allLists.find(l => String(l.id) === String(id));
+        const allUserLists = await fetchAllLists(apiKey); // Renamed to avoid conflict
+        const listObj = allUserLists.find(l => String(l.id) === String(id));
         if (!listObj?.listType) {
-          console.error(`MDBList ${id} not found or listType missing.`);
+          console.error(`MDBList original ID ${id} not found in user's lists or listType missing.`);
           return null;
         }
         effectiveListType = listObj.listType;
       }
-      apiUrl = `https://api.mdblist.com/${effectiveListType === 'E' ? 'external/' : ''}lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=${ITEMS_PER_PAGE}&offset=${skip}`;
+      const listPrefix = effectiveListType === 'E' ? 'external/' : '';
+      apiUrl = `https://api.mdblist.com/${listPrefix}lists/${id}/items?apikey=${apiKey}&sort=${sort}&order=${order}&limit=${ITEMS_PER_PAGE}&offset=${skip}`;
     }
     
-    const response = await axios.get(apiUrl);
+    const response = await axios.get(apiUrl, { timeout: 15000 }); // MDBList API timeout
     if (response.status === 429) {
-      console.error('Rate limited by MDBList API.');
-      return null;
+      console.error('Rate limited by MDBList API.'); return null;
     }
     mdbApiResponseData = response.data;
   } catch (error) {
-    console.error(`Error fetching MDBList items for ${listId}:`, error.message);
+    console.error(`Error fetching MDBList items for list ID ${listId} (API ID ${listId.replace(/^aiolists-|-.$/g, '')}):`, error.message);
     return null;
   }
 
@@ -127,13 +127,16 @@ async function fetchListItems(listId, apiKey, listsMetadata, skip = 0, sort = 'i
   if (!initialItemsFlat || initialItemsFlat.length === 0) {
     return { movies: [], shows: [], hasMovies: false, hasShows: false };
   }
-
+  
+  // Enrich these flat items using the utility
   const enrichedAllItems = await enrichItemsWithCinemeta(initialItemsFlat);
 
   const finalResult = { movies: [], shows: [], hasMovies: false, hasShows: false };
   enrichedAllItems.forEach(item => {
+    // Ensure item.type is correctly 'movie' or 'series' after enrichment
     if (item.type === 'movie') finalResult.movies.push(item);
     else if (item.type === 'series') finalResult.shows.push(item);
+    else console.warn("Item with unknown type after enrichment:", item);
   });
 
   finalResult.hasMovies = finalResult.movies.length > 0;
@@ -149,7 +152,7 @@ async function extractListFromUrl(url, apiKey) {
   try {
     const urlPattern = /^https?:\/\/mdblist\.com\/lists\/([\w-]+)\/([\w-]+)\/?$/;
     const urlMatch = url.match(urlPattern);
-    if (!urlMatch) throw new Error('Invalid MDBList URL format.');
+    if (!urlMatch) throw new Error('Invalid MDBList URL format. Expected: https://mdblist.com/lists/username/list-slug');
 
     const [, username, listSlug] = urlMatch;
     const apiResponse = await axios.get(`https://api.mdblist.com/lists/${username}/${listSlug}?apikey=${apiKey}`);
