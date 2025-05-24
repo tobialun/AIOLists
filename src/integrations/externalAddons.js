@@ -1,14 +1,11 @@
 // src/integrations/externalAddons.js
 const axios = require('axios');
-const { batchFetchPosters } = require('../utils/posters'); // Assuming posters.js is in the same utils directory
 
-// ... rest of your externalAddons.js file
 class ExternalAddon {
   constructor(manifestUrl) {
-    this.manifestUrl = this.normalizeUrl(manifestUrl);
+    this.originalManifestUrl = this.normalizeUrl(manifestUrl);
     this.manifest = null;
-    this.baseUrl = '';
-    this.configPath = ''; // Stores the /<configHash> part if present in the original manifest URL
+    this.apiBaseUrl = '';
   }
 
   normalizeUrl(url) {
@@ -18,102 +15,119 @@ class ExternalAddon {
     return url;
   }
 
-  parseManifestUrl() {
-    const url = new URL(this.manifestUrl);
-    this.baseUrl = `${url.protocol}//${url.host}`;
-    // Pathname might be /<config>/manifest.json or just /manifest.json
-    // We want to capture the part between the host and /manifest.json
-    const pathSegments = url.pathname.split('/');
-    const manifestIndex = pathSegments.lastIndexOf('manifest.json');
-    if (manifestIndex > 1) { // At least one segment before manifest.json (e.g., /configHash/manifest.json)
-        this.configPath = '/' + pathSegments.slice(1, manifestIndex).join('/');
+  setApiBaseUrlFromManifestUrl() {
+    const fullUrl = this.originalManifestUrl;
+    const manifestJsonPathSegment = "/manifest.json";
+    const manifestIndex = fullUrl.lastIndexOf(manifestJsonPathSegment);
+
+    if (manifestIndex === -1) {
+        this.apiBaseUrl = fullUrl.endsWith('/') ? fullUrl : fullUrl + '/';
     } else {
-        this.configPath = ''; // No extra path segments like a config hash
+        this.apiBaseUrl = fullUrl.substring(0, manifestIndex + 1); 
     }
   }
 
   async import() {
     try {
-      const response = await axios.get(this.manifestUrl);
+      const response = await axios.get(this.originalManifestUrl);
       this.manifest = response.data;
-      
-      this.parseManifestUrl(); // Call after fetching manifest to have the URL
 
-      if (!this.manifest || !this.manifest.catalogs) {
-        throw new Error('Invalid manifest format - missing catalogs');
+      if (!this.manifest || !this.manifest.id || !this.manifest.catalogs) {
+        throw new Error('Invalid external manifest format: missing id or catalogs');
+      }
+      
+      this.setApiBaseUrlFromManifestUrl();
+      const idUsageMap = new Map();
+
+      const processedCatalogs = this.manifest.catalogs.map(catalog => {
+        if (!catalog.id || !catalog.type) {
+            console.warn('[AIOLists ExternalAddon] Skipping catalog without id or type in external addon:', catalog.name || 'Unnamed', 'Full catalog object:', catalog);
+            return null; 
+        }
+
+        const originalCatalogId = catalog.id;
+        const originalCatalogType = catalog.type; // e.g., "anime", "trakt", "movie", "series"
+        let stremioFinalCatalogType = originalCatalogType; // Default to original
+
+      if (originalCatalogType !== 'movie' && originalCatalogType !== 'series' && originalCatalogType !== 'all') {
+            console.warn(`[AIOLists ExternalAddon] Unhandled originalType '${originalCatalogType}' from catalog '${originalCatalogId}'. Defaulting AIOLists catalog type to 'all'.`);
+            stremioFinalCatalogType = 'all';
       }
 
-      const isAnime = this.detectAnimeCatalogs();
+        const uniquenessTrackingKey = `${originalCatalogId}|${originalCatalogType}`;
+        const instanceCount = (idUsageMap.get(uniquenessTrackingKey) || 0) + 1;
+        idUsageMap.set(uniquenessTrackingKey, instanceCount);
 
-      const processedCatalogs = isAnime 
-        ? this.processAnimeCatalogs() 
-        : this.processStandardCatalogs();
-      
+        let aiolistsUniqueCatalogId = `${this.manifest.id}_${originalCatalogId}_${originalCatalogType}`;
+        if (instanceCount > 1) {
+          aiolistsUniqueCatalogId += `_${instanceCount}`;
+        }
+        
+        const hasSearchRequirement = (catalog.extra || []).some(e => e.name === 'search' && e.isRequired);
+        if (hasSearchRequirement) {
+            return null; 
+        }
+
+        return {
+          id: aiolistsUniqueCatalogId,        
+          originalId: originalCatalogId,      
+          originalType: originalCatalogType,  
+          name: catalog.name || 'Unnamed Catalog',
+          type: stremioFinalCatalogType, // This is the crucial type for AIOLists' manifest
+          extraSupported: catalog.extraSupported || catalog.extra || [],
+          extraRequired: catalog.extraRequired || (catalog.extra || []).filter(e => e.isRequired)
+        };
+      }).filter(catalog => catalog !== null);
+
+      let resolvedLogo = this.manifest.logo;
+      if (resolvedLogo && !resolvedLogo.startsWith('http://') && !resolvedLogo.startsWith('https://') && !resolvedLogo.startsWith('data:')) {
+        try { resolvedLogo = new URL(resolvedLogo, this.apiBaseUrl).href; } catch (e) { resolvedLogo = this.manifest.logo; }
+      }
+      let resolvedBackground = this.manifest.background;
+       if (resolvedBackground && !resolvedBackground.startsWith('http://') && !resolvedBackground.startsWith('https://') && !resolvedBackground.startsWith('data:')) {
+        try { resolvedBackground = new URL(resolvedBackground, this.apiBaseUrl).href; } catch (e) { resolvedBackground = this.manifest.background;}
+      }
+
       return {
-        id: this.manifest.id || `addon_${Date.now()}`, // Fallback ID
+        id: this.manifest.id, 
         name: this.manifest.name || 'Unknown Addon',
         version: this.manifest.version || '0.0.0',
         description: this.manifest.description || '',
-        logo: this.manifest.logo || null,
-        url: this.manifestUrl, // Store the original manifest URL
-        catalogs: processedCatalogs,
-        types: this.manifest.types || [],
+        logo: resolvedLogo,
+        background: resolvedBackground,
+        url: this.originalManifestUrl, 
+        apiBaseUrl: this.apiBaseUrl,   
+        catalogs: processedCatalogs,   
+        types: this.manifest.types || [], 
         resources: this.manifest.resources || [],
-        isAnime // Store if it's primarily anime for content fetching logic
+        isAnime: this.detectAnimeCatalogs() // Retaining this flag as it was already there.
       };
     } catch (error) {
-      console.error(`Error importing addon from ${this.manifestUrl}:`, error.message);
-      throw new Error(`Failed to import addon: ${error.message}`);
+      console.error(`[AIOLists ExternalAddon] Error importing addon from ${this.originalManifestUrl}:`, error.message, error.stack);
+      let specificError = error.message;
+      if (error.response) {
+        specificError += ` (Status: ${error.response.status})`;
+      }
+      throw new Error(`Failed to import addon: ${specificError}`);
     }
   }
 
   detectAnimeCatalogs() {
-    // Heuristics to detect anime-focused addons
-    const nameIncludesAnime = this.manifest.name?.toLowerCase().includes('anime');
-    const urlIncludesAnimeSource = ['myanimelist', 'anilist', 'anidb'].some(src => this.manifestUrl.toLowerCase().includes(src));
-    const hasAnimeTypeCatalog = this.manifest.catalogs.some(cat => cat.type === 'anime');
-    return nameIncludesAnime || urlIncludesAnimeSource || hasAnimeTypeCatalog;
+    const nameIncludesAnime = this.manifest?.name?.toLowerCase().includes('anime');
+    const urlIncludesAnimeSource = ['myanimelist', 'anilist', 'anidb', 'kitsu', 'livechart', 'notify.moe'].some(src => this.originalManifestUrl.toLowerCase().includes(src));
+    const hasAnimeTypeInManifestTypes = this.manifest?.types?.includes('anime');
+    const hasAnimeTypeCatalog = this.manifest?.catalogs?.some(cat => cat.type === 'anime');
+    return !!(nameIncludesAnime || urlIncludesAnimeSource || hasAnimeTypeInManifestTypes || hasAnimeTypeCatalog);
   }
 
-  processStandardCatalogs() {
-    // Ensure unique IDs if an addon reuses catalog IDs for different types
-    const idCounts = {};
-    return this.manifest.catalogs.map(catalog => {
-      const baseId = catalog.id;
-      const typeSuffix = catalog.type || 'unknown';
-      idCounts[baseId] = (idCounts[baseId] || 0) + 1;
-      
-      // Create a more unique ID if the same base ID is used multiple times, otherwise keep original
-      const uniqueId = idCounts[baseId] > 1 ? `${baseId}_${typeSuffix}_${idCounts[baseId]}` : baseId;
-
-      return {
-        id: uniqueId, // This will be used in our addon's manifest
-        originalId: baseId, // The ID used by the external addon's API
-        name: catalog.name,
-        type: catalog.type || 'movie', // Default to movie if type is missing
-        extra: catalog.extra || []
-      };
-    });
-  }
-
-  processAnimeCatalogs() {
-    return this.manifest.catalogs.map(catalog => ({
-      id: catalog.id, // Use the original ID from the anime addon
-      originalId: catalog.id,
-      name: catalog.name,
-      type: 'series', // Standardize anime to 'series' for Stremio compatibility
-      extra: catalog.extra || []
-    }));
-  }
-
-
-  buildCatalogUrl(catalogOriginalId, catalogType, skip = 0) {
-    let url = `${this.baseUrl}${this.configPath}/catalog/${catalogType}/${catalogOriginalId}`;
-    if (skip > 0) {
-      url += `/skip=${skip}`;
-    }
-    url += '.json';
-    return url;
+  buildCatalogUrl(catalogOriginalId, catalogOriginalType, skip = 0, genre = null) {
+    let urlPath = `catalog/${catalogOriginalType}/${encodeURIComponent(catalogOriginalId)}`;
+    const extraParams = [];
+    if (skip > 0) extraParams.push(`skip=${skip}`);
+    if (genre) extraParams.push(`genre=${encodeURIComponent(genre)}`);
+    if (extraParams.length > 0) urlPath += `/${extraParams.join('&')}`;
+    urlPath += '.json';
+    return this.apiBaseUrl + urlPath;
   }
 }
 
@@ -122,43 +136,50 @@ async function importExternalAddon(manifestUrl) {
   return await addon.import();
 }
 
-async function fetchExternalAddonItems(catalogOriginalId, sourceAddonConfig, skip = 0, rpdbApiKey = null) {
+async function fetchExternalAddonItems(externalCatalogIdToFetch, sourceAddonConfig, skip = 0, rpdbApiKey = null, genre = null) {
+  let attemptedUrl = "Unknown (URL could not be constructed before error)";
   try {
-    if (!sourceAddonConfig || !sourceAddonConfig.url) {
-      console.error('Invalid source addon configuration for fetching items.');
-      return { metas: [] }; // Return structure expected by convertToStremioFormat
+    if (!sourceAddonConfig || !sourceAddonConfig.apiBaseUrl || !sourceAddonConfig.catalogs) {
+      console.error('[AIOLists ExternalAddon] Invalid source addon configuration for fetching items. Config:', sourceAddonConfig);
+      return { metas: [] };
     }
 
-    const tempAddon = new ExternalAddon(sourceAddonConfig.url);
-    await tempAddon.import(); // Re-import to correctly parse baseUrl and configPath from the stored URL
-
-    const catalog = sourceAddonConfig.catalogs.find(c => c.originalId === catalogOriginalId || c.id === catalogOriginalId);
-    if (!catalog) {
-      console.error(`Catalog ${catalogOriginalId} not found in source addon ${sourceAddonConfig.name}`);
+    const catalogEntry = sourceAddonConfig.catalogs.find(c => c.originalId === externalCatalogIdToFetch);
+    if (!catalogEntry) {
+      console.error(`[AIOLists ExternalAddon] Catalog with originalId '${externalCatalogIdToFetch}' not found in source addon '${sourceAddonConfig.name}'. Available originalIds from config: ${sourceAddonConfig.catalogs.map(c=>c.originalId).join(', ')}`);
       return { metas: [] };
     }
     
-    // Use the catalog's defined type, defaulting to 'movie'. Anime is handled as 'series'.
-    const typeToFetch = catalog.type === 'anime' ? 'series' : (catalog.type || 'movie');
-    const metadataUrl = tempAddon.buildCatalogUrl(catalog.originalId, typeToFetch, skip);
+    const tempExternalAddon = new ExternalAddon(sourceAddonConfig.url); 
+    tempExternalAddon.apiBaseUrl = sourceAddonConfig.apiBaseUrl;       
+
+    attemptedUrl = tempExternalAddon.buildCatalogUrl(catalogEntry.originalId, catalogEntry.originalType, skip, genre);
     
-    const response = await axios.get(metadataUrl);
+    console.log(`[AIOLists Debug] Attempting to fetch external addon items from: ${attemptedUrl}`);
+    
+    const response = await axios.get(attemptedUrl, { timeout: 20000 }); 
     
     if (!response.data || !Array.isArray(response.data.metas)) {
-      console.error(`Invalid metadata response from ${metadataUrl}:`, response.data);
+      console.error(`[AIOLists ExternalAddon] Invalid metadata response from ${attemptedUrl}: Data or metas array missing. Response:`, response.data);
       return { metas: [] };
     }
 
-    // Return the raw metas array; poster fetching will be handled by convertToStremioFormat
-    return { metas: response.data.metas }; // Ensure this is an object with a .metas property
+    return { metas: response.data.metas };
 
   } catch (error) {
-    console.error(`Error fetching items for catalog ${catalogOriginalId} from ${sourceAddonConfig?.name}:`, error.message);
-    return { metas: [] }; // Return structure expected by convertToStremioFormat
+    console.error(`[AIOLists ExternalAddon] Error fetching items for external catalog ID '${externalCatalogIdToFetch}' (from addon '${sourceAddonConfig?.name}'). Attempted URL: ${attemptedUrl}. Error:`, error.message);
+    if (error.response) {
+        console.error("[AIOLists ExternalAddon] Error response status:", error.response.status);
+        console.error("[AIOLists ExternalAddon] Error response data from external addon:", JSON.stringify(error.response.data, null, 2)); 
+    } else {
+        console.error("[AIOLists ExternalAddon] Error stack:", error.stack);
+    }
+    return { metas: [] }; 
   }
 }
 
 module.exports = {
   importExternalAddon,
-  fetchExternalAddonItems
+  fetchExternalAddonItems,
+  ExternalAddon 
 };
