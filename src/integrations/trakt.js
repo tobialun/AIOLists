@@ -39,10 +39,6 @@ function getTraktAuthUrl() {
   return `${TRAKT_API_URL}/oauth/authorize?response_type=code&client_id=${TRAKT_CLIENT_ID}&redirect_uri=urn:ietf:wg:oauth:2.0:oob`;
 }
 
-function getTraktAuthUrl() {
-  return `${TRAKT_API_URL}/oauth/authorize?response_type=code&client_id=${TRAKT_CLIENT_ID}&redirect_uri=urn:ietf:wg:oauth:2.0:oob`;
-}
-
 async function authenticateTrakt(code) {
   try {
     const response = await axios.post(`${TRAKT_API_URL}/oauth/token`, {
@@ -119,13 +115,13 @@ async function fetchPublicTraktListDetails(traktListUrl) {
 }
 
 
-async function fetchTraktListItems(listId, userConfig, skip = 0, sortBy = 'rank', sortOrder = 'asc', isPublicImport = false, publicUsername = null, publicItemType = null) {
+async function fetchTraktListItems(listId, userConfig, skip = 0, sortBy = 'rank', sortOrder = 'asc', isPublicImport = false, publicUsername = null, itemTypeHint = null) {
   const limit = ITEMS_PER_PAGE;
   const page = Math.floor(skip / limit) + 1;
   const headers = { 'Content-Type': 'application/json', 'trakt-api-version': '2', 'trakt-api-key': TRAKT_CLIENT_ID };
   
   // Small helper for logging context
-  const logContext = `TraktListItems (ID: ${listId}, TypeHint: ${publicItemType || 'any'}, Page: ${page})`;
+  const logContext = `TraktListItems (ID: ${listId}, TypeHint: ${itemTypeHint || 'any'}, Page: ${page})`; // Use itemTypeHint
 
   if (!isPublicImport && !await initTraktApi(userConfig)) {
     console.log(`[${logContext}] Trakt API not initialized or auth failed.`);
@@ -135,7 +131,7 @@ async function fetchTraktListItems(listId, userConfig, skip = 0, sortBy = 'rank'
 
   let requestUrl;
   let params = { limit, page, extended: 'full' };
-  let specificItemType = publicItemType; // Used to determine if we are fetching specifically movies or shows
+  let specificItemType = itemTypeHint; // Used to determine if we are fetching specifically movies or shows
   let rawTraktEntries = [];
 
   try {
@@ -191,35 +187,47 @@ async function fetchTraktListItems(listId, userConfig, skip = 0, sortBy = 'rank'
     // --- End of Trakt API fetching logic ---
 
     const initialItems = rawTraktEntries.map(entry => {
-      const itemData = entry.movie || entry.show || entry; // For recommendations/trending, entry itself is the item
-      const typeFromTrakt = entry.typeFromParams || entry.type; // typeFromParams if specifically fetched, else Trakt's 'type'
-      
-      // Defensive type resolution
-      let resolvedType = 'movie'; // Default
-      if (typeFromTrakt === 'show' || itemData?.type === 'show' || typeFromTrakt === 'series') {
+      let actualItemData;
+      if (entry.movie) { 
+        actualItemData = entry.movie;
+      } else if (entry.show) {
+        actualItemData = entry.show;
+      } else if (specificItemType && entry[specificItemType]) {
+        actualItemData = entry[specificItemType];
+      } else {
+        actualItemData = entry;
+      }
+
+      const typeFromTrakt = entry.typeFromParams || actualItemData.type;
+
+      let resolvedType = 'movie';
+      if (typeFromTrakt === 'show' || typeFromTrakt === 'series') {
         resolvedType = 'series';
-      } else if (typeFromTrakt === 'movie' || itemData?.type === 'movie') {
+      } else if (typeFromTrakt === 'movie') {
         resolvedType = 'movie';
       }
-      // If specificItemType was set (e.g. for _movies or _shows lists), it should take precedence
       if (specificItemType === 'movie' || specificItemType === 'series') {
         resolvedType = specificItemType;
       }
 
+      if (itemTypeHint && resolvedType !== itemTypeHint && !(listId.startsWith('trakt_recommendations_') || listId.startsWith('trakt_trending_') || listId.startsWith('trakt_popular_'))) {
+         return null;
+      }
 
-      const imdbId = itemData?.ids?.imdb;
+
+      const imdbId = actualItemData?.ids?.imdb;
       if (!imdbId) {
         return null;
       }
 
       return {
         imdb_id: imdbId,
-        tmdb_id: itemData?.ids?.tmdb,
-        title: itemData?.title,
-        year: itemData?.year,
-        overview: itemData?.overview,
-        genres: itemData?.genres,
-        runtime: itemData?.runtime,
+        tmdb_id: actualItemData?.ids?.tmdb,
+        title: actualItemData?.title,
+        year: actualItemData?.year,
+        overview: actualItemData?.overview,
+        genres: actualItemData?.genres,
+        runtime: actualItemData?.runtime,
         type: resolvedType,
       };
     }).filter(item => item !== null);
