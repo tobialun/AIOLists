@@ -8,16 +8,19 @@ const { isWatchlist } = require('../utils/common');
 
 
 async function fetchListContent(listId, userConfig, skip = 0) {
-  const { apiKey, traktAccessToken, listsMetadata = {}, sortPreferences = {}, importedAddons = {}, rpdbApiKey, tmdbApiKey /*, simklAccessToken */ } = userConfig;
-  let originalListIdForSortLookup = listId;
+  // listId is expected to be the base ID of the list, e.g., "aiolists-watchlist-W", "trakt_watchlist"
+  // console.log(`[AIOLists Debug] fetchListContent called with listId: ${listId}`);
+  const { apiKey, traktAccessToken, listsMetadata = {}, sortPreferences = {}, importedAddons = {}, rpdbApiKey, tmdbApiKey } = userConfig;
+  let originalListIdForSortLookup = listId; // Default to the passed listId
 
+  // Determine the originalListId for fetching sort preferences more accurately
   if (listId.startsWith('aiolists-') && (listId.includes('-L') || listId.includes('-E') || listId.includes('-W'))) {
     const parts = listId.split('-');
     if (parts.length >= 2) {
       originalListIdForSortLookup = parts[1] === 'watchlist' ? 'watchlist' : parts[1];
     }
-  } else if ((listId.startsWith('trakt_') || listId.startsWith('tmdb_') || listId.startsWith('simkl_')) &&
-             !listId.includes('_movies') && !listId.includes('_series') && !listId.includes('_shows') /* simkl uses shows */) {
+  } else if (listId.startsWith('trakt_') || listId.startsWith('tmdb_') || listId.startsWith('simkl_')) {
+    // For these, the listId itself is usually the key for sort preferences unless it's from an import
     originalListIdForSortLookup = listId;
   } else if (importedAddons) {
       const foundAddonEntry = Object.values(importedAddons).find(addon => addon.catalogs && addon.catalogs.find(c => c.id === listId));
@@ -30,23 +33,24 @@ async function fetchListContent(listId, userConfig, skip = 0) {
   }
 
 
-  const isPotentiallyTrakt = listId.startsWith('trakt_') || listId.startsWith('traktpublic_') ||
-                             (importedAddons && Object.values(importedAddons).some(a => a.isTraktPublicList && a.catalogs && a.catalogs.find(c => c.id === listId)));
+  const isPotentiallyTrakt = originalListIdForSortLookup.startsWith('trakt_') || originalListIdForSortLookup.startsWith('traktpublic_');
   const defaultSort = isPotentiallyTrakt ? { sort: 'rank', order: 'asc' } : { sort: 'imdbvotes', order: 'desc' };
   const sortPrefs = userConfig.sortPreferences?.[originalListIdForSortLookup] || defaultSort;
 
+  // Handling for imported addons (these typically have unique catalog.id values already)
   if (importedAddons) {
     for (const addon of Object.values(importedAddons)) {
       if (!addon.catalogs) continue;
+      // `listId` here is the full unique catalog ID from the manifest (e.g. traktpublic_user_list_movies)
       const catalog = addon.catalogs.find(c => String(c.id) === String(listId));
       if (catalog) {
         if (addon.isMDBListUrlImport && apiKey) {
           return fetchMDBListItems(catalog.originalId, apiKey, listsMetadata, skip, sortPrefs.sort, sortPrefs.order, true);
         } else if (addon.isTraktPublicList) {
-           const type = catalog.id.endsWith('_movies') ? 'movie' : (catalog.id.endsWith('_series') ? 'series' : null);
-          return fetchTraktListItems(`trakt_${catalog.originalId}`, userConfig, skip, sortPrefs.sort, sortPrefs.order, true, addon.traktUser, type);
+           const itemTypeHint = catalog.type; // 'movie' or 'series' from the catalog definition
+          return fetchTraktListItems(`trakt_${catalog.originalId}`, userConfig, skip, sortPrefs.sort, sortPrefs.order, true, addon.traktUser, itemTypeHint);
         }
-        else if (!addon.isMDBListUrlImport && !addon.isTraktPublicList /* && !addon.isTmdbUrlImport etc. */) {
+        else if (!addon.isMDBListUrlImport && !addon.isTraktPublicList) { // Standard external addon
           return fetchExternalAddonItems(catalog.originalId || catalog.id, addon, skip, rpdbApiKey);
         }
       }
@@ -54,22 +58,25 @@ async function fetchListContent(listId, userConfig, skip = 0) {
   }
 
   // Direct list fetching
+  // listId here is the base ID (e.g., "aiolists-watchlist-W", "trakt_watchlist")
   if (listId.startsWith('trakt_') && traktAccessToken) {
-    let itemTypeForTraktSpecial = null; // For specific catalogs like trakt_watchlist_movies
-    if (listId.startsWith('trakt_watchlist_')) { // e.g. trakt_watchlist_movies
-        itemTypeForTraktSpecial = listId.endsWith('_movies') ? 'movie' : (listId.endsWith('_series') || listId.endsWith('_shows') ? 'series' : null);
-    } else if (listId.includes("_movies")) itemTypeForTraktSpecial = "movie";
-    else if (listId.includes("_shows") || listId.includes("_series")) itemTypeForTraktSpecial = "series"; // broader check
-    return fetchTraktListItems(listId, userConfig, skip, sortPrefs.sort, sortPrefs.order, false, null, itemTypeForTraktSpecial);
+    // For base Trakt lists, fetchTraktListItems usually gets all content.
+    // Filtering happens in catalog handler. `itemTypeHint` is for specific Trakt API behaviors.
+    let itemTypeHint = null;
+    // Example: if listId was 'trakt_recommendations_movies', fetchTraktListItems handles it.
+    // If listId is 'trakt_watchlist', itemTypeHint remains null to fetch all.
+    return fetchTraktListItems(listId, userConfig, skip, sortPrefs.sort, sortPrefs.order, false, null, itemTypeHint);
   }
-  if (apiKey && listId.startsWith('aiolists-')) { // MDBList user lists
+
+  if (apiKey && listId.startsWith('aiolists-')) {
     const match = listId.match(/^aiolists-([^-]+(?:-[^-]+)*)-([ELW])$/);
     let mdbListOriginalId = match ? match[1] : listId.replace(/^aiolists-/, '').replace(/-[ELW]$/, '');
-    if (listId === 'aiolists-watchlist-W') mdbListOriginalId = 'watchlist';
+    if (listId === 'aiolists-watchlist-W') {
+        mdbListOriginalId = 'watchlist';
+    }
     const mdbListSortPrefs = userConfig.sortPreferences?.[mdbListOriginalId] || { sort: 'imdbvotes', order: 'desc' };
     return fetchMDBListItems(mdbListOriginalId, apiKey, listsMetadata, skip, mdbListSortPrefs.sort, mdbListSortPrefs.order, false);
   }
-
 
   return null;
 }
@@ -77,26 +84,26 @@ async function fetchListContent(listId, userConfig, skip = 0) {
 async function createAddon(userConfig) {
   const manifest = {
     id: 'org.stremio.aiolists',
-    version: `1.0.0-${Date.now()}`, 
+    version: `1.0.0-${Date.now()}`,
     name: 'AIOLists',
     description: 'Manage all your lists in one place.',
     resources: ['catalog', 'meta'],
     types: ['movie', 'series', 'all'],
-    idPrefixes: ['tt'], 
+    idPrefixes: ['tt'],
     catalogs: [],
     logo: `https://i.imgur.com/nyIDmcb.png`,
     behaviorHints: { configurable: true, configurationRequired: false }
   };
 
   const {
-    apiKey, traktAccessToken, tmdbApiKey, /* simklAccessToken, */
+    apiKey, traktAccessToken,
     listOrder = [],
     hiddenLists = [],
     removedLists = [],
     customListNames = {},
     mergedLists = {},
     importedAddons = {},
-    listsMetadata = {} // This should be populated by the /lists endpoint primarily
+    listsMetadata = {}
   } = userConfig;
 
   const hiddenListsSet = new Set(hiddenLists.map(String));
@@ -113,82 +120,97 @@ async function createAddon(userConfig) {
   }
 
   for (const listInfo of activeListsInfo) {
-    const originalId = String(listInfo.originalId); // e.g., trakt_watchlist, mblist_123, simkl_plantowatch/shows
-    let manifestListId = originalId;
+    const originalId = String(listInfo.originalId);
+    let manifestListIdBase = originalId;
 
     if (listInfo.source === 'mdblist') {
-      manifestListId = originalId === 'watchlist' ? `aiolists-watchlist-W` : `aiolists-${originalId}-${listInfo.listType || 'L'}`;
-    }
-    if (listInfo.source === 'simkl' || listInfo.source === 'simkl_custom') {
-        manifestListId = listInfo.id; // Use the ID generated in fetchSimklLists
+      manifestListIdBase = originalId === 'watchlist' ? `aiolists-watchlist-W` : `aiolists-${originalId}-${listInfo.listType || 'L'}`;
+    } else if (listInfo.source === 'trakt') {
+      manifestListIdBase = originalId;
     }
 
-
-    if (removedListsSet.has(manifestListId) || removedListsSet.has(originalId)) {
+    if (removedListsSet.has(manifestListIdBase) || removedListsSet.has(originalId)) {
       continue;
     }
-    if (hiddenListsSet.has(manifestListId) || hiddenListsSet.has(originalId)) {
+    if (hiddenListsSet.has(manifestListIdBase) || hiddenListsSet.has(originalId)) {
       continue;
     }
 
-    let displayName = customListNames[manifestListId] || customListNames[originalId] || listInfo.name;
-    let metadata = listsMetadata[manifestListId] || listsMetadata[originalId] || {}; // Check both IDs
+    let displayName = customListNames[manifestListIdBase] || customListNames[originalId] || listInfo.name;
+    let metadata = listsMetadata[manifestListIdBase] || listsMetadata[originalId] || {};
 
     let hasMovies = metadata.hasMovies === true;
     let hasShows = metadata.hasShows === true;
 
-    // If metadata is missing, try to determine it, especially for Trakt Watchlist
-    if (listInfo.source === 'trakt' && listInfo.isTraktWatchlist && (metadata.hasMovies === undefined || metadata.hasShows === undefined)) {
-        const watchlistContent = await fetchTraktListItems('trakt_watchlist', userConfig, 0);
-        hasMovies = watchlistContent?.hasMovies || false;
-        hasShows = watchlistContent?.hasShows || false;
-    } else if (listInfo.source === 'trakt') { // Other Trakt lists (recommendations, trending, custom)
-        if (listInfo.isMovieList === true) { hasMovies = true; hasShows = false; }
-        else if (listInfo.isShowList === true) { hasMovies = false; hasShows = true; }
-    } else if (listInfo.source === 'simkl' || listInfo.source === 'simkl_custom') {
-        if (metadata.hasMovies === undefined && metadata.hasShows === undefined) {
-            hasMovies = listInfo.simklMediaType === 'movies' || (listInfo.simklListObject && listInfo.simklListObject.stats?.movie_count > 0);
-            hasShows = listInfo.simklMediaType === 'shows' || listInfo.simklMediaType === 'anime' || (listInfo.simklListObject && (listInfo.simklListObject.stats?.show_count > 0 || listInfo.simklListObject.stats?.anime_count > 0));
+    if (typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean') {
+        if (listInfo.source === 'trakt') {
+            if (listInfo.isTraktWatchlist || manifestListIdBase === 'trakt_watchlist') {
+                const content = await fetchTraktListItems(manifestListIdBase, userConfig, 0);
+                hasMovies = content?.hasMovies || false;
+                hasShows = content?.hasShows || false;
+            } else if (manifestListIdBase.endsWith("_movies") || listInfo.isMovieList) {
+                hasMovies = true; hasShows = false;
+            } else if (manifestListIdBase.endsWith("_shows") || manifestListIdBase.endsWith("_series") || listInfo.isShowList) {
+                hasMovies = false; hasShows = true;
+            } else {
+                const content = await fetchTraktListItems(manifestListIdBase, userConfig, 0);
+                hasMovies = content?.hasMovies || false;
+                hasShows = content?.hasShows || false;
+            }
+        } else if (listInfo.source === 'mdblist') {
+            const content = await fetchMDBListItems(originalId, apiKey, listsMetadata, 0, 'imdbvotes', 'desc', false);
+            hasMovies = content?.hasMovies || false;
+            hasShows = content?.hasShows || false;
         }
     }
-    // Fallback if still undefined
-    if (typeof hasMovies !== 'boolean') hasMovies = listInfo.hasMovies === true; // Use listInfo as fallback
-    if (typeof hasShows !== 'boolean') hasShows = listInfo.hasShows === true;   // Use listInfo as fallback
-
 
     if (hasMovies || hasShows) {
-      const isMerged = mergedLists[manifestListId] !== false; // Default to merged
+      const isMerged = mergedLists[manifestListIdBase] !== false;
+
       if (hasMovies && hasShows && isMerged) {
-        manifest.catalogs.push({ type: 'all', id: manifestListId, name: displayName, extraSupported: ["skip"], extraRequired: [] });
-      } else {
+        // MERGED: Create a single 'all' catalog using the base ID
+        manifest.catalogs.push({
+          type: 'all',
+          id: manifestListIdBase, // Use the base ID
+          name: displayName,
+          extraSupported: ["skip"],
+          extraRequired: []
+        });
+      } else { // SPLIT or single-type list
         if (hasMovies) {
-          const movieListName = (hasMovies && hasShows && !isMerged) ? `${displayName}` : displayName;
-          // Ensure unique ID if splitting
-          const movieListId = (hasMovies && hasShows && !isMerged) ? `${manifestListId}_movies` : manifestListId;
-          manifest.catalogs.push({ type: 'movie', id: movieListId, name: movieListName, extraSupported: ["skip"], extraRequired: [] });
+          // For SPLIT lists, use the SAME base ID, but with type 'movie'
+          // For lists that are naturally movies-only, use their base ID and type 'movie'
+          manifest.catalogs.push({
+            type: 'movie',
+            id: manifestListIdBase, // Use the base ID
+            name: displayName, // Potentially: `${displayName} (Movies)` if you want to differentiate by name
+            extraSupported: ["skip"],
+            extraRequired: []
+          });
         }
         if (hasShows) {
-          const seriesListName = (hasMovies && hasShows && !isMerged) ? `${displayName}` : displayName;
-          const seriesListId = (hasMovies && hasShows && !isMerged) ? `${manifestListId}_series` : manifestListId; // or _shows
-          manifest.catalogs.push({ type: 'series', id: seriesListId, name: seriesListName, extraSupported: ["skip"], extraRequired: [] });
+          // For SPLIT lists, use the SAME base ID, but with type 'series'
+          // For lists that are naturally series-only, use their base ID and type 'series'
+          manifest.catalogs.push({
+            type: 'series',
+            id: manifestListIdBase, // Use the base ID
+            name: displayName, // Potentially: `${displayName} (Series)`
+            extraSupported: ["skip"],
+            extraRequired: []
+          });
         }
       }
     }
   }
 
-  // Process imported addons (URL imports and manifest imports)
   Object.values(importedAddons || {}).forEach(addon => {
-    if (removedListsSet.has(String(addon.id))) { // addon.id is the group ID
-      return;
-    }
+    if (removedListsSet.has(String(addon.id))) return;
     (addon.catalogs || []).forEach(catalog => {
-      const catalogIdForManifest = String(catalog.id); // This is the unique ID like traktpublic_user_slug_movies
-      if (removedListsSet.has(catalogIdForManifest) || hiddenListsSet.has(catalogIdForManifest)) {
-        return;
-      }
+      const catalogIdForManifest = String(catalog.id);
+      if (removedListsSet.has(catalogIdForManifest) || hiddenListsSet.has(catalogIdForManifest)) return;
       let displayName = customListNames[catalogIdForManifest] || catalog.name;
       manifest.catalogs.push({
-        type: catalog.type, // 'movie', 'series', or potentially 'all' if the source addon provided it
+        type: catalog.type, // Imported addons already have distinct types and IDs
         id: catalogIdForManifest,
         name: displayName,
         extraSupported: catalog.extraSupported || ["skip"],
@@ -198,62 +220,53 @@ async function createAddon(userConfig) {
   });
 
   if (listOrder && listOrder.length > 0) {
-    const orderMap = new Map();
-    listOrder.forEach((id, index) => { orderMap.set(String(id), index); });
-
+    const orderMap = new Map(listOrder.map((id, index) => [String(id), index]));
     manifest.catalogs.sort((a, b) => {
-        const catalogIdA = String(a.id);
-        const catalogIdB = String(b.id);
+      const catalogIdA = String(a.id); // This ID is now the base ID for split lists
+      const catalogIdB = String(b.id);
 
-        const indexA = orderMap.get(catalogIdA);
-        const indexB = orderMap.get(catalogIdB);
+      const indexA = orderMap.get(catalogIdA);
+      const indexB = orderMap.get(catalogIdB);
 
-        if (indexA !== undefined && indexB !== undefined) {
-            if (indexA !== indexB) return indexA - indexB;
-
-            const baseIdA = catalogIdA.replace(/_movies$|_series$|_shows$/, '');
-            const baseIdB = catalogIdB.replace(/_movies$|_series$|_shows$/, '');
-
-            if (baseIdA === baseIdB) {
-                if (catalogIdA.endsWith('_movies') && (catalogIdB.endsWith('_series') || catalogIdB.endsWith('_shows'))) return -1;
-                if ((catalogIdA.endsWith('_series') || catalogIdA.endsWith('_shows')) && catalogIdB.endsWith('_movies')) return 1;
-            }
-            return 0;t
-        }
-        if (indexA !== undefined) return -1;
-        if (indexB !== undefined) return 1;
-
-        return (a.name || '').localeCompare(b.name || '');
+      if (indexA !== undefined && indexB !== undefined) {
+        if (indexA !== indexB) return indexA - indexB;
+        // If IDs are the same (e.g., "aiolists-watchlist-W" for both movie and series catalogs),
+        // sort by type: movie before series.
+        if (a.type === 'movie' && b.type === 'series') return -1;
+        if (a.type === 'series' && b.type === 'movie') return 1;
+        return 0;
+      }
+      if (indexA !== undefined) return -1;
+      if (indexB !== undefined) return 1;
+      return (a.name || '').localeCompare(b.name || '');
     });
   }
 
   const builder = new addonBuilder(manifest);
 
   builder.defineCatalogHandler(async ({ type, id, extra }) => {
+    // console.log(`[AIOLists Debug] Catalog Handler received: type=${type}, id=${id}`);
     const skip = parseInt(extra?.skip) || 0;
-    let baseListId = id;
-    let forcedType = type;
+    
+    // With the new manifest strategy, 'id' is the baseListId, and 'type' is the specific type.
+    // No suffix stripping is needed here anymore for your primary lists.
+    const baseListIdToFetch = id; 
+    const typeToFilterBy = type;
 
-    if (id.endsWith('_movies')) {
-        baseListId = id.substring(0, id.length - '_movies'.length);
-        forcedType = 'movie';
-    } else if (id.endsWith('_series') || id.endsWith('_shows')) {
-        baseListId = id.substring(0, id.length - (id.endsWith('_series') ? '_series'.length : '_shows'.length));
-        forcedType = 'series';
-    }
-    if (id.startsWith('trakt_watchlist_')) {
-        baseListId = 'trakt_watchlist';
-    }
+    // Suffix stripping might still be relevant if you have imported addons
+    // that use a _movies/_series suffix pattern in their *catalog.id* values.
+    // For this example, we assume `id` from your primary lists is already the base ID.
 
-
-    const items = await fetchListContent(baseListId, userConfig, skip); // Pass baseListId
+    const items = await fetchListContent(baseListIdToFetch, userConfig, skip);
     if (!items) return Promise.resolve({ metas: [] });
 
     let metas = await convertToStremioFormat(items, userConfig.rpdbApiKey);
-    if (forcedType !== 'all') {
-        metas = metas.filter(meta => meta.type === forcedType);
+
+    if (typeToFilterBy !== 'all') {
+        metas = metas.filter(meta => meta.type === typeToFilterBy);
     }
-    return Promise.resolve({ metas, cacheMaxAge: isWatchlist(baseListId) ? 0 : (5 * 60) });
+
+    return Promise.resolve({ metas, cacheMaxAge: isWatchlist(baseListIdToFetch) ? 0 : (5 * 60) });
   });
 
   builder.defineMetaHandler(({ type, id }) => {
