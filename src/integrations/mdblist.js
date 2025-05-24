@@ -24,14 +24,14 @@ async function fetchAllLists(apiKey) {
   if (!apiKey) return [];
   let allLists = [];
   const listEndpoints = [
-    { url: `https://api.mdblist.com/lists/user?apikey=${apiKey}`, type: 'L', nameSuffix: '' },
-    { url: `https://api.mdblist.com/external/lists/user?apikey=${apiKey}`, type: 'E', nameSuffix: ' (External)' }
+    { url: `https://api.mdblist.com/lists/user?apikey=${apiKey}`, type: 'L' },
+    { url: `https://api.mdblist.com/external/lists/user?apikey=${apiKey}`, type: 'E' }
   ];
   for (const endpoint of listEndpoints) {
     try {
       const response = await axios.get(endpoint.url);
       if (response.data && Array.isArray(response.data)) {
-        allLists.push(...response.data.map(list => ({ ...list, listType: endpoint.type, name: list.name + endpoint.nameSuffix })));
+        allLists.push(...response.data.map(list => ({ ...list, listType: endpoint.type, name: list.name })));
       }
     } catch (err) { console.error(`Error fetching MDBList ${endpoint.type} lists:`, err.message); }
   }

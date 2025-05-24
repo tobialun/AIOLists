@@ -162,13 +162,13 @@ async function createAddon(userConfig) {
         manifest.catalogs.push({ type: 'all', id: manifestListId, name: displayName, extraSupported: ["skip"], extraRequired: [] });
       } else {
         if (hasMovies) {
-          const movieListName = (hasMovies && hasShows && !isMerged) ? `${displayName} (Movies)` : displayName;
+          const movieListName = (hasMovies && hasShows && !isMerged) ? `${displayName}` : displayName;
           // Ensure unique ID if splitting
           const movieListId = (hasMovies && hasShows && !isMerged) ? `${manifestListId}_movies` : manifestListId;
           manifest.catalogs.push({ type: 'movie', id: movieListId, name: movieListName, extraSupported: ["skip"], extraRequired: [] });
         }
         if (hasShows) {
-          const seriesListName = (hasMovies && hasShows && !isMerged) ? `${displayName} (Series)` : displayName;
+          const seriesListName = (hasMovies && hasShows && !isMerged) ? `${displayName}` : displayName;
           const seriesListId = (hasMovies && hasShows && !isMerged) ? `${manifestListId}_series` : manifestListId; // or _shows
           manifest.catalogs.push({ type: 'series', id: seriesListId, name: seriesListName, extraSupported: ["skip"], extraRequired: [] });
         }
@@ -202,23 +202,30 @@ async function createAddon(userConfig) {
     listOrder.forEach((id, index) => { orderMap.set(String(id), index); });
 
     manifest.catalogs.sort((a, b) => {
-        const idA = String(a.id).replace(/_movies$|_series$|_shows$/, ''); // Get base ID for sorting
-        const idB = String(b.id).replace(/_movies$|_series$|_shows$/, '');
-        const indexA = orderMap.get(idA);
-        const indexB = orderMap.get(idB);
+        const catalogIdA = String(a.id);
+        const catalogIdB = String(b.id);
+
+        const indexA = orderMap.get(catalogIdA);
+        const indexB = orderMap.get(catalogIdB);
 
         if (indexA !== undefined && indexB !== undefined) {
             if (indexA !== indexB) return indexA - indexB;
-            if (a.id.endsWith('_movies') && (b.id.endsWith('_series') || b.id.endsWith('_shows'))) return -1;
-            if ((a.id.endsWith('_series') || a.id.endsWith('_shows')) && b.id.endsWith('_movies')) return 1;
-            return 0;
+
+            const baseIdA = catalogIdA.replace(/_movies$|_series$|_shows$/, '');
+            const baseIdB = catalogIdB.replace(/_movies$|_series$|_shows$/, '');
+
+            if (baseIdA === baseIdB) {
+                if (catalogIdA.endsWith('_movies') && (catalogIdB.endsWith('_series') || catalogIdB.endsWith('_shows'))) return -1;
+                if ((catalogIdA.endsWith('_series') || catalogIdA.endsWith('_shows')) && catalogIdB.endsWith('_movies')) return 1;
+            }
+            return 0;t
         }
         if (indexA !== undefined) return -1;
         if (indexB !== undefined) return 1;
-        return 0;
+
+        return (a.name || '').localeCompare(b.name || '');
     });
   }
-
 
   const builder = new addonBuilder(manifest);
 
