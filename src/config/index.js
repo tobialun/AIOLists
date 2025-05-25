@@ -3,8 +3,16 @@ const PORT = process.env.PORT || 7000;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const TRAKT_CLIENT_ID = '490414ec03fe9a33b2d0c16d58261ebbbd9cf0eee23f213fa0e3eb1d6126d05c';
 
+const staticGenres = [
+  "Action", "Adventure", "Animation", "Anime", "Biography", "Comedy", "Crime",
+  "Documentary", "Drama", "Family", "Fantasy", "Film Noir", "History", "Horror",
+  "Music", "Musical", "Mystery", "Romance", "Sci-Fi", "Science Fiction", "Short", "Sport",
+  "Superhero", "Thriller", "War", "Western", "Game Show", "Home and Garden",
+  "News", "Reality", "Talk Show", "Mini-Series" // Added some TV specific ones too
+];
+
 const defaultConfig = {
-  apiKey: '',            
+  apiKey: '',
   rpdbApiKey: '',
   traktAccessToken: '',
   traktRefreshToken: '',
@@ -13,11 +21,11 @@ const defaultConfig = {
   lastUpdated: null,
   listsMetadata: {},
   hiddenLists: [],
-  removedLists: [],      
-  customListNames: {},   
-  mergedLists: {},       
-  importedAddons: {},    
-  sortPreferences: {},   
+  removedLists: [],
+  customListNames: {},
+  mergedLists: {},
+  importedAddons: {},
+  sortPreferences: {},
   availableSortOptions: [
     { value: 'rank', label: 'Rank' },
     { value: 'score', label: 'Score' },
@@ -59,5 +67,6 @@ module.exports = {
   ITEMS_PER_PAGE,
   TRAKT_CLIENT_ID,
   PORT,
-  IS_PRODUCTION
+  IS_PRODUCTION,
+  staticGenres
 };
