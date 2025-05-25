@@ -5,10 +5,9 @@ const TRAKT_CLIENT_ID = '490414ec03fe9a33b2d0c16d58261ebbbd9cf0eee23f213fa0e3eb1
 
 const staticGenres = [
   "Action", "Adventure", "Animation", "Anime", "Biography", "Comedy", "Crime",
-  "Documentary", "Drama", "Family", "Fantasy", "Film Noir", "History", "Horror",
-  "Music", "Musical", "Mystery", "Romance", "Sci-Fi", "Science Fiction", "Short", "Sport",
-  "Superhero", "Thriller", "War", "Western", "Game Show", "Home and Garden",
-  "News", "Reality", "Talk Show", "Mini-Series" // Added some TV specific ones too
+  "Documentary", "Drama", "Family", "Fantasy", "History", "Horror",
+  "Music", "Musical", "Mystery", "Romance", "Sci-Fi", "Short", "Sport",
+  "Thriller", "War", "Western", "Game-Show"
 ];
 
 const defaultConfig = {

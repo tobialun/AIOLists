@@ -8,11 +8,10 @@ async function initTraktApi(userConfig) {
   if (userConfig.traktAccessToken && userConfig.traktExpiresAt) {
     const now = new Date();
     const expiresAt = new Date(userConfig.traktExpiresAt);
-    if (now < expiresAt) return true; // Token is valid
-    // Token expired, try to refresh
+    if (now < expiresAt) return true;
     if (userConfig.traktRefreshToken) return refreshTraktToken(userConfig);
   }
-  return false; // No token, expired and no refresh token, or refresh failed
+  return false;
 }
 
 async function refreshTraktToken(userConfig) {
@@ -20,24 +19,20 @@ async function refreshTraktToken(userConfig) {
     const response = await axios.post(`${TRAKT_API_URL}/oauth/token`, {
       refresh_token: userConfig.traktRefreshToken,
       client_id: TRAKT_CLIENT_ID,
-      // client_secret: TRAKT_CLIENT_SECRET, // Not typically used for PIN auth flow with public clients
       grant_type: 'refresh_token',
-      redirect_uri: 'urn:ietf:wg:oauth:2.0:oob' // Must match what was used for initial auth
+      redirect_uri: 'urn:ietf:wg:oauth:2.0:oob'
     }, { headers: { 'Content-Type': 'application/json' } });
 
     if (response.status === 200 && response.data) {
       userConfig.traktAccessToken = response.data.access_token;
-      userConfig.traktRefreshToken = response.data.refresh_token; // Store the new refresh token
+      userConfig.traktRefreshToken = response.data.refresh_token;
       userConfig.traktExpiresAt = new Date(Date.now() + (response.data.expires_in * 1000)).toISOString();
-      // Persist these changes (e.g., by re-compressing config or specific update endpoint)
-      // For now, assume userConfig is mutated and will be saved by the caller
       return true;
     }
     return false;
   } catch (error) {
     console.error("Error refreshing Trakt token:", error.message);
-    if (error.response?.status === 401) { // Unauthorized, likely bad refresh token
-      // Invalidate tokens
+    if (error.response?.status === 401) {
       userConfig.traktAccessToken = null;
       userConfig.traktRefreshToken = null;
       userConfig.traktExpiresAt = null;
@@ -55,7 +50,6 @@ async function authenticateTrakt(code) {
     const response = await axios.post(`${TRAKT_API_URL}/oauth/token`, {
       code,
       client_id: TRAKT_CLIENT_ID,
-      // client_secret: TRAKT_CLIENT_SECRET,
       grant_type: 'authorization_code',
       redirect_uri: 'urn:ietf:wg:oauth:2.0:oob'
     }, { headers: { 'Content-Type': 'application/json' } });
@@ -70,13 +64,12 @@ async function authenticateTrakt(code) {
     throw new Error('Failed to authenticate with Trakt');
   } catch (error) {
     console.error("Error authenticating with Trakt:", error.response?.data || error.message);
-    throw error; // Re-throw to be handled by the caller
+    throw error;
   }
 }
 
 async function fetchTraktLists(userConfig) {
-  if (!await initTraktApi(userConfig)) return []; // Ensure token is valid/refreshed
-
+  if (!await initTraktApi(userConfig)) return [];
   try {
     const response = await axios.get(`${TRAKT_API_URL}/users/me/lists`, {
       headers: {
@@ -87,13 +80,8 @@ async function fetchTraktLists(userConfig) {
       }
     });
     const lists = response.data.map(list => ({
-      id: `trakt_${list.ids.slug}`, // Use slug for ID
-      name: list.name,
-      updated: list.updated_at,
-      listType: 'T', // Custom type for Trakt user lists
-      isTraktList: true
+      id: `trakt_${list.ids.slug}`, name: list.name, updated: list.updated_at, listType: 'T', isTraktList: true
     }));
-    // Add special Trakt lists
     const specialLists = [
       { id: 'trakt_watchlist', name: 'Trakt Watchlist', isTraktWatchlist: true, listType: 'T'},
       { id: 'trakt_recommendations_movies', name: 'Recommended Movies', isTraktRecommendations: true, isMovieList: true, listType: 'T'},
@@ -112,45 +100,29 @@ async function fetchTraktLists(userConfig) {
 
 async function fetchPublicTraktListDetails(traktListUrl) {
   try {
-    const cleanedUrl = traktListUrl.split('?')[0]; // Remove query params if any
+    const cleanedUrl = traktListUrl.split('?')[0];
     const urlMatch = cleanedUrl.match(/^https?:\/\/trakt\.tv\/users\/([\w-]+)\/lists\/([\w-]+)\/?$/);
-    if (!urlMatch) throw new Error('Invalid Trakt list URL format. Expected: https://trakt.tv/users/username/lists/list-slug-or-id');
-    
+    if (!urlMatch) throw new Error('Invalid Trakt list URL format.');
     const [, username, listSlugOrId] = urlMatch;
-    const headers = {
-      'Content-Type': 'application/json',
-      'trakt-api-version': '2',
-      'trakt-api-key': TRAKT_CLIENT_ID
-    };
-
-    // Fetch main list details to get name, actual slug, etc.
+    const headers = { 'Content-Type': 'application/json', 'trakt-api-version': '2', 'trakt-api-key': TRAKT_CLIENT_ID };
     const listDetailsResponse = await axios.get(`${TRAKT_API_URL}/users/${username}/lists/${listSlugOrId}`, { headers });
     if (!listDetailsResponse.data) throw new Error('Could not fetch Trakt list details.');
     const listData = listDetailsResponse.data;
-
-    // Determine if list has movies/shows by fetching a few items
     let hasMovies = false, hasShows = false;
     if (listData.item_count > 0) {
-      const itemsResp = await axios.get(`${TRAKT_API_URL}/users/${username}/lists/${listData.ids.slug}/items?limit=5&extended=full`, { headers });
+      const itemsResp = await axios.get(`${TRAKT_API_URL}/users/${username}/lists/${listData.ids.slug}/items?limit=1&extended=full`, { headers });
       if (itemsResp.data && Array.isArray(itemsResp.data)) {
         for (const item of itemsResp.data) {
           if (item.type === 'movie' && item.movie) hasMovies = true;
           if (item.type === 'show' && item.show) hasShows = true;
-          if (hasMovies && hasShows) break; // Stop if both found
+          if (hasMovies && hasShows) break;
         }
       }
     }
-
     return {
-      listId: `traktpublic_${username}_${listData.ids.slug}`, // Unique ID for AIOLists
-      originalTraktId: String(listData.ids.trakt), // Store original Trakt numeric ID
-      originalTraktSlug: listData.ids.slug, // Store original Trakt slug
-      traktUser: username, // Store the Trakt username
-      listName: listData.name,
-      isTraktPublicList: true,
-      hasMovies: hasMovies,
-      hasShows: hasShows,
-      itemCount: listData.item_count
+      listId: `traktpublic_${username}_${listData.ids.slug}`, originalTraktId: String(listData.ids.trakt),
+      originalTraktSlug: listData.ids.slug, traktUser: username, listName: listData.name,
+      isTraktPublicList: true, hasMovies: hasMovies, hasShows: hasShows, itemCount: listData.item_count
     };
   } catch (error) {
     console.error('Error fetching public Trakt list details:', error.response?.data || error.message);
@@ -158,21 +130,24 @@ async function fetchPublicTraktListDetails(traktListUrl) {
   }
 }
 
-
-async function fetchTraktListItems(listId, userConfig, skip = 0, sortBy = 'rank', sortOrder = 'asc', isPublicImport = false, publicUsername = null, itemTypeHint = null, genre = null) { // Added genre
-  const limit = ITEMS_PER_PAGE;
-  const page = Math.floor(skip / limit) + 1; // Trakt API is 1-indexed for pages
-  const headers = {
-    'Content-Type': 'application/json',
-    'trakt-api-version': '2',
-    'trakt-api-key': TRAKT_CLIENT_ID
-  };
+async function fetchTraktListItems(
+    listId, userConfig, skip = 0, sortBy = 'rank', sortOrder = 'asc',
+    isPublicImport = false, publicUsername = null, itemTypeHint = null, genre = null,
+    isMetadataCheck = false
+) {
+  if (!listId) {
+    console.error(`TraktListItems: Critical error - listId is undefined.`);
+    return null;
+  }
   
-  const logContext = `TraktListItems (ID: ${listId}, TypeHint: ${itemTypeHint || 'any'}, Genre: ${genre || 'any'}, Page: ${page})`;
+  const limit = isMetadataCheck ? 1 : ITEMS_PER_PAGE;
+  const page = isMetadataCheck ? 1 : Math.floor(skip / limit) + 1;
 
-  if (!isPublicImport) { // For private lists, ensure token is valid
+  const headers = { 'Content-Type': 'application/json', 'trakt-api-version': '2', 'trakt-api-key': TRAKT_CLIENT_ID };
+
+  if (!isPublicImport) {
     if (!await initTraktApi(userConfig)) {
-      console.error(`[${logContext}] Trakt API not initialized or token refresh failed.`);
+      console.error(`TraktListItems (ID: ${listId}): Trakt API not initialized or token refresh failed.`);
       return null;
     }
     headers['Authorization'] = `Bearer ${userConfig.traktAccessToken}`;
@@ -181,173 +156,151 @@ async function fetchTraktListItems(listId, userConfig, skip = 0, sortBy = 'rank'
   let requestUrl;
   let params = { limit, page, extended: 'full' };
   let rawTraktEntries = [];
-  let effectiveItemTypeForEndpoint = itemTypeHint; // movie, series, or null for mixed
-
+  let effectiveItemTypeForEndpoint = itemTypeHint;
 
   try {
     if (isPublicImport && publicUsername) {
-        // For public lists, listId is like 'traktpublic_username_actualslug'
-        const actualSlugOrId = listId.replace(/^traktpublic_[^_]+_/, '');
-        const traktApiItemTypePath = itemTypeHint === 'series' ? 'shows' : (itemTypeHint === 'movie' ? 'movies' : null);
-        
-        if (!traktApiItemTypePath) { // If no specific type hint, fetch all types from the list
-             requestUrl = `${TRAKT_API_URL}/users/${publicUsername}/lists/${actualSlugOrId}/items`;
-        } else { // Fetch only a specific type if hinted
-            requestUrl = `${TRAKT_API_URL}/users/${publicUsername}/lists/${actualSlugOrId}/items/${traktApiItemTypePath}`;
-        }
-        // Sorting for public user lists (can be by rank, added, title etc.)
-        if (['rank', 'added', 'title', 'released', 'runtime', 'popularity', 'votes', 'random'].includes(sortBy)) {
-            params.sort_by = sortBy;
-            if (sortOrder) params.sort_how = sortOrder; // asc or desc
+        const actualSlug = listId.replace(/^traktpublic_[^_]+_/, '');
+        let basePath = `${TRAKT_API_URL}/users/${publicUsername}/lists/${actualSlug}/items`;
+        if (itemTypeHint === 'movie') requestUrl = `${basePath}/movies`;
+        else if (itemTypeHint === 'series') requestUrl = `${basePath}/shows`;
+        else requestUrl = basePath;
+        effectiveItemTypeForEndpoint = itemTypeHint;
+        if (['rank', 'added', 'title', 'released', 'runtime', 'popularity', 'votes', 'random'].includes(sortBy) && !isMetadataCheck) {
+            params.sort_by = sortBy; if (sortOrder) params.sort_how = sortOrder;
         }
     } else if (listId === 'trakt_watchlist') {
-        if (['rank', 'added', 'released', 'title'].includes(sortBy)) params.sort = sortBy; // Watchlist uses 'sort'
-        if (sortOrder) params.order = sortOrder; // asc or desc
-
-        if (!itemTypeHint) { // Fetch both movies and shows for watchlist if no type hint
-            const [moviesResp, showsResp] = await Promise.all([
-                axios.get(`${TRAKT_API_URL}/users/me/watchlist/movies`, { headers, params }).catch(e => ({ data: [] })),
-                axios.get(`${TRAKT_API_URL}/users/me/watchlist/shows`, { headers, params }).catch(e => ({ data: [] }))
-            ]);
-            if (Array.isArray(moviesResp.data)) rawTraktEntries.push(...moviesResp.data.map(entry => ({ ...entry, typeFromParams: 'movie'}))); // Add type hint
-            if (Array.isArray(showsResp.data)) rawTraktEntries.push(...showsResp.data.map(entry => ({ ...entry, typeFromParams: 'show'})));
-        } else { // Fetch specific type for watchlist
-            requestUrl = `${TRAKT_API_URL}/users/me/watchlist/${itemTypeHint === 'series' ? 'shows' : 'movies'}`;
-            effectiveItemTypeForEndpoint = itemTypeHint;
+        let basePath = `${TRAKT_API_URL}/users/me/watchlist`;
+        if (itemTypeHint === 'movie') { requestUrl = `${basePath}/movies`; effectiveItemTypeForEndpoint = 'movie'; }
+        else if (itemTypeHint === 'series') { requestUrl = `${basePath}/shows`; effectiveItemTypeForEndpoint = 'series'; }
+        else {
+            const typesToFetch = isMetadataCheck && itemTypeHint ? [itemTypeHint] : ['movie', 'show'];
+            const promises = typesToFetch.map(type => {
+                const typePath = type === 'movie' ? 'movies' : 'shows';
+                return axios.get(`${basePath}/${typePath}`, { headers, params }).catch(e => ({ data: [] }));
+            });
+            const responses = await Promise.all(promises);
+            responses.forEach((resp, index) => {
+                const currentType = typesToFetch[index]; // 'movie' or 'show'
+                if (Array.isArray(resp.data)) rawTraktEntries.push(...resp.data.map(entry => ({ ...entry, typeFromParams: currentType })));
+            });
+            effectiveItemTypeForEndpoint = null;
         }
+        if (['rank', 'added', 'released', 'title'].includes(sortBy) && !isMetadataCheck) params.sort = sortBy;
     } else if (listId.startsWith('trakt_recommendations_')) {
         effectiveItemTypeForEndpoint = listId.endsWith('_movies') ? 'movie' : (listId.endsWith('_shows') ? 'series' : null);
-        if (!effectiveItemTypeForEndpoint) return null; // Invalid recommendations list ID
+        if (!effectiveItemTypeForEndpoint) { console.error(`TraktListItems (ID: ${listId}): Invalid recommendations list ID.`); return null; }
         requestUrl = `${TRAKT_API_URL}/recommendations/${effectiveItemTypeForEndpoint === 'series' ? 'shows' : 'movies'}`;
-        // Recommendations can be filtered by genre on Trakt's side
-        if (genre) params.genres = genre.toLowerCase().replace(/\s+/g, '-'); // Trakt uses slugified genres
-        params = { ...params, limit, page, extended: 'full' }; // Ensure params are correctly set
+        if (genre && !isMetadataCheck) params.genres = genre.toLowerCase().replace(/\s+/g, '-');
     } else if (listId.startsWith('trakt_trending_') || listId.startsWith('trakt_popular_')) {
         effectiveItemTypeForEndpoint = listId.includes('_movies') ? 'movie' : (listId.includes('_shows') ? 'series' : null);
-        if (!effectiveItemTypeForEndpoint) return null;
+        if (!effectiveItemTypeForEndpoint) { console.error(`TraktListItems (ID: ${listId}): Invalid trending/popular list ID.`); return null; }
         const endpointType = listId.startsWith('trakt_trending_') ? 'trending' : 'popular';
-        if (headers.Authorization) delete headers.Authorization; // Trending/Popular don't need auth and can fail if sent with bad token
+        if (headers.Authorization) delete headers.Authorization;
         requestUrl = `${TRAKT_API_URL}/${effectiveItemTypeForEndpoint === 'series' ? 'shows' : 'movies'}/${endpointType}`;
-        // Trending/Popular can also be filtered by genre on Trakt's side
-        if (genre) params.genres = genre.toLowerCase().replace(/\s+/g, '-');
-        params = { ...params, limit, page, extended: 'full' };
-    } else if (listId.startsWith('trakt_')) { // Regular user list
+        if (genre && !isMetadataCheck) params.genres = genre.toLowerCase().replace(/\s+/g, '-');
+    } else if (listId.startsWith('trakt_')) {
         const listSlug = listId.replace('trakt_', '');
-        requestUrl = `${TRAKT_API_URL}/users/me/lists/${listSlug}/items`;
-        if (itemTypeHint) { // If a specific type is requested for a user list
-             const typePath = itemTypeHint === 'series' ? 'shows' : (itemTypeHint === 'movie' ? 'movies' : null);
-             if (typePath) requestUrl += `/${typePath}`; // Append /movies or /shows
-             effectiveItemTypeForEndpoint = itemTypeHint;
-        }
-        // Sorting for user lists
-        if (sortBy) params.sort_by = sortBy; 
-        if (sortOrder) params.sort_how = sortOrder;
+        let basePath = `${TRAKT_API_URL}/users/me/lists/${listSlug}/items`;
+        if (itemTypeHint === 'movie') { requestUrl = `${basePath}/movies`; effectiveItemTypeForEndpoint = 'movie'; }
+        else if (itemTypeHint === 'series') { requestUrl = `${basePath}/shows`; effectiveItemTypeForEndpoint = 'series'; }
+        else { requestUrl = basePath; effectiveItemTypeForEndpoint = null; }
+        if (sortBy && !isMetadataCheck) params.sort_by = sortBy; 
+        if (sortOrder && !isMetadataCheck) params.sort_how = sortOrder;
     } else {
-      console.warn(`[${logContext}] Unknown Trakt list ID format.`);
-      return null; // Unknown list ID format
+      console.warn(`TraktListItems (ID: ${listId}): Unknown Trakt list ID format or type.`); return null;
     }
 
-    // Make the API call if requestUrl is set and not already populated (e.g. combined watchlist)
     if (requestUrl && rawTraktEntries.length === 0) {
         const response = await axios.get(requestUrl, { headers, params });
-        // Recommendations, Trending, Popular return array of items directly, not item objects with 'movie'/'show' keys
         if (listId.startsWith('trakt_recommendations_') || listId.startsWith('trakt_trending_') || listId.startsWith('trakt_popular_')) {
-             // The response here is an array of movie/show objects directly
-             if (Array.isArray(response.data)) rawTraktEntries = response.data.map(item => ({ [effectiveItemTypeForEndpoint]: item, typeFromParams: effectiveItemTypeForEndpoint }));
-        } else if (Array.isArray(response.data)) { // For user lists and watchlist
-            // Data is an array of list items, each has a 'type' ('movie', 'show') and a corresponding object key
+             if (Array.isArray(response.data)) {
+                rawTraktEntries = response.data.map(item => ({ [effectiveItemTypeForEndpoint]: item, typeFromParams: effectiveItemTypeForEndpoint }));
+             }
+        } else if (Array.isArray(response.data)) {
             rawTraktEntries = response.data.map(entry => ({ ...entry, typeFromParams: entry.type || effectiveItemTypeForEndpoint || null }));
         }
     }
 
-
-    // Process raw Trakt entries to a common format for enrichment
     const initialItems = rawTraktEntries.map(entry => {
       let itemDataForDetails;
       let resolvedStremioType;
-      let entryType = entry.typeFromParams || entry.type; // Use our added type hint or Trakt's type
+      let entryType = entry.typeFromParams || entry.type || effectiveItemTypeForEndpoint;
 
-      // Unpack based on Trakt's structure (item.movie, item.show, or direct item for trending/popular)
       if (entryType === 'movie' && entry.movie) {
         resolvedStremioType = 'movie';
-        itemDataForDetails = entry.movie;
-      } else if (entryType === 'show' && entry.show) {
+        if (entry.movie.movie && entry.movie.movie.ids) { // Handles { movie: { movie: ACTUAL_DATA } }
+            itemDataForDetails = entry.movie.movie;
+        } else if (entry.movie.ids) { // Handles { movie: ACTUAL_DATA }
+            itemDataForDetails = entry.movie;
+        } else {
+            return null;
+        }
+      } else if (entryType === 'series' && entry.series) {
         resolvedStremioType = 'series';
+        if (entry.series.show && entry.series.show.ids) { // Handles { series: { show: ACTUAL_DATA } }
+            itemDataForDetails = entry.series.show;
+        } else if (entry.series.ids) { // Handles { series: ACTUAL_DATA }
+            itemDataForDetails = entry.series;
+        } else {
+            return null;
+        }
+      } else if (entryType === 'show' && entry.show) { // Handles items from watchlist/user lists with type: 'show'
+        resolvedStremioType = 'series'; 
         itemDataForDetails = entry.show;
-      } else if (entry.movie) { // Handles cases where entry is { movie: {...} } and type might be missing/general
-        resolvedStremioType = 'movie';
-        itemDataForDetails = entry.movie;
-      } else if (entry.show) { // Handles cases where entry is { show: {...} }
-        resolvedStremioType = 'series';
-        itemDataForDetails = entry.show;
-      } else if (entry.ids && entry.title) { // Fallback for flatter structures, often from trending/popular if not pre-processed
-          itemDataForDetails = entry; // The entry itself is the movie/show object
-          if (entryType === 'movie') resolvedStremioType = 'movie';
-          else if (entryType === 'show' || entryType === 'series') resolvedStremioType = 'series';
-          else if (effectiveItemTypeForEndpoint) resolvedStremioType = effectiveItemTypeForEndpoint; // Use type from endpoint if available
-          else return null; // Cannot determine type
       } else {
-        // console.warn(`[${logContext}] Skipping entry with unknown structure:`, entry);
-        return null; // Skip if structure is not recognized
+        return null;
       }
       
-      // If a specific item type was requested (e.g., for split views) and this item doesn't match, skip it.
-      // This is mainly for when itemTypeHint was null initially and we fetched mixed content.
-      if (itemTypeHint && resolvedStremioType !== itemTypeHint) {
-         // console.log(`[${logContext}] Filtering out item due to type mismatch. Expected: ${itemTypeHint}, Got: ${resolvedStremioType}`, itemDataForDetails.title);
+      if (!itemDataForDetails) {
+          return null;
+      }
+
+      // Filter by hint if the hint was specific and doesn't match the resolved type.
+      // This is mainly for mixed lists (watchlist, user list with no type hint) being filtered by a typed Stremio catalog.
+      if (itemTypeHint && resolvedStremioType !== itemTypeHint && !(listId === 'trakt_watchlist' && !itemTypeHint)) {
          return null;
       }
 
-      const imdbId = itemDataForDetails?.ids?.imdb;
-      if (!imdbId) {
-        // console.warn(`[${logContext}] Skipping item without IMDb ID:`, itemDataForDetails.title);
-        return null; // Essential for Stremio
+      const imdbId = itemDataForDetails.ids?.imdb;
+      if (!imdbId) { 
+        return null; 
       }
 
-      // Basic mapping, enrichment will add more details
       return {
-        imdb_id: imdbId, // For enrichment key
-        tmdb_id: itemDataForDetails?.ids?.tmdb, // For enrichment if needed
-        title: itemDataForDetails?.title,
-        year: itemDataForDetails?.year,
-        overview: itemDataForDetails?.overview,
-        genres: itemDataForDetails?.genres, // Trakt provides genres as an array of slugs
-        runtime: itemDataForDetails?.runtime, // In minutes
-        type: resolvedStremioType, // 'movie' or 'series'
-        // Add any other fields needed before enrichment or that enrichment might miss
+        imdb_id: imdbId, tmdb_id: itemDataForDetails.ids?.tmdb, title: itemDataForDetails.title,
+        year: itemDataForDetails.year, overview: itemDataForDetails.overview, genres: itemDataForDetails.genres,
+        runtime: itemDataForDetails.runtime, type: resolvedStremioType,
       };
-    }).filter(item => item !== null); // Remove nulls from mapping
+    }).filter(item => item !== null);
 
-    // Enrich with Cinemeta (which also converts Trakt genre slugs to display names)
     let enrichedAllItems = await enrichItemsWithCinemeta(initialItems);
 
-    // Post-enrichment genre filtering IF Trakt API didn't filter it and genre is specified
-    // This is a fallback, especially for user lists and watchlists where Trakt API doesn't filter by genre
-    if (genre && enrichedAllItems.length > 0 &&
-        !(listId.startsWith('trakt_recommendations_') || listId.startsWith('trakt_trending_') || listId.startsWith('trakt_popular_'))) {
-        enrichedAllItems = enrichedAllItems.filter(item => item.genres && item.genres.includes(genre));
+    if (genre && enrichedAllItems.length > 0 && !isMetadataCheck) {
+        const lowerGenre = String(genre).toLowerCase();
+        const needsServerSideGenreFiltering = !(
+            listId.startsWith('trakt_recommendations_') || listId.startsWith('trakt_trending_') ||
+            listId.startsWith('trakt_popular_') || (isPublicImport && itemTypeHint)
+        );
+        if (needsServerSideGenreFiltering) {
+            enrichedAllItems = enrichedAllItems.filter(item => item.genres && item.genres.map(g => String(g).toLowerCase()).includes(lowerGenre));
+        }
     }
 
     const finalResult = { movies: [], shows: [], hasMovies: false, hasShows: false };
     enrichedAllItems.forEach(item => {
-      if (item.type === 'movie') {
-        finalResult.movies.push(item);
-        finalResult.hasMovies = true;
-      } else if (item.type === 'series') {
-        finalResult.shows.push(item);
-        finalResult.hasShows = true;
-      }
+      if (item.type === 'movie') { finalResult.movies.push(item); finalResult.hasMovies = true; }
+      else if (item.type === 'series') { finalResult.shows.push(item); finalResult.hasShows = true; }
     });
     
-    // console.log(`[${logContext}] Processed ${rawTraktEntries.length} raw entries, resulted in ${finalResult.movies.length} movies, ${finalResult.shows.length} shows.`);
     return finalResult;
 
   } catch (error) {
-    console.error(`[${logContext}] Critical error in fetchTraktListItems: ${error.message}`, error.stack);
+    console.error(`TraktListItems (ID: ${listId}): Critical error: ${error.message}`, error.stack);
     if (error.response) {
-        console.error(`[${logContext}] Trakt API Error Response:`, JSON.stringify(error.response.data), error.response.status);
+        console.error(`TraktListItems (ID: ${listId}): Trakt API Error Response: Status ${error.response.status}`, JSON.stringify(error.response.data, null, 2));
     }
-    return null; // Return null on error
+    return null;
   }
 }
 

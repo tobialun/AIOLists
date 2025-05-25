@@ -50,42 +50,57 @@ module.exports = function(router) {
   // Serve catalog content
   router.get('/:configHash/catalog/:type/:id/:extra?.json', async (req, res) => {
     try {
-      const { type, id } = req.params;
-      const skip = parseInt(req.query.skip || req.params.extra?.match(/skip=(\d+)/)?.[1]) || 0;
-      const genre = req.query.genre || req.params.extra?.match(/genre=([^&]+)/)?.[1] || null; // Extract genre
+      const { type: catalogType, id: catalogId } = req.params; // Renamed to avoid conflict in this scope
+      const extraParamsString = req.params.extra; // Capture the raw extra string
 
-      setCacheHeaders(res, id); // Set cache headers based on list ID
+      // Parse skip and genre from query parameters first, then from path segment if present
+      let skip = parseInt(req.query.skip);
+      let genre = req.query.genre;
 
-      const items = await fetchListContent(id, req.userConfig, skip, genre); // Pass genre
-      if (!items) return res.json({ metas: [] });
+      if (isNaN(skip) && extraParamsString) { // If skip is not a number from query, try parsing from path
+        const skipMatch = extraParamsString.match(/skip=(\d+)/);
+        if (skipMatch) skip = parseInt(skipMatch[1]);
+      }
+      if (!genre && extraParamsString) { // If genre is not from query, try parsing from path
+        const genreMatch = extraParamsString.match(/genre=([^&]+)/);
+        if (genreMatch) genre = decodeURIComponent(genreMatch[1]);
+      }
+      
+      skip = isNaN(skip) ? 0 : skip;
+      genre = genre || null;
 
-      let metas = await convertToStremioFormat(items, req.userConfig.rpdbApiKey);
 
-      // Filter by type (movie/series) if not 'all'
-      if (type !== 'all' && (type === 'movie' || type === 'series')) {
-        metas = metas.filter(meta => meta.type === type);
-      } else if (type !== 'all') { // Invalid type if not movie, series, or all
+      setCacheHeaders(res, catalogId); // Set cache headers based on list ID
+
+      // Pass catalogType to fetchListContent
+      const itemsResult = await fetchListContent(catalogId, req.userConfig, skip, genre, catalogType);
+      
+      if (!itemsResult) {
+        return res.json({ metas: [] });
+      }
+
+      let metas = await convertToStremioFormat(itemsResult, req.userConfig.rpdbApiKey);
+
+      if (catalogType !== 'all' && (catalogType === 'movie' || catalogType === 'series')) {
+        metas = metas.filter(meta => meta.type === catalogType);
+      } else if (catalogType !== 'all') { // Invalid type if not movie, series, or all
         return res.json({ metas: [] });
       }
       
-      // Fallback genre filtering if not handled by fetchListContent
       if (genre && metas.length > 0) {
-        const isPotentiallyUnfiltered = metas.some(meta => !(meta.genres && meta.genres.includes(genre)));
-        if (isPotentiallyUnfiltered) {
-            metas = metas.filter(meta => meta.genres && meta.genres.includes(genre));
+        const needsFiltering = metas.some(meta => !(meta.genres && meta.genres.map(g => String(g).toLowerCase()).includes(String(genre).toLowerCase())));
+        if (needsFiltering) {
+            metas = metas.filter(meta => meta.genres && meta.genres.map(g => String(g).toLowerCase()).includes(String(genre).toLowerCase()));
         }
       }
-
       res.json({ metas });
     } catch (error) {
-      console.error('Error in catalog endpoint:', error);
-      res.status(500).json({ error: 'Internal server error' });
+      console.error(`Error in catalog endpoint (/catalog/${req.params.type}/${req.params.id}):`, error);
+      res.status(500).json({ error: 'Internal server error in catalog handler' });
     }
   });
 
-  // Get current configuration
   router.get('/:configHash/config', (req, res) => {
-    // Deep clone and ensure sets are arrays for JSON transport
     const configToSend = JSON.parse(JSON.stringify(req.userConfig));
     configToSend.hiddenLists = Array.from(new Set(configToSend.hiddenLists || []));
     configToSend.removedLists = Array.from(new Set(configToSend.removedLists || []));
@@ -210,7 +225,7 @@ module.exports = function(router) {
         // Store structured addon info
         req.userConfig.importedAddons[addonId] = {
             id: addonId, // This is the key in importedAddons and also the manifest catalog ID
-            name: `${sourceSystem}: ${listNameForDisplay}`, // Default name
+            name: `${listNameForDisplay}`, // Default name
             version: '1.0.0', // Placeholder version
             description: `Imported from ${sourceSystem} URL: ${url}`,
             url: url,
