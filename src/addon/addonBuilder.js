@@ -216,10 +216,12 @@ async function createAddon(userConfig) {
 
   Object.values(importedAddons || {}).forEach(addon => {
     const addonGroupId = String(addon.id);
-    if (removedListsSet.has(addonGroupId) || hiddenListsSet.has(addonGroupId)) return;
+    if (removedListsSet.has(addonGroupId) || hiddenListsSet.has(addonGroupId)) {
+        // This check is for the parent addon group. Individual catalogs are checked below.
+    }
 
     if (addon.isUrlImported) {
-      if (addon.hasMovies || addon.hasShows) {
+      if ((addon.hasMovies || addon.hasShows) && !(hiddenListsSet.has(addonGroupId) || removedListsSet.has(addonGroupId))) {
         let displayName = customListNames[addonGroupId] || addon.name;
         const isMerged = (addon.hasMovies && addon.hasShows) ? (mergedLists?.[addonGroupId] !== false) : false;
         
@@ -248,49 +250,44 @@ async function createAddon(userConfig) {
           
           let displayName = customListNames[catalogIdForManifest] || catalog.name;
           
-          let extraSupportedForCatalog = catalog.extraSupported ? 
-                                         [...new Set(catalog.extraSupported.map(e => typeof e === 'string' ? e : ({ ...e })))] : 
-                                         [];
+          let tempExtraSupported = (catalog.extraSupported || catalog.extra || [])
+              .map(e => (typeof e === 'string' ? e : ({ ...e })))
+              .filter(e => {
+                  if (typeof e === 'string') {
+                      return e !== 'skip' && e !== 'genre';
+                  }
+                  if (typeof e === 'object' && e !== null) {
+                      return e.name !== 'skip' && e.name !== 'genre';
+                  }
+                  return true; 
+              });
 
-          if (!extraSupportedForCatalog.some(e => (typeof e === 'string' && e === 'skip') || (typeof e === 'object' && e !== null && e.name === 'skip'))) {
-              extraSupportedForCatalog.push('skip');
-          }
+          let extraSupportedForCatalog = ['skip'];
+          extraSupportedForCatalog.push(...tempExtraSupported);
 
           let genresForThisCatalog = undefined; 
 
           if (includeGenresInManifest) {
-              extraSupportedForCatalog = extraSupportedForCatalog.filter(e => {
-                  if (typeof e === 'object' && e !== null) {
-                      return e.name !== 'genre'; 
-                  }
-                  return e !== 'genre'; 
-              });
-
               if (!extraSupportedForCatalog.includes('genre')) {
                  extraSupportedForCatalog.push('genre');
               }
-              
               genresForThisCatalog = staticGenres;
-          } else {
-              extraSupportedForCatalog = extraSupportedForCatalog.filter(e => {
-                  if (typeof e === 'string') return e !== 'genre';
-                  if (typeof e === 'object' && e !== null) return e.name !== 'genre';
-                  return true;
-              });
           }
+          
+          extraSupportedForCatalog = [...new Set(extraSupportedForCatalog)];
 
           manifest.catalogs.push({
               id: catalogIdForManifest, 
               type: catalog.type, 
               name: displayName,
               extraSupported: extraSupportedForCatalog,
-              extraRequired: catalog.extraRequired || (catalog.extra || []).filter(e => typeof e === 'object' && e !== null && e.isRequired),
+              extraRequired: catalog.extraRequired || [], 
               genres: genresForThisCatalog
           });
       });
     }
   });
-
+  
   if (listOrder && listOrder.length > 0) {
     const orderMap = new Map(listOrder.map((id, index) => [String(id), index]));
     manifest.catalogs.sort((a, b) => {
