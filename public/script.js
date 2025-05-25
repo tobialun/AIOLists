@@ -1,7 +1,3 @@
-// public/script.js
-// APP_VERSION will be fetched dynamically
-
-// Default configurations for sort options
 const defaultConfig = {
   availableSortOptions: [
     { value: 'imdbvotes', label: 'IMDb Votes' }, { value: 'rank', label: 'Rank' },
@@ -27,7 +23,7 @@ const defaultConfig = {
 document.addEventListener('DOMContentLoaded', function() {
   const state = {
     configHash: null,
-    userConfig: { // This structure will be populated and merged
+    userConfig: {
       listOrder: [],
       hiddenLists: new Set(),
       removedLists: new Set(),
@@ -41,13 +37,13 @@ document.addEventListener('DOMContentLoaded', function() {
       traktExpiresAt: null,
       importedAddons: {},
       listsMetadata: {},
-      availableSortOptions: [...defaultConfig.availableSortOptions], // Initialize with defaults
-      traktSortOptions: [...defaultConfig.traktSortOptions]   // Initialize with defaults
+      availableSortOptions: [...defaultConfig.availableSortOptions],
+      traktSortOptions: [...defaultConfig.traktSortOptions]
     },
     currentLists: [],
     validationTimeout: null,
     isMobile: window.matchMedia('(max-width: 600px)').matches,
-    appVersion: "..." // Will be updated
+    appVersion: "..."
   };
 
   const elements = {
@@ -84,7 +80,6 @@ document.addEventListener('DOMContentLoaded', function() {
     let initialConfigHash = null;
 
     if (pathParts.length === 0 || (pathParts.length === 1 && pathParts[0] === 'configure')) {
-      // Base /configure or empty path, needs new hash if no existing one
     } else if (pathParts.length >= 1 && pathParts[0] !== 'api' && pathParts[0] !== 'configure') {
         initialConfigHash = pathParts[0];
         if (pathParts.length === 1 || (pathParts.length > 1 && pathParts[1] !== 'configure')) {
@@ -102,7 +97,6 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = await response.json();
             if (data.success && data.configHash) {
                 state.configHash = data.configHash;
-                // Redirect to the new hash/configure path
                 window.history.replaceState({}, '', `/${state.configHash}/configure`);
             } else { throw new Error(data.error || 'Failed to create config hash'); }
         } catch (error) {
@@ -111,9 +105,8 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
     }
-    // Now that configHash is set (either from URL or newly created)
     await fetchAppVersionAndApplyStyles();
-    updateURLAndLoadData(); // Loads config and then lists
+    updateURLAndLoadData();
   }
 
   async function fetchAppVersionAndApplyStyles() {
@@ -128,11 +121,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (manifest && manifest.version) {
             state.appVersion = manifest.version.split('-')[0];
         } else {
-            state.appVersion = "1.0.0"; // Fallback
+            state.appVersion = "1.0.0";
         }
     } catch (error) {
         console.error('Error fetching manifest for version:', error);
-        state.appVersion = "1.0.0"; // Fallback
+        state.appVersion = "1.0.0";
     }
     applyGlobalStyles();
   }
@@ -158,9 +151,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
   function updateURLAndLoadData() {
     if (!state.configHash) return;
-    updateURL(); // Ensures URL is /hash/configure
+    updateURL();
     updateStremioButtonHref();
-    loadConfiguration(); // Fetches full config
+    loadConfiguration();
   }
 
   function updateURL() {
@@ -194,9 +187,9 @@ document.addEventListener('DOMContentLoaded', function() {
       if (!response.ok || !data.success) throw new Error(data.error || `Failed to load config data. Status: ${response.status}`);
 
       state.userConfig = {
-        ...defaultConfig, // Base defaults
-        ...state.userConfig, // Preserve client-side only state if any (though most should come from backend)
-        ...data.config, // Fetched config from backend
+        ...defaultConfig,
+        ...state.userConfig,
+        ...data.config,
         hiddenLists: new Set(data.config.hiddenLists || []),
         removedLists: new Set(data.config.removedLists || []),
         importedAddons: data.config.importedAddons || {},
@@ -213,7 +206,7 @@ document.addEventListener('DOMContentLoaded', function() {
       if (mdblistApiKey || rpdbApiKey) {
         await validateAndSaveApiKeys(mdblistApiKey, rpdbApiKey, true);
       }  
-        updateTraktUI(!!state.userConfig.traktAccessToken);
+      updateTraktUI(!!state.userConfig.traktAccessToken);
       await loadUserListsAndAddons();
     } catch (error) { console.error('Load Config Error:', error); showNotification('apiKeys', `Load Config Error: ${error.message}`, 'error', true); }
   }
@@ -243,7 +236,6 @@ document.addEventListener('DOMContentLoaded', function() {
       const rpdbValid = validationResults.rpdb?.valid;
       const mdblistUsername = mdblistValid ? validationResults.mdblist.username : null;
   
-      // Update UI regardless of isInitialLoadOrSilentCheck
       updateApiKeyUI(elements.apiKeyInput, mdblistApiKeyToValidate, 'mdblist', mdblistUsername, mdblistValid);
       updateApiKeyUI(elements.rpdbApiKeyInput, rpdbApiKeyToValidate, 'rpdb', null, rpdbValid);  
   
@@ -259,7 +251,7 @@ document.addEventListener('DOMContentLoaded', function() {
       }
       state.userConfig.apiKey = mdblistApiKeyToValidate;
       state.userConfig.rpdbApiKey = rpdbApiKeyToValidate;
-      if (mdblistValid) state.userConfig.mdblistUsername = mdblistUsername; // Persist username if valid
+      if (mdblistValid) state.userConfig.mdblistUsername = mdblistUsername;
   
       if (!isInitialLoadOrSilentCheck) {
           showNotification('apiKeys', 'API keys updated.', 'success');
@@ -314,9 +306,8 @@ document.addEventListener('DOMContentLoaded', function() {
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(data.error || data.details || 'Trakt auth failed');
 
-      state.configHash = data.configHash; // Expect new hash
-      // Update tokens in userConfig from the response
-      state.userConfig.traktAccessToken = data.traktAccessToken || data.accessToken; // Backend might use different field names
+      state.configHash = data.configHash;
+      state.userConfig.traktAccessToken = data.traktAccessToken || data.accessToken;
       state.userConfig.traktRefreshToken = data.traktRefreshToken || data.refreshToken;
       state.userConfig.traktExpiresAt = data.traktExpiresAt || data.expiresAt;
 
@@ -367,13 +358,11 @@ document.addEventListener('DOMContentLoaded', function() {
       if (!response.ok || !data.success) throw new Error(data.error || 'Failed to load lists');
 
       state.currentLists = data.lists || [];
-      // Update parts of userConfig that come from /lists response (like importedAddons, metadata, sort options)
       state.userConfig.importedAddons = data.importedAddons || {};
       state.userConfig.listsMetadata = data.listsMetadata || state.userConfig.listsMetadata;
       state.userConfig.availableSortOptions = data.availableSortOptions || defaultConfig.availableSortOptions;
       state.userConfig.traktSortOptions = data.traktSortOptions || defaultConfig.traktSortOptions;
       
-      // If /lists endpoint returns a new hash (e.g., due to metadata fetching), update it
       if (data.newConfigHash && data.newConfigHash !== state.configHash) {
         state.configHash = data.newConfigHash;
         updateURL();
@@ -394,11 +383,8 @@ document.addEventListener('DOMContentLoaded', function() {
     elements.listItems.innerHTML = '';
     const fragment = document.createDocumentFragment();
     state.currentLists.forEach(list => {
-      // Filter out lists that are marked as removed on the client-side state
       if (!state.userConfig.removedLists.has(String(list.id))) {
         fragment.appendChild(createListItemElement(list));
-      } else {
-        console.log("Not rendering removed list:", list.id, list.name);
       }
     });
     elements.listItems.appendChild(fragment);
@@ -411,7 +397,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
   function createListItemElement(list) {
     const li = document.createElement('li');
-    // Item is always visible in admin panel. Styling for "hidden from manifest" handled by eye icon.
     li.className = `list-item`;
     li.dataset.id = String(list.id);
     li.dataset.originalId = String(list.originalId || list.id);
@@ -425,7 +410,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let tagTypeChar = list.tag;
     let tagImageSrc = list.tagImage;
 
-    if (!tagTypeChar) { // Fallback logic
+    if (!tagTypeChar) {
         if (list.source === 'mdblist' || list.source === 'mdblist_url') { tagTypeChar = list.isWatchlist ? 'W' : (list.listType || 'L');}
         else if (list.source === 'trakt' || list.source === 'trakt_public') { tagTypeChar = 'T'; }
         else { tagTypeChar = 'A'; }
@@ -467,16 +452,22 @@ document.addEventListener('DOMContentLoaded', function() {
     let mergeToggle = null;
     const canMerge = list.hasMovies && list.hasShows;
     if (canMerge) {
-      const isMerged = state.userConfig.mergedLists?.[String(list.id)] !== false;
-      mergeToggle = createButton(isMerged ? 'Merged' : 'Split', `merge-toggle ${isMerged ? 'merged' : 'split'}`,
+      const isListMerged = state.userConfig.mergedLists?.[String(list.id)] !== false;
+      mergeToggle = createButton(isListMerged ? 'Merged' : 'Split', `merge-toggle ${isListMerged ? 'merged' : 'split'}`,
           async (e) => {
               e.stopPropagation();
-              const newMergedState = !(state.userConfig.mergedLists?.[String(list.id)] !== false);
+              const currentIsMerged = state.userConfig.mergedLists?.[String(list.id)] !== false;
+              const newMergedState = !currentIsMerged;
+              
               mergeToggle.textContent = newMergedState ? 'Merged' : 'Split';
               mergeToggle.className = `merge-toggle ${newMergedState ? 'merged' : 'split'}`;
+              
+              if (!state.userConfig.mergedLists) {
+                  state.userConfig.mergedLists = {};
+              }
               state.userConfig.mergedLists[String(list.id)] = newMergedState;
               await updateListPreference(String(list.id), 'merge', { merged: newMergedState });
-          }, isMerged ? 'Click to split into Movies/Series lists' : 'Click to merge into one list');
+          }, isListMerged ? 'Click to split into Movies/Series lists' : 'Click to merge into one list');
     }
 
     let sortControlsContainer = null;
@@ -559,7 +550,7 @@ document.addEventListener('DOMContentLoaded', function() {
   function handleListReorder(evt) {
     const items = Array.from(elements.listItems.querySelectorAll('.list-item'));
     const newOrder = items.map(item => String(item.dataset.id));
-    state.userConfig.listOrder = newOrder; // Update local state for immediate consistency
+    state.userConfig.listOrder = newOrder;
     debouncedSaveListOrder(newOrder);
   }
 
@@ -584,22 +575,18 @@ document.addEventListener('DOMContentLoaded', function() {
     async function handleSave(e) {
         if(e) e.stopPropagation();
         const newName = input.value.trim();
-        const listIdToUpdate = String(list.id); // This is the manifest ID
+        const listIdToUpdate = String(list.id);
         
         await updateListPreference(listIdToUpdate, 'name', { customName: newName });
-        // Update local state after successful save confirmed by backend (or rely on full reload)
-        list.customName = newName; // Update the list object passed by reference
+        list.customName = newName;
         state.userConfig.customListNames[listIdToUpdate] = newName;
-        finishEditing(true); // true for saved
+        finishEditing(true);
     }
-    function handleCancel(e) { if(e) e.stopPropagation(); finishEditing(false); } // false for cancelled
+    function handleCancel(e) { if(e) e.stopPropagation(); finishEditing(false); }
 
     function finishEditing(isSaved) {
-        // Re-create the list item to restore its structure and event listeners
-        // The 'list' object itself was updated if saved.
         const newListItemElement = createListItemElement(list);
         listItemElement.replaceWith(newListItemElement);
-        // No need to explicitly show otherActionsGroup, as re-creation handles it.
     }
     input.addEventListener('keydown', e => {
         if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); handleSave(e); }
@@ -618,7 +605,6 @@ document.addEventListener('DOMContentLoaded', function() {
         state.userConfig.hiddenLists.delete(listIdStr);
     }
 
-
     const eyeIconSpan = listItemElement.querySelector('.visibility-toggle .eye-icon');
     if (eyeIconSpan) {
         eyeIconSpan.className = `eye-icon ${newHiddenStateInManifest ? 'eye-closed-svg' : 'eye-open-svg'}`;
@@ -627,41 +613,25 @@ document.addEventListener('DOMContentLoaded', function() {
     if (visibilityButton) {
         visibilityButton.title = newHiddenStateInManifest ? 'Click to Show in Stremio Manifest' : 'Click to Hide from Stremio Manifest';
     }
-    // List item in admin UI remains fully visible. No class like .hidden is toggled on listItemElement.
     await updateListPreference(null, 'visibility', { hiddenLists: Array.from(state.userConfig.hiddenLists) });
   }
 
   async function removeListItem(listItemElement, listId) {
     const listToRemoveIdStr = String(listId);
-
-    // Optimistic UI update
     listItemElement.remove();
     state.currentLists = state.currentLists.filter(l => String(l.id) !== listToRemoveIdStr);
     state.userConfig.removedLists.add(listToRemoveIdStr);
-
-    // Clean up related states
     state.userConfig.hiddenLists.delete(listToRemoveIdStr);
     delete state.userConfig.customListNames[listToRemoveIdStr];
-    // For sortPreferences, the key is originalId. Find it.
     const listObject = state.currentLists.find(l => String(l.id) === listToRemoveIdStr) || 
-                       (state.previousCurrentLists && state.previousCurrentLists.find(l => String(l.id) === listToRemoveIdStr)); // Check previous if already filtered
+                       (state.previousCurrentLists && state.previousCurrentLists.find(l => String(l.id) === listToRemoveIdStr));
     if(listObject && listObject.originalId) {
         delete state.userConfig.sortPreferences[String(listObject.originalId)];
-    } else {
-         // If originalId isn't easily found, this might be an issue for sortPref cleanup.
-         // Usually listId for sortPref refers to originalId for MDB/Trakt lists.
     }
     delete state.userConfig.mergedLists[listToRemoveIdStr];
-
-
     await updateListPreference(null, 'remove', { listIds: [listToRemoveIdStr] });
-    // `updateListPreference` for 'remove' type will call `loadUserListsAndAddons`
-    // which re-fetches lists from server. If server correctly processed removal,
-    // the list won't be in the response.
   }
-  // Store previous list state for removeListItem cleanup if needed
   state.previousCurrentLists = []; 
-
 
   async function updateListPreference(listIdForPref, type, payload) {
     const endpointMap = {
@@ -696,30 +666,36 @@ document.addEventListener('DOMContentLoaded', function() {
             throw new Error(data.error || `Server error for ${type}. Status: ${response.status}`);
         }
 
-
         if (data.configHash && data.configHash !== state.configHash) {
             state.configHash = data.configHash;
             updateURL();
             updateStremioButtonHref();
-        } else if (data.configHash) {
-            console.warn(`Config hash received for ${type} but was the same: ${data.configHash}. Manifest cache relies on server's manifestCache.clear().`);
-        } else {
-             console.error(`No configHash received from backend for ${type}! Manifest link won't update if it relied on new hash.`);
         }
         showNotification('lists', `${type.charAt(0).toUpperCase() + type.slice(1)} updated.`, 'success', false);
-
-        // Critical: Reload list data from server after operations that change config
-        // This ensures UI reflects the server's source of truth.
-        if (['name', 'visibility', 'remove', 'order', 'sort', 'merge'].includes(type)) {
-            state.previousCurrentLists = [...state.currentLists]; // Store before reload for removeListItem
+        
+        const criticalChangeTypesRequiringFullReload = ['name', 'visibility', 'remove', 'sort', 'merge'];
+        
+        if (criticalChangeTypesRequiringFullReload.includes(type)) {
+            state.previousCurrentLists = [...state.currentLists];
             await loadUserListsAndAddons();
+        } else if (type === 'order') {
+            if (state.userConfig.listOrder && state.userConfig.listOrder.length > 0 && state.currentLists.length > 0) {
+                const orderMap = new Map(state.userConfig.listOrder.map((id, index) => [String(id), index]));
+                state.currentLists.sort((a, b) => {
+                    const indexA = orderMap.get(String(a.id));
+                    const indexB = orderMap.get(String(b.id));
+                    if (indexA === undefined && indexB === undefined) return 0;
+                    if (indexA === undefined) return 1;
+                    if (indexB === undefined) return -1;
+                    return indexA - indexB;
+                });
+            }
         }
-
     } catch (error) {
         console.error(`Update Error for ${type}:`, error);
         showNotification('lists', `Error updating ${type}: ${error.message}`, 'error', true);
         state.previousCurrentLists = [...state.currentLists];
-        await loadUserListsAndAddons(); // Attempt to resync with server on error
+        await loadUserListsAndAddons(); 
     }
   }
 
@@ -753,8 +729,7 @@ document.addEventListener('DOMContentLoaded', function() {
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(data.error || 'Failed to remove addon group');
 
-      state.configHash = data.configHash; // Expect new hash
-      // Local state update already handled by loadUserListsAndAddons
+      state.configHash = data.configHash;
       updateURL(); updateStremioButtonHref();
       await loadUserListsAndAddons();
       showNotification('import', 'Addon group removed.', 'success');
@@ -803,7 +778,6 @@ document.addEventListener('DOMContentLoaded', function() {
   window.disconnectMDBList = async function() {
     updateApiKeyUI(elements.apiKeyInput, '', 'mdblist', null, false);
     await validateAndSaveApiKeys('', elements.rpdbApiKeyInput.value.trim());
-    // No need to set state.userConfig.apiKey = '' here, validateAndSaveApiKeys will do it if save is successful
   };
   window.disconnectRPDB = async function() {
     updateApiKeyUI(elements.rpdbApiKeyInput, '', 'rpdb', null, false);
@@ -816,7 +790,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const data = await response.json();
         if (!response.ok || !data.success) throw new Error(data.error || 'Failed to disconnect Trakt');
 
-        state.configHash = data.configHash; // Expect new hash
+        state.configHash = data.configHash;
         state.userConfig.traktAccessToken = null;
         state.userConfig.traktRefreshToken = null;
         state.userConfig.traktExpiresAt = null;

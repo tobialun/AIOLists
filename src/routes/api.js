@@ -1,4 +1,3 @@
-// src/routes/api.js
 const path = require('path');
 const { defaultConfig } = require('../config');
 const { compressConfig, decompressConfig } = require('../utils/urlConfig');
@@ -6,13 +5,12 @@ const { createAddon, fetchListContent } = require('../addon/addonBuilder');
 const { convertToStremioFormat } = require('../addon/converters');
 const { setCacheHeaders } = require('../utils/common');
 const Cache = require('../utils/cache');
-
 const { validateRPDBKey } = require('../utils/posters');
 const { authenticateTrakt, getTraktAuthUrl, fetchTraktLists: fetchTraktUserLists, fetchPublicTraktListDetails } = require('../integrations/trakt');
 const { fetchAllLists: fetchAllMDBLists, fetchListItems: fetchMDBListItemsDirect, validateMDBListKey, extractListFromUrl: extractMDBListFromUrl } = require('../integrations/mdblist');
 const { importExternalAddon: importExtAddon } = require('../integrations/externalAddons');
 
-const manifestCache = new Cache({ defaultTTL: 1 * 60 * 1000 }); // Re-enable cache with 1 min TTL
+const manifestCache = new Cache({ defaultTTL: 1 * 60 * 1000 });
 
 module.exports = function(router) {
   router.param('configHash', async (req, res, next, configHash) => {
@@ -31,7 +29,6 @@ module.exports = function(router) {
     res.sendFile(path.join(__dirname, '..', '..', 'public', 'index.html'));
   });
 
-  // Re-enable manifest caching
   router.get('/:configHash/manifest.json', async (req, res) => {
     try {
       const cacheKey = `manifest_${req.configHash}`;
@@ -138,7 +135,6 @@ module.exports = function(router) {
         let addonId; 
         let sourceSystem;
         let listNameForDisplay;
-        let isUrlImportedFlag = true;
 
         if (url.includes('mdblist.com/lists/')) {
             if (!req.userConfig.apiKey) return res.status(400).json({ error: 'MDBList API key required' });
@@ -146,13 +142,11 @@ module.exports = function(router) {
             addonId = `mdblisturl_${importedListDetails.listId}`;
             listNameForDisplay = importedListDetails.listName;
             sourceSystem = "MDBList";
-            importedListDetails.isMDBListUrlImport = true;
         } else if (url.includes('trakt.tv/users/') && url.includes('/lists/')) {
             importedListDetails = await fetchPublicTraktListDetails(url);
             addonId = importedListDetails.listId; 
             listNameForDisplay = importedListDetails.listName;
             sourceSystem = "Trakt Public";
-            importedListDetails.isTraktPublicList = true;
         } else {
             return res.status(400).json({ error: 'Invalid or unsupported URL.' });
         }
@@ -165,43 +159,27 @@ module.exports = function(router) {
         if (!importedListDetails.hasMovies && !importedListDetails.hasShows) {
             return res.status(400).json({ error: `List "${listNameForDisplay}" from ${sourceSystem} contains no movie or show content.` });
         }
-
-        const catalogs = [];
-        const idPrefixForCatalog = addonId;
-
-        if (importedListDetails.hasMovies) {
-            catalogs.push({ 
-                id: `${idPrefixForCatalog}_movies`, 
-                originalId: importedListDetails.originalTraktSlug || importedListDetails.listId,
-                name: `${listNameForDisplay}`, type: 'movie', url: url,
-                traktUser: importedListDetails.traktUser, traktListSlug: importedListDetails.originalTraktSlug 
-            });
-        }
-        if (importedListDetails.hasShows) {
-            catalogs.push({ 
-                id: `${idPrefixForCatalog}_series`, 
-                originalId: importedListDetails.originalTraktSlug || importedListDetails.listId,
-                name: `${listNameForDisplay}`, type: 'series', url: url, 
-                traktUser: importedListDetails.traktUser, traktListSlug: importedListDetails.originalTraktSlug 
-            });
-        }
-        
-        if (catalogs.length === 0) {
-             return res.status(400).json({ error: `List "${listNameForDisplay}" catalogs could not be created.` });
-        }
         
         req.userConfig.importedAddons[addonId] = {
             id: addonId, 
             name: `${sourceSystem}: ${listNameForDisplay}`,
-            version: '1.0.0', description: `Imported from ${sourceSystem} URL: ${url}`,
-            catalogs: catalogs, types: [...new Set(catalogs.map(c => c.type))],
-            resources: ['catalog', 'meta'], url: url,
-            isUrlImported: isUrlImportedFlag,
-            isTraktPublicList: !!importedListDetails.isTraktPublicList,
-            traktUser: importedListDetails.traktUser, 
-            traktListSlug: importedListDetails.originalTraktSlug,
-            isMDBListUrlImport: !!importedListDetails.isMDBListUrlImport,
-            mdblistId: sourceSystem === "MDBList" ? importedListDetails.listId : undefined
+            version: '1.0.0', 
+            description: `Imported from ${sourceSystem} URL: ${url}`,
+            url: url,
+            isUrlImported: true,
+            hasMovies: importedListDetails.hasMovies,
+            hasShows: importedListDetails.hasShows,
+            isTraktPublicList: sourceSystem === "Trakt Public",
+            traktUser: sourceSystem === "Trakt Public" ? importedListDetails.traktUser : undefined, 
+            traktListSlug: sourceSystem === "Trakt Public" ? importedListDetails.originalTraktSlug : undefined,
+            isMDBListUrlImport: sourceSystem === "MDBList",
+            mdblistId: sourceSystem === "MDBList" ? importedListDetails.listId : undefined,
+            catalogs: [], 
+            types: [
+                ...(importedListDetails.hasMovies ? ['movie'] : []),
+                ...(importedListDetails.hasShows ? ['series'] : [])
+            ],
+            resources: ['catalog', 'meta']
         };
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
@@ -223,6 +201,8 @@ module.exports = function(router) {
             return res.status(400).json({ error: `Addon with ID ${addonInfo.id} (${addonInfo.name}) is already imported.`});
         }
         addonInfo.isUrlImported = false;
+        addonInfo.hasMovies = addonInfo.types.includes('movie');
+        addonInfo.hasShows = addonInfo.types.includes('series');
         req.userConfig.importedAddons[addonInfo.id] = addonInfo;
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
@@ -406,105 +386,153 @@ module.exports = function(router) {
         let allUserLists = [];
         if (req.userConfig.apiKey) {
             const mdbLists = await fetchAllMDBLists(req.userConfig.apiKey);
-            allUserLists.push(...mdbLists.map(l => ({...l, source: 'mdblist', isUrlImportedType: false})));
+            allUserLists.push(...mdbLists.map(l => ({...l, source: 'mdblist'})));
         }
         if (req.userConfig.traktAccessToken) {
             const traktLists = await fetchTraktUserLists(req.userConfig); 
-            allUserLists.push(...traktLists.map(l => ({...l, source: 'trakt', isUrlImportedType: false })));
+            allUserLists.push(...traktLists.map(l => ({...l, source: 'trakt'})));
         }
 
         const removedListsSet = new Set(req.userConfig.removedLists || []);
         let configChangedDueToMetadataFetch = false;
         if (!req.userConfig.listsMetadata) req.userConfig.listsMetadata = {};
         
-        const processedListsPromises = allUserLists
-            .filter(list => {
-                let potentialManifestId = String(list.id);
-                 if (list.source === 'mdblist') {
-                    potentialManifestId = list.id === 'watchlist' ? `aiolists-watchlist-W` : `aiolists-${list.id}-${list.listType || 'L'}`;
-                }
-                return !removedListsSet.has(potentialManifestId);
-            })
+        let processedLists = [];
+
+        const activeListsProcessingPromises = allUserLists
             .map(async list => {
-                const listIdStr = String(list.id);
-                let metadata = req.userConfig.listsMetadata[listIdStr] || {};
-                let manifestListId = listIdStr;
-                let listTypeForTag = list.listType || 'L';
+                const originalListIdStr = String(list.id);
+                let manifestListId = originalListIdStr;
+                let defaultListTypeChar = 'L';
+                let tagType;
+
                 if (list.source === 'mdblist') {
-                    manifestListId = list.id === 'watchlist' ? `aiolists-watchlist-W` : `aiolists-${list.id}-${listTypeForTag}`;
+                    const listTypeSuffix = list.listType || 'L';
+                    manifestListId = list.id === 'watchlist' ? `aiolists-watchlist-W` : `aiolists-${list.id}-${listTypeSuffix}`;
+                    tagType = listTypeSuffix;
                 } else if (list.source === 'trakt'){
                     manifestListId = list.id;
+                    tagType = 'T';
+                } else {
+                    tagType = defaultListTypeChar;
+                }
+                
+                if (list.isWatchlist) {
+                    tagType = 'W';
                 }
 
+                if (removedListsSet.has(manifestListId)) return null;
+
+                let metadata = req.userConfig.listsMetadata[manifestListId] || req.userConfig.listsMetadata[originalListIdStr] || {};
                 if (typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean') {
                   const tempContent = await fetchListContent(manifestListId, req.userConfig, 0);
                   metadata.hasMovies = tempContent?.movies?.length > 0 || tempContent?.hasMovies === true;
                   metadata.hasShows = tempContent?.shows?.length > 0 || tempContent?.hasShows === true;
-                  req.userConfig.listsMetadata[listIdStr] = metadata;
+                  req.userConfig.listsMetadata[manifestListId] = metadata;
                   configChangedDueToMetadataFetch = true;
                 }
-
-                let tagType = listTypeForTag;
-                if (list.source === 'trakt') tagType = 'T';
-                if (list.isWatchlist) tagType = 'W';
                 
                 return {
-                    id: manifestListId, originalId: listIdStr, name: list.name,
+                    id: manifestListId, 
+                    originalId: originalListIdStr, 
+                    name: list.name,
                     customName: req.userConfig.customListNames?.[manifestListId] || null,
                     isHidden: (req.userConfig.hiddenLists || []).includes(manifestListId),
-                    hasMovies: metadata.hasMovies, hasShows: metadata.hasShows,   
+                    hasMovies: metadata.hasMovies, 
+                    hasShows: metadata.hasShows,   
                     isTraktList: list.source === 'trakt' && list.isTraktList, 
                     isTraktWatchlist: list.source === 'trakt' && list.isTraktWatchlist,
                     isTraktRecommendations: list.isTraktRecommendations,
                     isTraktTrending: list.isTraktTrending,
                     isTraktPopular: list.isTraktPopular,
                     isWatchlist: !!list.isWatchlist,
-                    tag: tagType, listType: list.listType,
+                    tag: tagType, 
+                    listType: list.listType,
                     tagImage: list.source === 'trakt' ? 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico' : null,
-                    sortPreferences: req.userConfig.sortPreferences?.[listIdStr] || 
+                    sortPreferences: req.userConfig.sortPreferences?.[originalListIdStr] || 
                                      { sort: (list.source === 'trakt') ? 'rank' : 'imdbvotes', 
                                        order: (list.source === 'trakt') ? 'asc' : 'desc' },
-                    isMerged: req.userConfig.mergedLists?.[manifestListId] !== false,
+                    isMerged: (metadata.hasMovies && metadata.hasShows) ? (req.userConfig.mergedLists?.[manifestListId] !== false) : false,
                     source: list.source 
                 };
             });
         
-        let processedLists = await Promise.all(processedListsPromises);
+        const activeListsResults = (await Promise.all(activeListsProcessingPromises)).filter(p => p !== null);
+        processedLists.push(...activeListsResults);
 
         if (req.userConfig.importedAddons) {
             for (const addonKey in req.userConfig.importedAddons) {
                 const addon = req.userConfig.importedAddons[addonKey];
-                if (removedListsSet.has(addon.id)) continue;
-                addon.catalogs.forEach(catalog => {
-                    const catalogIdStr = String(catalog.id); 
-                    if (removedListsSet.has(catalogIdStr)) return;
-                    let metadata = req.userConfig.listsMetadata[catalogIdStr] || {};
-                    if (typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean') {
-                        metadata.hasMovies = catalog.type === 'movie';
-                        metadata.hasShows = catalog.type === 'series';
-                    }
-                    let tagType = 'A'; let tagImage = addon.logo;
-                    if(addon.isMDBListUrlImport) { tagType = 'L'; tagImage = null; }
-                    else if (addon.isTraktPublicList) { tagType = 'T'; tagImage = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico'; }
+                const addonGroupId = String(addon.id);
+                if (removedListsSet.has(addonGroupId)) continue;
 
-                    processedLists.push({
-                        id: catalogIdStr, originalId: catalog.originalId || catalogIdStr, name: catalog.name, 
-                        customName: req.userConfig.customListNames?.[catalogIdStr] || null,
-                        isHidden: (req.userConfig.hiddenLists || []).includes(catalogIdStr),
-                        hasMovies: metadata.hasMovies, hasShows: metadata.hasShows,
-                        addonId: addon.id, addonName: addon.name,
-                        tag: tagType, tagImage: tagImage,
-                        sortPreferences: req.userConfig.sortPreferences?.[catalog.originalId || catalogIdStr] || 
-                                         { sort: (addon.isTraktPublicList ? 'rank' : 'imdbvotes'), 
-                                           order: (addon.isTraktPublicList ? 'asc' : 'desc') },
-                        isMerged: req.userConfig.mergedLists?.[catalogIdStr] !== false,
-                        source: addon.isMDBListUrlImport ? 'mdblist_url' : (addon.isTraktPublicList ? 'trakt_public' : 'addon_manifest'),
-                        isUrlImportedType: !!addon.isUrlImported,
-                        isMDBListUrlImport: !!addon.isMDBListUrlImport,
-                        isTraktPublicList: !!addon.isTraktPublicList,
-                        traktUser: addon.traktUser, traktListSlug: addon.traktListSlug
+                let currentListEntry = null;
+
+                if (addon.isUrlImported) {
+                    if ((addon.hasMovies || addon.hasShows) && !(req.userConfig.hiddenLists || []).includes(addonGroupId)) {
+                        let tagType = 'A'; 
+                        let tagImage = addon.logo;
+                        if(addon.isMDBListUrlImport) { tagType = 'L'; tagImage = null; }
+                        else if (addon.isTraktPublicList) { tagType = 'T'; tagImage = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico'; }
+                        
+                        currentListEntry = {
+                            id: addonGroupId,
+                            originalId: addon.mdblistId || addon.traktListSlug || addonGroupId,
+                            name: addon.name, 
+                            customName: req.userConfig.customListNames?.[addonGroupId] || null,
+                            isHidden: (req.userConfig.hiddenLists || []).includes(addonGroupId),
+                            hasMovies: addon.hasMovies,
+                            hasShows: addon.hasShows,
+                            addonId: addonGroupId, 
+                            addonName: addon.name,
+                            tag: tagType, 
+                            tagImage: tagImage,
+                            sortPreferences: req.userConfig.sortPreferences?.[addonGroupId] || 
+                                             { sort: (addon.isTraktPublicList ? 'rank' : 'imdbvotes'), 
+                                               order: (addon.isTraktPublicList ? 'asc' : 'desc') },
+                            isMerged: (addon.hasMovies && addon.hasShows) ? (req.userConfig.mergedLists?.[addonGroupId] !== false) : false,
+                            source: addon.isMDBListUrlImport ? 'mdblist_url' : (addon.isTraktPublicList ? 'trakt_public' : 'addon_url_import'),
+                            isUrlImportedType: true,
+                            isMDBListUrlImport: !!addon.isMDBListUrlImport,
+                            isTraktPublicList: !!addon.isTraktPublicList,
+                            traktUser: addon.traktUser, 
+                            traktListSlug: addon.traktListSlug
+                        };
+                        processedLists.push(currentListEntry);
+                    }
+                } else if (addon.catalogs && addon.catalogs.length > 0) { 
+                    (addon.catalogs || []).forEach(catalog => {
+                        const catalogIdStr = String(catalog.id); 
+                        if (removedListsSet.has(catalogIdStr) || (req.userConfig.hiddenLists || []).includes(catalogIdStr)) return;
+                        
+                        let catalogHasMovies = catalog.type === 'movie' || (catalog.type === 'all' && (addon.types?.includes('movie') || !!addon.hasMovies));
+                        let catalogHasShows = catalog.type === 'series' || (catalog.type === 'all' && (addon.types?.includes('series') || !!addon.hasShows));
+
+                        let tagType = 'A'; 
+                        let tagImage = addon.logo; 
+
+                        processedLists.push({
+                            id: catalogIdStr, 
+                            originalId: catalog.originalId || catalogIdStr, 
+                            name: catalog.name, 
+                            customName: req.userConfig.customListNames?.[catalogIdStr] || null,
+                            isHidden: (req.userConfig.hiddenLists || []).includes(catalogIdStr),
+                            hasMovies: catalogHasMovies, 
+                            hasShows: catalogHasShows,
+                            addonId: addon.id, 
+                            addonName: addon.name,
+                            tag: tagType, 
+                            tagImage: tagImage,
+                            sortPreferences: req.userConfig.sortPreferences?.[catalog.originalId || catalogIdStr] || 
+                                             { sort: 'imdbvotes', order: 'desc' },
+                            isMerged: false, 
+                            source: 'addon_manifest',
+                            isUrlImportedType: false, 
+                            isMDBListUrlImport: false, 
+                            isTraktPublicList: false,
+                        });
                     });
-                });
+                }
             }
         }
         

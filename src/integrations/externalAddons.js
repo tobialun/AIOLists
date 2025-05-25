@@ -1,4 +1,3 @@
-// src/integrations/externalAddons.js
 const axios = require('axios');
 
 class ExternalAddon {
@@ -17,13 +16,12 @@ class ExternalAddon {
 
   setApiBaseUrlFromManifestUrl() {
     const fullUrl = this.originalManifestUrl;
-    const manifestJsonPathSegment = "/manifest.json";
-    const manifestIndex = fullUrl.lastIndexOf(manifestJsonPathSegment);
+    const manifestPathSegment = "/manifest.json";
 
-    if (manifestIndex === -1) {
-        this.apiBaseUrl = fullUrl.endsWith('/') ? fullUrl : fullUrl + '/';
+    if (fullUrl.endsWith(manifestPathSegment)) {
+      this.apiBaseUrl = fullUrl.substring(0, fullUrl.length - manifestPathSegment.length + 1);
     } else {
-        this.apiBaseUrl = fullUrl.substring(0, manifestIndex + 1); 
+      this.apiBaseUrl = fullUrl.endsWith('/') ? fullUrl : fullUrl + '/';
     }
   }
 
@@ -46,8 +44,8 @@ class ExternalAddon {
         }
 
         const originalCatalogId = catalog.id;
-        const originalCatalogType = catalog.type; // e.g., "anime", "trakt", "movie", "series"
-        let stremioFinalCatalogType = originalCatalogType; // Default to original
+        const originalCatalogType = catalog.type;
+        let stremioFinalCatalogType = originalCatalogType;
 
       if (originalCatalogType !== 'movie' && originalCatalogType !== 'series' && originalCatalogType !== 'all') {
             console.warn(`[AIOLists ExternalAddon] Unhandled originalType '${originalCatalogType}' from catalog '${originalCatalogId}'. Defaulting AIOLists catalog type to 'all'.`);
@@ -73,7 +71,7 @@ class ExternalAddon {
           originalId: originalCatalogId,      
           originalType: originalCatalogType,  
           name: catalog.name || 'Unnamed Catalog',
-          type: stremioFinalCatalogType, // This is the crucial type for AIOLists' manifest
+          type: stremioFinalCatalogType,
           extraSupported: catalog.extraSupported || catalog.extra || [],
           extraRequired: catalog.extraRequired || (catalog.extra || []).filter(e => e.isRequired)
         };
@@ -100,7 +98,7 @@ class ExternalAddon {
         catalogs: processedCatalogs,   
         types: this.manifest.types || [], 
         resources: this.manifest.resources || [],
-        isAnime: this.detectAnimeCatalogs() // Retaining this flag as it was already there.
+        isAnime: this.detectAnimeCatalogs()
       };
     } catch (error) {
       console.error(`[AIOLists ExternalAddon] Error importing addon from ${this.originalManifestUrl}:`, error.message, error.stack);
@@ -136,7 +134,7 @@ async function importExternalAddon(manifestUrl) {
   return await addon.import();
 }
 
-async function fetchExternalAddonItems(externalCatalogIdToFetch, sourceAddonConfig, skip = 0, rpdbApiKey = null, genre = null) {
+async function fetchExternalAddonItems(targetOriginalId, targetOriginalType, sourceAddonConfig, skip = 0, rpdbApiKey = null, genre = null) {
   let attemptedUrl = "Unknown (URL could not be constructed before error)";
   try {
     if (!sourceAddonConfig || !sourceAddonConfig.apiBaseUrl || !sourceAddonConfig.catalogs) {
@@ -144,9 +142,12 @@ async function fetchExternalAddonItems(externalCatalogIdToFetch, sourceAddonConf
       return { metas: [] };
     }
 
-    const catalogEntry = sourceAddonConfig.catalogs.find(c => c.originalId === externalCatalogIdToFetch);
+    const catalogEntry = sourceAddonConfig.catalogs.find(
+      c => c.originalId === targetOriginalId && c.originalType === targetOriginalType
+    );
+
     if (!catalogEntry) {
-      console.error(`[AIOLists ExternalAddon] Catalog with originalId '${externalCatalogIdToFetch}' not found in source addon '${sourceAddonConfig.name}'. Available originalIds from config: ${sourceAddonConfig.catalogs.map(c=>c.originalId).join(', ')}`);
+      console.error(`[AIOLists ExternalAddon] Catalog with originalId '${targetOriginalId}' and originalType '${targetOriginalType}' not found in source addon '${sourceAddonConfig.name}'. Available: ${sourceAddonConfig.catalogs.map(c=> `${c.originalId} (${c.originalType})`).join(', ')}`);
       return { metas: [] };
     }
     
@@ -167,7 +168,7 @@ async function fetchExternalAddonItems(externalCatalogIdToFetch, sourceAddonConf
     return { metas: response.data.metas };
 
   } catch (error) {
-    console.error(`[AIOLists ExternalAddon] Error fetching items for external catalog ID '${externalCatalogIdToFetch}' (from addon '${sourceAddonConfig?.name}'). Attempted URL: ${attemptedUrl}. Error:`, error.message);
+    console.error(`[AIOLists ExternalAddon] Error fetching items for external catalog ID '${targetOriginalId}' (type: '${targetOriginalType}', from addon '${sourceAddonConfig?.name}'). Attempted URL: ${attemptedUrl}. Error:`, error.message);
     if (error.response) {
         console.error("[AIOLists ExternalAddon] Error response status:", error.response.status);
         console.error("[AIOLists ExternalAddon] Error response data from external addon:", JSON.stringify(error.response.data, null, 2)); 
