@@ -190,7 +190,6 @@ async function fetchExternalAddonItems(targetOriginalId, targetOriginalType, sou
     );
 
     if (!catalogEntry) {
-      console.error(`[AIOLists ExternalAddon] Catalog with originalId '${targetOriginalId}' and originalType '${targetOriginalType}' not found in source addon '${sourceAddonConfig.name}'. Available: ${sourceAddonConfig.catalogs.map(c=> `${c.originalId} (${c.originalType})`).join(', ')}`);
       return { metas: [] };
     }
     

@@ -357,3 +357,10 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 .github-link:hover {
   color: #8E5AF7; /* Or your hover color */
 }
+
+.action-btn.active-setting {
+  background-color: #4CAF50;
+}
+.action-btn.active-setting:hover {
+  background-color: #45a049;
+}

@@ -25,6 +25,7 @@ const defaultConfig = {
   mergedLists: {},
   importedAddons: {},
   sortPreferences: {},
+  disableGenreFilter: false,
   availableSortOptions: [
     { value: 'rank', label: 'Rank' },
     { value: 'score', label: 'Score' },

@@ -4,7 +4,7 @@ const { fetchListItems: fetchMDBListItems, fetchAllLists: fetchAllMDBLists } = r
 const { fetchExternalAddonItems } = require('../integrations/externalAddons');
 const { convertToStremioFormat } = require('./converters');
 const { isWatchlist } = require('../utils/common');
-const { staticGenres } = require('../config');
+const { staticGenres, defaultConfig } = require('../config');
 
 async function fetchListContent(listId, userConfig, skip = 0, genre = null, stremioCatalogType = 'all') {
   const { apiKey, traktAccessToken, listsMetadata = {}, sortPreferences = {}, importedAddons = {}, rpdbApiKey } = userConfig;
@@ -125,9 +125,11 @@ async function createAddon(userConfig) {
 
   const {
     apiKey, traktAccessToken, listOrder = [], hiddenLists = [], removedLists = [],
-    customListNames = {}, mergedLists = {}, importedAddons = {}, listsMetadata = {}
+    customListNames = {}, mergedLists = {}, importedAddons = {}, listsMetadata = {},
+    disableGenreFilter
   } = userConfig;
 
+  const includeGenresInManifest = !disableGenreFilter
   const hiddenListsSet = new Set(hiddenLists.map(String));
   const removedListsSet = new Set(removedLists.map(String));
 
@@ -153,7 +155,6 @@ async function createAddon(userConfig) {
     }
 
     if (removedListsSet.has(manifestListIdBase) || hiddenListsSet.has(manifestListIdBase)) {
-      // console.log(`[DEBUG createAddon] List ${manifestListIdBase} is removed or hidden, skipping from manifest.`);
       continue;
     }
 
@@ -163,13 +164,7 @@ async function createAddon(userConfig) {
     let hasMovies = metadata.hasMovies === true;
     let hasShows = metadata.hasShows === true;
     
-    // Debugging for specific problematic lists before metadata fetch
-    if (['trakt_recommendations_shows', 'trakt_trending_shows', 'trakt_popular_shows'].includes(manifestListIdBase)) {
-        console.log(`[DEBUG createAddon] PRE-METADATA For ${manifestListIdBase}, Name=${listInfo.name}, CurrentMetaHasMovies=${metadata.hasMovies}, CurrentMetaHasShows=${metadata.hasShows}`);
-    }
-
     if (typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean') {
-      // console.log(`[DEBUG createAddon] Metadata missing for ${manifestListIdBase} (${displayName}). Fetching content details...`);
       const tempUserConfigForMetadata = { ...userConfig, rpdbApiKey: null, listsMetadata: {} };
       
       let typeForMetaCheck = 'all';
@@ -179,18 +174,11 @@ async function createAddon(userConfig) {
       // Forcing type for known series-only lists during metadata check
       if (manifestListIdBase === 'trakt_recommendations_shows' || manifestListIdBase === 'trakt_trending_shows' || manifestListIdBase === 'trakt_popular_shows') {
           typeForMetaCheck = 'series';
-          // console.log(`[DEBUG createAddon] Forcing typeForMetaCheck to 'series' for ${manifestListIdBase}`);
       }
 
 
       const content = await fetchListContent(manifestListIdBase, tempUserConfigForMetadata, 0, null, typeForMetaCheck);
       
-      // Debugging for specific problematic lists
-      if (['trakt_recommendations_shows', 'trakt_trending_shows', 'trakt_popular_shows'].includes(manifestListIdBase)) {
-          console.log(`[DEBUG createAddon METADATA FETCH] For ${manifestListIdBase}, TypeForMetaCheck: ${typeForMetaCheck}`);
-          console.log(`  -> Content from fetchListContent:`, JSON.stringify(content, null, 2)?.substring(0,500));
-      }
-
       hasMovies = content?.hasMovies || false;
       hasShows = content?.hasShows || false;
       
@@ -198,24 +186,22 @@ async function createAddon(userConfig) {
       // For the manifest generation, this ensures it uses the fresh values.
       if (!userConfig.listsMetadata) userConfig.listsMetadata = {}; // Should be initialized earlier
       userConfig.listsMetadata[manifestListIdBase] = { ...userConfig.listsMetadata[manifestListIdBase], hasMovies, hasShows };
-      // console.log(`[DEBUG createAddon] Metadata updated for ${manifestListIdBase}: hasMovies=${hasMovies}, hasShows=${hasShows}`);
     }
     
-    // Debugging for specific problematic lists after metadata determination
-    if (['trakt_recommendations_shows', 'trakt_trending_shows', 'trakt_popular_shows'].includes(manifestListIdBase)) {
-        console.log(`[DEBUG createAddon] POST-METADATA For ${manifestListIdBase}, Name=${listInfo.name}, FinalHasMovies=${hasMovies}, FinalHasShows=${hasShows}`);
-    }
-
 
     if (hasMovies || hasShows) {
       const isMerged = (hasMovies && hasShows) ? (mergedLists[manifestListIdBase] !== false) : false;
       
       const commonCatalogProps = {
         name: displayName,
-        extraSupported: ["skip", "genre"],
+        extraSupported: ["skip"],
         extraRequired: [],
-        genres: staticGenres
       };
+
+      if (includeGenresInManifest) {
+        commonCatalogProps.extraSupported.push("genre");
+        commonCatalogProps.genres = staticGenres;
+      }
 
       if (hasMovies && hasShows && isMerged) {
         manifest.catalogs.push({ id: manifestListIdBase, type: 'all', ...commonCatalogProps });
@@ -224,41 +210,84 @@ async function createAddon(userConfig) {
         if (hasShows) manifest.catalogs.push({ id: manifestListIdBase, type: 'series', ...commonCatalogProps });
       }
     } else {
-        // console.log(`[DEBUG createAddon] SKIPPING ${manifestListIdBase} (${displayName}) from manifest because hasMovies and hasShows are both false.`);
+        console.log(`[DEBUG createAddon] SKIPPING ${manifestListIdBase} (${displayName}) from manifest because hasMovies and hasShows are both false.`);
     }
   }
 
   Object.values(importedAddons || {}).forEach(addon => {
     const addonGroupId = String(addon.id);
-    if (addon.isUrlImported && (removedListsSet.has(addonGroupId) || hiddenListsSet.has(addonGroupId))) return;
-    if (!addon.isUrlImported && (removedListsSet.has(addonGroupId) || hiddenListsSet.has(addonGroupId))) return;
-
-
-    const commonCatalogProps = {
-        extraSupported: ["skip", "genre"], extraRequired: [], genres: staticGenres
-    };
+    if (removedListsSet.has(addonGroupId) || hiddenListsSet.has(addonGroupId)) return;
 
     if (addon.isUrlImported) {
-        if (addon.hasMovies || addon.hasShows) {
-            let displayName = customListNames[addonGroupId] || addon.name;
-            const isMerged = (addon.hasMovies && addon.hasShows) ? (mergedLists?.[addonGroupId] !== false) : false;
-            if (isMerged) manifest.catalogs.push({ id: addonGroupId, type: 'all', name: displayName, ...commonCatalogProps });
-            else {
-                if (addon.hasMovies) manifest.catalogs.push({ id: addonGroupId, type: 'movie', name: displayName, ...commonCatalogProps });
-                if (addon.hasShows) manifest.catalogs.push({ id: addonGroupId, type: 'series', name: displayName, ...commonCatalogProps });
-            }
+      if (addon.hasMovies || addon.hasShows) {
+        let displayName = customListNames[addonGroupId] || addon.name;
+        const isMerged = (addon.hasMovies && addon.hasShows) ? (mergedLists?.[addonGroupId] !== false) : false;
+        
+        const catalogPropsForUrlImport = {
+            name: displayName,
+            extraSupported: ["skip"],
+            extraRequired: []
+        };
+
+        if (includeGenresInManifest) {
+            catalogPropsForUrlImport.extraSupported.push("genre");
+            catalogPropsForUrlImport.genres = staticGenres;
         }
-    } else if (addon.catalogs && addon.catalogs.length > 0) {
-        (addon.catalogs || []).forEach(catalog => {
-            const catalogIdForManifest = String(catalog.id);
-            if (removedListsSet.has(catalogIdForManifest) || hiddenListsSet.has(catalogIdForManifest)) return;
-            let displayName = customListNames[catalogIdForManifest] || catalog.name;
-            manifest.catalogs.push({
-                id: catalogIdForManifest, type: catalog.type, name: displayName,
-                extraSupported: catalog.extraSupported ? [...new Set([...catalog.extraSupported, "skip", "genre"])] : ["skip", "genre"],
-                extraRequired: catalog.extraRequired || [], genres: staticGenres
-            });
-        });
+
+        if (isMerged) {
+          manifest.catalogs.push({ id: addonGroupId, type: 'all', ...catalogPropsForUrlImport });
+        } else {
+          if (addon.hasMovies) manifest.catalogs.push({ id: addonGroupId, type: 'movie', ...catalogPropsForUrlImport });
+          if (addon.hasShows) manifest.catalogs.push({ id: addonGroupId, type: 'series', ...catalogPropsForUrlImport });
+        }
+      }
+    } else if (addon.catalogs && addon.catalogs.length > 0) { 
+      (addon.catalogs || []).forEach(catalog => {
+          const catalogIdForManifest = String(catalog.id);
+          if (removedListsSet.has(catalogIdForManifest) || hiddenListsSet.has(catalogIdForManifest)) return;
+          
+          let displayName = customListNames[catalogIdForManifest] || catalog.name;
+          
+          let extraSupportedForCatalog = catalog.extraSupported ? 
+                                         [...new Set(catalog.extraSupported.map(e => typeof e === 'string' ? e : ({ ...e })))] : 
+                                         [];
+
+          if (!extraSupportedForCatalog.some(e => (typeof e === 'string' && e === 'skip') || (typeof e === 'object' && e !== null && e.name === 'skip'))) {
+              extraSupportedForCatalog.push('skip');
+          }
+
+          let genresForThisCatalog = undefined; 
+
+          if (includeGenresInManifest) {
+              extraSupportedForCatalog = extraSupportedForCatalog.filter(e => {
+                  if (typeof e === 'object' && e !== null) {
+                      return e.name !== 'genre'; 
+                  }
+                  return e !== 'genre'; 
+              });
+
+              if (!extraSupportedForCatalog.includes('genre')) {
+                 extraSupportedForCatalog.push('genre');
+              }
+              
+              genresForThisCatalog = staticGenres;
+          } else {
+              extraSupportedForCatalog = extraSupportedForCatalog.filter(e => {
+                  if (typeof e === 'string') return e !== 'genre';
+                  if (typeof e === 'object' && e !== null) return e.name !== 'genre';
+                  return true;
+              });
+          }
+
+          manifest.catalogs.push({
+              id: catalogIdForManifest, 
+              type: catalog.type, 
+              name: displayName,
+              extraSupported: extraSupportedForCatalog,
+              extraRequired: catalog.extraRequired || (catalog.extra || []).filter(e => typeof e === 'object' && e !== null && e.isRequired),
+              genres: genresForThisCatalog
+          });
+      });
     }
   });
 

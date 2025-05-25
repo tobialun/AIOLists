@@ -88,6 +88,25 @@ module.exports = function(router) {
     }
   });
 
+  router.post('/:configHash/config/genre-filter', async (req, res) => {
+    try {
+      const { disableGenreFilter } = req.body;
+      if (typeof disableGenreFilter !== 'boolean') {
+        return res.status(400).json({ success: false, error: 'Invalid value for disableGenreFilter. Must be boolean.' });
+      }
+
+      req.userConfig.disableGenreFilter = disableGenreFilter;
+      req.userConfig.lastUpdated = new Date().toISOString();
+
+      const newConfigHash = await compressConfig(req.userConfig);
+      manifestCache.clear(); // Clear manifest cache as this setting affects it
+      res.json({ success: true, configHash: newConfigHash });
+    } catch (error) {
+      console.error('Error updating genre filter setting:', error);
+      res.status(500).json({ success: false, error: 'Failed to update genre filter setting' });
+    }
+  });
+
   // Serve main configuration page
   router.get('/:configHash/configure', (req, res) => {
     res.sendFile(path.join(__dirname, '..', '..', 'public', 'index.html'));
