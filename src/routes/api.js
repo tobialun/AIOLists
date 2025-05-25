@@ -1,3 +1,4 @@
+// src/routes/api.js
 const path = require('path');
 const { defaultConfig } = require('../config');
 const { compressConfig, decompressConfig } = require('../utils/urlConfig');
@@ -12,6 +13,68 @@ const { importExternalAddon: importExtAddon } = require('../integrations/externa
 
 const manifestCache = new Cache({ defaultTTL: 1 * 60 * 1000 }); // 1 minute for manifest
 
+function purgeListConfigs(userConfig, listIdPrefixOrExactId, isExactId = false) {
+  const idsToRemove = new Set();
+
+  if (isExactId) {
+      idsToRemove.add(String(listIdPrefixOrExactId));
+  }
+
+  if (userConfig.customListNames) {
+      for (const key in userConfig.customListNames) {
+          if ((isExactId && key === listIdPrefixOrExactId) || (!isExactId && key.startsWith(listIdPrefixOrExactId) && !key.startsWith('traktpublic_') )) { // Added !key.startsWith('traktpublic_') for the prefix case
+              idsToRemove.add(key);
+              delete userConfig.customListNames[key];
+          }
+      }
+  }
+
+  if (userConfig.sortPreferences) {
+      for (const key in userConfig.sortPreferences) {
+          if ((isExactId && key === listIdPrefixOrExactId) || (!isExactId && key.startsWith(listIdPrefixOrExactId) && !key.startsWith('traktpublic_'))) {
+              idsToRemove.add(key);
+              delete userConfig.sortPreferences[key];
+          }
+      }
+  }
+  if (userConfig.mergedLists) {
+      for (const key in userConfig.mergedLists) {
+          if ((isExactId && key === listIdPrefixOrExactId) || (!isExactId && key.startsWith(listIdPrefixOrExactId) && !key.startsWith('traktpublic_'))) {
+              idsToRemove.add(key);
+              delete userConfig.mergedLists[key];
+          }
+      }
+  }
+
+  const filterCondition = (id) => {
+      const idStr = String(id);
+      if (isExactId) return idStr === listIdPrefixOrExactId;
+      if (listIdPrefixOrExactId === 'trakt_') return idStr.startsWith('trakt_') && !idStr.startsWith('traktpublic_');
+      return idStr.startsWith(listIdPrefixOrExactId);
+  };
+
+  if (userConfig.listOrder) {
+      userConfig.listOrder = userConfig.listOrder.filter(id => {
+          if (filterCondition(id)) { idsToRemove.add(String(id)); return false; }
+          return true;
+      });
+  }
+  if (userConfig.hiddenLists) {
+      userConfig.hiddenLists = userConfig.hiddenLists.filter(id => {
+          if (filterCondition(id)) { idsToRemove.add(String(id)); return false; }
+          return true;
+      });
+  }
+  if (userConfig.removedLists) {
+      userConfig.removedLists = userConfig.removedLists.filter(id => {
+          if (filterCondition(id)) { idsToRemove.add(String(id)); return false; }
+          return true;
+      });
+  }
+  return idsToRemove;
+}
+
+
 module.exports = function(router) {
   router.param('configHash', async (req, res, next, configHash) => {
     try {
@@ -20,8 +83,8 @@ module.exports = function(router) {
       next();
     } catch (error) {
       console.error('Error decompressing configHash:', configHash, error);
-      if (!res.headersSent) { return res.redirect('/configure'); } // Redirect if possible
-      next(error); // Pass error to Express error handler
+      if (!res.headersSent) { return res.redirect('/configure'); }
+      next(error);
     }
   });
 
@@ -39,7 +102,7 @@ module.exports = function(router) {
         addonInterface = await createAddon(req.userConfig);
         manifestCache.set(cacheKey, addonInterface);
       }
-      setCacheHeaders(res, null); // No specific list ID for manifest itself
+      setCacheHeaders(res, null);
       res.json(addonInterface.manifest);
     } catch (error) {
       console.error('Error serving manifest:', error);
@@ -50,18 +113,16 @@ module.exports = function(router) {
   // Serve catalog content
   router.get('/:configHash/catalog/:type/:id/:extra?.json', async (req, res) => {
     try {
-      const { type: catalogType, id: catalogId } = req.params; // Renamed to avoid conflict in this scope
-      const extraParamsString = req.params.extra; // Capture the raw extra string
-
-      // Parse skip and genre from query parameters first, then from path segment if present
+      const { type: catalogType, id: catalogId } = req.params;
+      const extraParamsString = req.params.extra;
       let skip = parseInt(req.query.skip);
       let genre = req.query.genre;
 
-      if (isNaN(skip) && extraParamsString) { // If skip is not a number from query, try parsing from path
+      if (isNaN(skip) && extraParamsString) {
         const skipMatch = extraParamsString.match(/skip=(\d+)/);
         if (skipMatch) skip = parseInt(skipMatch[1]);
       }
-      if (!genre && extraParamsString) { // If genre is not from query, try parsing from path
+      if (!genre && extraParamsString) {
         const genreMatch = extraParamsString.match(/genre=([^&]+)/);
         if (genreMatch) genre = decodeURIComponent(genreMatch[1]);
       }
@@ -69,10 +130,7 @@ module.exports = function(router) {
       skip = isNaN(skip) ? 0 : skip;
       genre = genre || null;
 
-
-      setCacheHeaders(res, catalogId); // Set cache headers based on list ID
-
-      // Pass catalogType to fetchListContent
+      setCacheHeaders(res, catalogId);
       const itemsResult = await fetchListContent(catalogId, req.userConfig, skip, genre, catalogType);
       
       if (!itemsResult) {
@@ -83,7 +141,7 @@ module.exports = function(router) {
 
       if (catalogType !== 'all' && (catalogType === 'movie' || catalogType === 'series')) {
         metas = metas.filter(meta => meta.type === catalogType);
-      } else if (catalogType !== 'all') { // Invalid type if not movie, series, or all
+      } else if (catalogType !== 'all') {
         return res.json({ metas: [] });
       }
       
@@ -113,26 +171,44 @@ module.exports = function(router) {
       const { apiKey, rpdbApiKey } = req.body;
       let configChanged = false;
 
-      // Normalize to empty string if null or undefined
-      const newApiKey = apiKey || '';
+      const newApiKey = apiKey || ''; // For MDBList
       const newRpdbApiKey = rpdbApiKey || '';
 
       if (req.userConfig.rpdbApiKey !== newRpdbApiKey) {
         req.userConfig.rpdbApiKey = newRpdbApiKey;
         configChanged = true;
       }
+
       if (req.userConfig.apiKey !== newApiKey) {
-        req.userConfig.apiKey = newApiKey;
         configChanged = true;
+        if (newApiKey === '') { // MDBList API key cleared - PURGE MDBList related data
+            console.log('MDBList API key cleared. Purging aiolists- and mdblisturl_ entries.');
+            req.userConfig.apiKey = '';
+            if (req.userConfig.mdblistUsername) delete req.userConfig.mdblistUsername;
+
+            purgeListConfigs(req.userConfig, 'aiolists-');
+            
+            // Purge mdblisturl_ from importedAddons and their specific configs
+            if (req.userConfig.importedAddons) {
+                for (const addonKey in req.userConfig.importedAddons) {
+                    if (addonKey.startsWith('mdblisturl_')) {
+                        purgeListConfigs(req.userConfig, addonKey, true); // Purge specific configs for this addonKey
+                        delete req.userConfig.importedAddons[addonKey];
+                    }
+                }
+            }
+        } else {
+            req.userConfig.apiKey = newApiKey;
+        }
       }
       
       if (configChanged) {
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
-        manifestCache.clear(); // Invalidate manifest cache on config change
+        manifestCache.clear(); 
         return res.json({ success: true, configHash: newConfigHash });
       }
-      return res.json({ success: true, configHash: req.configHash, message: "API keys unchanged" });
+      return res.json({ success: true, configHash: req.configHash, message: "API keys processed" });
     } catch (error) {
       console.error('Error in /apikey:', error);
       res.status(500).json({ error: 'Internal server error in /apikey' });
@@ -156,7 +232,6 @@ module.exports = function(router) {
         res.json({ 
             success: true, 
             configHash: newConfigHash, 
-            // Return tokens for client-side, though server now stores them
             accessToken: traktTokens.accessToken,
             refreshToken: traktTokens.refreshToken,
             expiresAt: traktTokens.expiresAt,
@@ -171,13 +246,17 @@ module.exports = function(router) {
   // Trakt Disconnect
   router.post('/:configHash/trakt/disconnect', async (req, res) => {
     try {
+        console.log('Trakt disconnect requested. Purging native trakt_ entries (excluding traktpublic_).');
         req.userConfig.traktAccessToken = null;
         req.userConfig.traktRefreshToken = null;
         req.userConfig.traktExpiresAt = null;
+
+        purgeListConfigs(req.userConfig, 'trakt_'); 
+
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
         manifestCache.clear();
-        res.json({ success: true, configHash: newConfigHash, message: 'Disconnected from Trakt' });
+        res.json({ success: true, configHash: newConfigHash, message: 'Disconnected from Trakt. Native Trakt data purged; Trakt Public URL imports retained.' });
     } catch (error) {
         console.error('Error in /trakt/disconnect:', error);
         res.status(500).json({ error: 'Failed to disconnect from Trakt', details: error.message });
@@ -198,12 +277,11 @@ module.exports = function(router) {
         if (url.includes('mdblist.com/lists/')) {
             if (!req.userConfig.apiKey) return res.status(400).json({ error: 'MDBList API key required' });
             importedListDetails = await extractMDBListFromUrl(url, req.userConfig.apiKey);
-            addonId = `mdblisturl_${importedListDetails.listId}`; // Unique prefix for MDBList URL imports
+            addonId = `mdblisturl_${importedListDetails.listId}`; 
             listNameForDisplay = importedListDetails.listName;
             sourceSystem = "MDBList";
         } else if (url.includes('trakt.tv/users/') && url.includes('/lists/')) {
             importedListDetails = await fetchPublicTraktListDetails(url);
-            // Use the ID structure from fetchPublicTraktListDetails directly (e.g., traktpublic_username_slug)
             addonId = importedListDetails.listId; 
             listNameForDisplay = importedListDetails.listName;
             sourceSystem = "Trakt Public";
@@ -213,38 +291,33 @@ module.exports = function(router) {
         
         if (!req.userConfig.importedAddons) req.userConfig.importedAddons = {};
         if (req.userConfig.importedAddons[addonId]) {
-             // More specific error
              return res.status(400).json({ error: `List "${listNameForDisplay}" from ${sourceSystem} with ID ${addonId} is already imported.` });
         }
 
-        // Check if list has content
         if (!importedListDetails.hasMovies && !importedListDetails.hasShows) {
             return res.status(400).json({ error: `List "${listNameForDisplay}" from ${sourceSystem} contains no movie or show content.` });
         }
         
-        // Store structured addon info
         req.userConfig.importedAddons[addonId] = {
-            id: addonId, // This is the key in importedAddons and also the manifest catalog ID
-            name: `${listNameForDisplay}`, // Default name
-            version: '1.0.0', // Placeholder version
+            id: addonId, 
+            name: `${listNameForDisplay}`, 
+            version: '1.0.0', 
             description: `Imported from ${sourceSystem} URL: ${url}`,
             url: url,
             isUrlImported: true,
             hasMovies: importedListDetails.hasMovies,
             hasShows: importedListDetails.hasShows,
-            // Specific flags for logic later
             isTraktPublicList: sourceSystem === "Trakt Public",
-            traktUser: sourceSystem === "Trakt Public" ? importedListDetails.traktUser : undefined, // Store Trakt user for public lists
-            traktListSlug: sourceSystem === "Trakt Public" ? importedListDetails.originalTraktSlug : undefined, // Store Trakt slug
+            traktUser: sourceSystem === "Trakt Public" ? importedListDetails.traktUser : undefined, 
+            traktListSlug: sourceSystem === "Trakt Public" ? importedListDetails.originalTraktSlug : undefined, 
             isMDBListUrlImport: sourceSystem === "MDBList",
-            mdblistId: sourceSystem === "MDBList" ? importedListDetails.listId : undefined, // Store MDBList original ID
-            // For manifest generation (can be simplified if only one type)
-            catalogs: [], // URL imports will be treated as a single "group" catalog initially
+            mdblistId: sourceSystem === "MDBList" ? importedListDetails.listId : undefined, 
+            catalogs: [], 
             types: [
                 ...(importedListDetails.hasMovies ? ['movie'] : []),
                 ...(importedListDetails.hasShows ? ['series'] : [])
             ],
-            resources: ['catalog', 'meta'] // Standard resources
+            resources: ['catalog', 'meta'] 
         };
 
         req.userConfig.lastUpdated = new Date().toISOString();
@@ -263,17 +336,14 @@ module.exports = function(router) {
         const { manifestUrl } = req.body;
         if (!manifestUrl) return res.status(400).json({ error: 'Manifest URL required' });
 
-        const addonInfo = await importExtAddon(manifestUrl); // Assuming this function is robust
+        const addonInfo = await importExtAddon(manifestUrl); 
         if (!req.userConfig.importedAddons) req.userConfig.importedAddons = {};
 
-        // Check if addon with the same ID already exists
         if (req.userConfig.importedAddons[addonInfo.id]) {
             return res.status(400).json({ error: `Addon with ID ${addonInfo.id} (${addonInfo.name}) is already imported.`});
         }
         
-        // Mark as not a direct URL list import (it's a full addon manifest)
         addonInfo.isUrlImported = false; 
-        // Determine if it has movies/shows based on its own manifest types
         addonInfo.hasMovies = addonInfo.types.includes('movie');
         addonInfo.hasShows = addonInfo.types.includes('series');
 
@@ -288,30 +358,38 @@ module.exports = function(router) {
     }
   });
   
-  // Remove Imported Addon Group (works for both URL imports and manifest imports)
+  // Remove Imported Addon Group
   router.post('/:configHash/remove-addon', async (req, res) => {
     try {
-        const { addonId } = req.body; // addonId is the key in importedAddons (e.g., 'mdblisturl_123' or 'community.stremio.anime')
+        const { addonId } = req.body; 
         if (!addonId || !req.userConfig.importedAddons || !req.userConfig.importedAddons[addonId]) {
-            return res.status(400).json({ error: 'Invalid addon ID' });
+            return res.status(400).json({ error: 'Invalid addon ID or addon not found in imports.' });
         }
 
+        const addonToRemove = req.userConfig.importedAddons[addonId];
         delete req.userConfig.importedAddons[addonId];
-        // Also ensure related settings like custom names, removed lists (if they used this ID) are cleaned up or handled.
-        // For simplicity, direct deletion here. More complex cleanup might be needed.
-        if(req.userConfig.customListNames) delete req.userConfig.customListNames[addonId];
-        if(req.userConfig.mergedLists) delete req.userConfig.mergedLists[addonId];
-        if(req.userConfig.sortPreferences) delete req.userConfig.sortPreferences[addonId];
-        // If this addonId was in listOrder or hiddenLists, remove it
-        if(req.userConfig.listOrder) req.userConfig.listOrder = req.userConfig.listOrder.filter(id => id !== addonId);
-        if(req.userConfig.hiddenLists) req.userConfig.hiddenLists = req.userConfig.hiddenLists.filter(id => id !== addonId);
-        if(req.userConfig.removedLists) req.userConfig.removedLists = req.userConfig.removedLists.filter(id => id !== addonId);
 
+        // Purge general settings for the addon group ID
+        purgeListConfigs(req.userConfig, addonId, true);
+
+        // If it was a manifest import, purge settings for its sub-catalogs
+        if (addonToRemove && addonToRemove.catalogs && Array.isArray(addonToRemove.catalogs)) {
+            for (const subCatalog of addonToRemove.catalogs) {
+                const subCatalogIdStr = String(subCatalog.id);
+                purgeListConfigs(req.userConfig, subCatalogIdStr, true); // Purge specific settings for this sub-catalog ID
+
+                // Also attempt to purge sort prefs by originalId if different and exists
+                const subCatalogOriginalId = String(subCatalog.originalId);
+                if (subCatalogOriginalId && subCatalogOriginalId !== subCatalogIdStr && req.userConfig.sortPreferences?.[subCatalogOriginalId]) {
+                     delete req.userConfig.sortPreferences[subCatalogOriginalId];
+                }
+            }
+        }
 
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
         manifestCache.clear();
-        res.json({ success: true, configHash: newConfigHash, message: 'Addon group removed' });
+        res.json({ success: true, configHash: newConfigHash, message: 'Addon group and its configurations removed.' });
     } catch (error) {
         console.error('Error in /remove-addon:', error);
         res.status(500).json({ error: 'Failed to remove addon group', details: error.message });
@@ -321,9 +399,9 @@ module.exports = function(router) {
   // Update list order
   router.post('/:configHash/lists/order', async (req, res) => {
     try {
-        const { order } = req.body; // Expects an array of list IDs in the new order
+        const { order } = req.body; 
         if (!Array.isArray(order)) return res.status(400).json({ error: 'Order must be an array of strings.' });
-        req.userConfig.listOrder = order.map(String); // Ensure all IDs are strings
+        req.userConfig.listOrder = order.map(String); 
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
         manifestCache.clear(); 
@@ -337,13 +415,13 @@ module.exports = function(router) {
   // Update custom list names
   router.post('/:configHash/lists/names', async (req, res) => {
     try {
-      const { listId, customName } = req.body; // listId here is the manifest ID
+      const { listId, customName } = req.body; 
       if (!listId) return res.status(400).json({ error: 'List ID required' });
       if (!req.userConfig.customListNames) req.userConfig.customListNames = {};
       if (customName && customName.trim()) {
         req.userConfig.customListNames[String(listId)] = customName.trim();
       } else {
-        delete req.userConfig.customListNames[String(listId)]; // Remove if name is empty
+        delete req.userConfig.customListNames[String(listId)]; 
       }
       req.userConfig.lastUpdated = new Date().toISOString();
       const newConfigHash = await compressConfig(req.userConfig);
@@ -358,9 +436,9 @@ module.exports = function(router) {
   // Update list visibility
   router.post('/:configHash/lists/visibility', async (req, res) => {
     try {
-      const { hiddenLists } = req.body; // Expects an array of list IDs to hide
+      const { hiddenLists } = req.body; 
       if (!Array.isArray(hiddenLists)) return res.status(400).json({ error: 'Hidden lists must be an array of strings.' });
-      req.userConfig.hiddenLists = hiddenLists.map(String); // Ensure all IDs are strings
+      req.userConfig.hiddenLists = hiddenLists.map(String); 
       req.userConfig.lastUpdated = new Date().toISOString();
       const newConfigHash = await compressConfig(req.userConfig);
       manifestCache.clear();
@@ -371,48 +449,93 @@ module.exports = function(router) {
     }
   });
 
-  // Remove lists (mark as removed)
+  // Remove lists (mark as removed or purge)
   router.post('/:configHash/lists/remove', async (req, res) => {
     try {
-      const { listIds } = req.body; // Expects an array of list IDs to remove
+      const { listIds } = req.body; 
       if (!Array.isArray(listIds)) return res.status(400).json({ error: 'List IDs must be an array of strings.' });
-      
-      const currentRemoved = new Set(req.userConfig.removedLists || []);
-      listIds.forEach(id => currentRemoved.add(String(id)));
-      req.userConfig.removedLists = Array.from(currentRemoved);
 
-      // Also remove from hiddenLists if present
-      if (req.userConfig.hiddenLists) {
-          req.userConfig.hiddenLists = (req.userConfig.hiddenLists || []).filter(id => !listIds.includes(String(id)));
+      const currentRemoved = new Set(req.userConfig.removedLists || []);
+      // Hidden lists and listOrder will be modified by purgeListConfigs or handled for native lists.
+
+      for (const listIdToRemove of listIds) {
+        const idStr = String(listIdToRemove);
+
+        const isNativeMDBList = idStr.startsWith('aiolists-');
+        const isNativeTrakt = idStr.startsWith('trakt_') && !idStr.startsWith('traktpublic_');
+        const isUrlImportedMDBList = idStr.startsWith('mdblisturl_');
+        const isUrlImportedTraktList = idStr.startsWith('traktpublic_');
+        
+        let isSubCatalog = false;
+        let parentAddonIdForSubCatalog = null;
+        let subCatalogOriginalId = null;
+
+        if (!isNativeMDBList && !isNativeTrakt && !isUrlImportedMDBList && !isUrlImportedTraktList) {
+            for (const importedAddonId in req.userConfig.importedAddons) {
+                const parentAddon = req.userConfig.importedAddons[importedAddonId];
+                if (parentAddon && parentAddon.catalogs) {
+                    const foundCatalog = parentAddon.catalogs.find(cat => String(cat.id) === idStr);
+                    if (foundCatalog) {
+                        isSubCatalog = true;
+                        parentAddonIdForSubCatalog = importedAddonId;
+                        subCatalogOriginalId = String(foundCatalog.originalId);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (isUrlImportedMDBList || isUrlImportedTraktList) {
+          console.log(`Purging URL import: ${idStr}`);
+          if (req.userConfig.importedAddons) delete req.userConfig.importedAddons[idStr];
+          purgeListConfigs(req.userConfig, idStr, true); 
+        } else if (isSubCatalog && parentAddonIdForSubCatalog) {
+          console.log(`Purging sub-catalog: ${idStr} from parent ${parentAddonIdForSubCatalog}`);
+          purgeListConfigs(req.userConfig, idStr, true); 
+          // Also specifically try to remove sortPreference by originalId if it's different
+          if (subCatalogOriginalId && subCatalogOriginalId !== idStr && req.userConfig.sortPreferences?.[subCatalogOriginalId]) {
+            delete req.userConfig.sortPreferences[subCatalogOriginalId];
+          }
+          if (req.userConfig.importedAddons[parentAddonIdForSubCatalog]?.catalogs) {
+            req.userConfig.importedAddons[parentAddonIdForSubCatalog].catalogs = 
+              req.userConfig.importedAddons[parentAddonIdForSubCatalog].catalogs.filter(cat => String(cat.id) !== idStr);
+          }
+        } else if (isNativeMDBList || isNativeTrakt) {
+          console.log(`Soft deleting native list: ${idStr}`);
+          currentRemoved.add(idStr);
+          if (req.userConfig.hiddenLists) { // Ensure it's removed from hidden if being added to removed
+            req.userConfig.hiddenLists = req.userConfig.hiddenLists.filter(id => String(id) !== idStr);
+          }
+          // Native list configs (customName, sort, merge) are preserved
+        } else {
+          console.warn(`Removing unclassified list ID: ${idStr}. Treating as purge.`);
+          if (req.userConfig.importedAddons && req.userConfig.importedAddons[idStr]) {
+             delete req.userConfig.importedAddons[idStr];
+          }
+          purgeListConfigs(req.userConfig, idStr, true);
+        }
       }
-      // Clean up other settings for these lists
-      listIds.forEach(listIdToRemove => {
-          const idStr = String(listIdToRemove);
-          if (req.userConfig.customListNames) delete req.userConfig.customListNames[idStr];
-          if (req.userConfig.mergedLists) delete req.userConfig.mergedLists[idStr];
-          // For sortPreferences, the key is originalId, which might be different.
-          // This part needs careful handling if listId passed is manifestId.
-          // For now, assume listId is the one used as key where applicable.
-          // A better approach would be to find the originalId from the manifestId if needed.
-      });
+
+      req.userConfig.removedLists = Array.from(currentRemoved);
+      // listOrder and hiddenLists are already modified by purgeListConfigs where applicable
 
       req.userConfig.lastUpdated = new Date().toISOString();
       const newConfigHash = await compressConfig(req.userConfig);
       manifestCache.clear();
-      res.json({ success: true, configHash: newConfigHash, message: 'Lists removed' });
+      res.json({ success: true, configHash: newConfigHash, message: 'Lists processed for removal' });
     } catch (error) { 
         console.error('Failed to remove lists:', error);
-        res.status(500).json({ error: 'Failed to remove lists' });
+        res.status(500).json({ error: 'Failed to remove lists', details: error.message });
     }
   });
 
   // Update sort preferences for a list
   router.post('/:configHash/lists/sort', async (req, res) => {
     try {
-      const { listId, sort, order } = req.body; // listId here should be the originalId used for sorting keys
+      const { listId, sort, order } = req.body; 
       if (!listId || !sort) return res.status(400).json({ error: 'List ID (originalId) and sort field required' });
       if (!req.userConfig.sortPreferences) req.userConfig.sortPreferences = {};
-      req.userConfig.sortPreferences[String(listId)] = { sort, order: order || 'desc' }; // Default order to 'desc'
+      req.userConfig.sortPreferences[String(listId)] = { sort, order: order || 'desc' }; 
       req.userConfig.lastUpdated = new Date().toISOString();
       const newConfigHash = await compressConfig(req.userConfig);
       manifestCache.clear(); 
@@ -423,10 +546,10 @@ module.exports = function(router) {
     }
   });
   
-  // Update merge preference for a list (split/merge movies & series)
+  // Update merge preference for a list
   router.post('/:configHash/lists/merge', async (req, res) => {
     try {
-        const { listId, merged } = req.body; // listId is the manifest ID
+        const { listId, merged } = req.body; 
         if (!listId || typeof merged !== 'boolean') {
             return res.status(400).json({ error: 'List ID (manifestId) and merge preference (boolean) required' });
         }
@@ -445,13 +568,11 @@ module.exports = function(router) {
   // Create a new default configuration
   router.post('/config/create', async (req, res) => {
     try {
-      // Start with a clean default structure, then overlay any body params (e.g., from URL query if any)
       const initialStructure = {
         listOrder: [], hiddenLists: [], removedLists: [],
         customListNames: {}, mergedLists: {}, sortPreferences: {},
         importedAddons: {}, listsMetadata: {}
       };
-      // Merge defaultConfig, then initialStructure to ensure all keys are present, then req.body for overrides
       const config = { ...defaultConfig, ...initialStructure, ...req.body, lastUpdated: new Date().toISOString() };
       const configHash = await compressConfig(config);
       res.json({ success: true, configHash });
@@ -461,7 +582,7 @@ module.exports = function(router) {
     }
   });
   
-  // Validate API keys (MDBList, RPDB)
+  // Validate API keys
   router.post('/validate-keys', async (req, res) => {
     try {
       const { apiKey, rpdbApiKey } = req.body;
@@ -494,12 +615,10 @@ module.exports = function(router) {
   router.get('/:configHash/lists', async (req, res) => {
     try {
         let allUserLists = [];
-        // Fetch MDBLists if API key is present
         if (req.userConfig.apiKey) {
             const mdbLists = await fetchAllMDBLists(req.userConfig.apiKey);
             allUserLists.push(...mdbLists.map(l => ({...l, source: 'mdblist'})));
         }
-        // Fetch Trakt lists if authenticated
         if (req.userConfig.traktAccessToken) {
             const traktLists = await fetchTraktUserLists(req.userConfig); 
             allUserLists.push(...traktLists.map(l => ({...l, source: 'trakt'})));
@@ -511,104 +630,85 @@ module.exports = function(router) {
         
         let processedLists = [];
 
-        // Process native MDBList and Trakt lists
         const activeListsProcessingPromises = allUserLists
             .map(async list => {
-                const originalListIdStr = String(list.id); // e.g., '12345' for MDB, 'watchlist' or 'trending_movies' for Trakt
-                let manifestListId = originalListIdStr; // Default
-                let defaultListTypeChar = 'L'; // Default MDBList type
-                let tagType; // For UI display
+                const originalListIdStr = String(list.id);
+                let manifestListId = originalListIdStr;
+                let tagType = 'L'; 
 
                 if (list.source === 'mdblist') {
-                    const listTypeSuffix = list.listType || 'L'; // L, E, or W from MDBList fetch
+                    const listTypeSuffix = list.listType || 'L';
                     manifestListId = list.id === 'watchlist' ? `aiolists-watchlist-W` : `aiolists-${list.id}-${listTypeSuffix}`;
                     tagType = listTypeSuffix;
                 } else if (list.source === 'trakt'){
-                    manifestListId = list.id; // e.g., trakt_watchlist, trakt_userlist_slug
-                    tagType = 'T'; // Trakt
-                } else {
-                    // Should not happen with current logic but as a fallback
-                    tagType = defaultListTypeChar;
+                    manifestListId = list.id; 
+                    tagType = 'T';
                 }
+                if (list.isWatchlist) tagType = 'W';
                 
-                if (list.isWatchlist) { // MDBList watchlist specifically
-                    tagType = 'W';
-                }
+                if (removedListsSet.has(manifestListId)) return null;
 
-                if (removedListsSet.has(manifestListId)) return null; // Skip if removed
-
-                // Fetch metadata (hasMovies, hasShows) if not already present
                 let metadata = req.userConfig.listsMetadata[manifestListId] || req.userConfig.listsMetadata[originalListIdStr] || {};
                 if (typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean') {
-                  // Use a slimmed down config for this fetch to avoid loops or excessive data
-                  const tempContent = await fetchListContent(manifestListId, { ...req.userConfig, rpdbApiKey: null }, 0); // No RPDB for this check
+                  const tempContent = await fetchListContent(manifestListId, { ...req.userConfig, rpdbApiKey: null }, 0);
                   metadata.hasMovies = tempContent?.movies?.length > 0 || tempContent?.hasMovies === true;
                   metadata.hasShows = tempContent?.shows?.length > 0 || tempContent?.hasShows === true;
-                  req.userConfig.listsMetadata[manifestListId] = metadata; // Store it back
+                  req.userConfig.listsMetadata[manifestListId] = metadata;
                   configChangedDueToMetadataFetch = true;
                 }
                 
                 return {
-                    id: manifestListId, // ID used in manifest and for UI list items
-                    originalId: originalListIdStr, // Original ID from source (MDBList numerical, Trakt slug/special ID)
+                    id: manifestListId, 
+                    originalId: originalListIdStr, 
                     name: list.name,
                     customName: req.userConfig.customListNames?.[manifestListId] || null,
                     isHidden: (req.userConfig.hiddenLists || []).includes(manifestListId),
                     hasMovies: metadata.hasMovies, 
                     hasShows: metadata.hasShows,   
-                    // Trakt specific flags
                     isTraktList: list.source === 'trakt' && list.isTraktList, 
                     isTraktWatchlist: list.source === 'trakt' && list.isTraktWatchlist,
                     isTraktRecommendations: list.isTraktRecommendations,
                     isTraktTrending: list.isTraktTrending,
                     isTraktPopular: list.isTraktPopular,
-                    // MDBList specific
-                    isWatchlist: !!list.isWatchlist, // Generic watchlist flag
-                    tag: tagType, // For UI: L, E, W, T
-                    listType: list.listType, // Original MDBList type if available
+                    isWatchlist: !!list.isWatchlist,
+                    tag: tagType, 
+                    listType: list.listType, 
                     tagImage: list.source === 'trakt' ? 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico' : null,
                     sortPreferences: req.userConfig.sortPreferences?.[originalListIdStr] || 
                                      { sort: (list.source === 'trakt') ? 'rank' : 'imdbvotes', 
                                        order: (list.source === 'trakt') ? 'asc' : 'desc' },
                     isMerged: (metadata.hasMovies && metadata.hasShows) ? (req.userConfig.mergedLists?.[manifestListId] !== false) : false,
-                    source: list.source // 'mdblist' or 'trakt'
+                    source: list.source 
                 };
             });
         
         const activeListsResults = (await Promise.all(activeListsProcessingPromises)).filter(p => p !== null);
         processedLists.push(...activeListsResults);
 
-        // Process imported addons (both URL-based and manifest-based)
         if (req.userConfig.importedAddons) {
             for (const addonKey in req.userConfig.importedAddons) {
                 const addon = req.userConfig.importedAddons[addonKey];
-                const addonGroupId = String(addon.id); // This is the primary ID for the imported addon group/URL
-                if (removedListsSet.has(addonGroupId)) continue;
-
-                let currentListEntry = null;
-
-                // Case 1: Imported via URL (MDBList or Trakt Public)
+                const addonGroupId = String(addon.id); 
+                
                 if (addon.isUrlImported) {
-                    // This addon group itself acts as a "list" in the UI if it has content
                     if ((addon.hasMovies || addon.hasShows) && !(req.userConfig.hiddenLists || []).includes(addonGroupId)) {
-                        let tagType = 'A'; // Default for addon
-                        let tagImage = addon.logo; // Use addon logo if available
+                        let tagType = 'A'; 
+                        let tagImage = addon.logo; 
                         if(addon.isMDBListUrlImport) { tagType = 'L'; tagImage = null; }
                         else if (addon.isTraktPublicList) { tagType = 'T'; tagImage = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico'; }
                         
-                        // The originalId for sort prefs should be specific to the source if known
                         let sortOriginalId = addon.mdblistId || (addon.isTraktPublicList ? `traktpublic_${addon.traktUser}_${addon.traktListSlug}` : addonGroupId);
 
-                        currentListEntry = {
-                            id: addonGroupId, // Manifest/UI ID
+                        processedLists.push({
+                            id: addonGroupId, 
                             originalId: sortOriginalId, 
-                            name: addon.name, // User-facing name (can be customized)
+                            name: addon.name,
                             customName: req.userConfig.customListNames?.[addonGroupId] || null,
                             isHidden: (req.userConfig.hiddenLists || []).includes(addonGroupId),
                             hasMovies: addon.hasMovies,
                             hasShows: addon.hasShows,
-                            addonId: addonGroupId, // Reference to its own group ID
-                            addonName: addon.name, // Original name of the addon group
+                            addonId: addonGroupId, 
+                            addonName: addon.name, 
                             tag: tagType, 
                             tagImage: tagImage,
                             sortPreferences: req.userConfig.sortPreferences?.[sortOriginalId] || 
@@ -616,48 +716,43 @@ module.exports = function(router) {
                                                order: (addon.isTraktPublicList ? 'asc' : 'desc') },
                             isMerged: (addon.hasMovies && addon.hasShows) ? (req.userConfig.mergedLists?.[addonGroupId] !== false) : false,
                             source: addon.isMDBListUrlImport ? 'mdblist_url' : (addon.isTraktPublicList ? 'trakt_public' : 'addon_url_import'),
-                            isUrlImportedType: true, // Flag for UI
+                            isUrlImportedType: true,
                             isMDBListUrlImport: !!addon.isMDBListUrlImport,
                             isTraktPublicList: !!addon.isTraktPublicList,
                             traktUser: addon.traktUser, 
                             traktListSlug: addon.traktListSlug
-                        };
-                        processedLists.push(currentListEntry);
+                        });
                     }
                 } 
-                // Case 2: Imported via Manifest URL (external addon with its own catalogs)
                 else if (addon.catalogs && addon.catalogs.length > 0) { 
                     (addon.catalogs || []).forEach(catalog => {
-                        const catalogIdStr = String(catalog.id); // This is the unique ID AIOLists gives to the sub-catalog
+                        const catalogIdStr = String(catalog.id); 
+                        
                         if (removedListsSet.has(catalogIdStr) || (req.userConfig.hiddenLists || []).includes(catalogIdStr)) return;
                         
-                        // Determine movie/show content based on catalog type and parent addon types
                         let catalogHasMovies = catalog.type === 'movie' || (catalog.type === 'all' && (addon.types?.includes('movie') || !!addon.hasMovies));
                         let catalogHasShows = catalog.type === 'series' || (catalog.type === 'all' && (addon.types?.includes('series') || !!addon.hasShows));
-
-                        let tagType = 'A'; // Default for addon sub-catalog
-                        let tagImage = addon.logo; // Use parent addon logo
-
-                        // The originalId for sort prefs for sub-catalogs is their own originalId from the source manifest
+                        let tagType = 'A'; 
+                        let tagImage = addon.logo;
                         let sortOriginalIdForSubCatalog = catalog.originalId || catalogIdStr;
 
                         processedLists.push({
-                            id: catalogIdStr, // Manifest/UI ID for this specific sub-catalog
+                            id: catalogIdStr, 
                             originalId: sortOriginalIdForSubCatalog, 
-                            name: catalog.name, // Name from the sub-catalog's manifest entry
+                            name: catalog.name, 
                             customName: req.userConfig.customListNames?.[catalogIdStr] || null,
                             isHidden: (req.userConfig.hiddenLists || []).includes(catalogIdStr),
                             hasMovies: catalogHasMovies, 
                             hasShows: catalogHasShows,
-                            addonId: addon.id, // Parent addon group ID
-                            addonName: addon.name, // Parent addon group name
+                            addonId: addon.id, 
+                            addonName: addon.name, 
                             tag: tagType, 
                             tagImage: tagImage,
                             sortPreferences: req.userConfig.sortPreferences?.[sortOriginalIdForSubCatalog] || 
-                                             { sort: 'imdbvotes', order: 'desc' }, // Default sort for external catalogs
-                            isMerged: false, // Sub-catalogs from manifests are typically not mergeable by AIOLists directly
-                            source: 'addon_manifest', // Indicates it's a sub-catalog from an imported manifest
-                            isUrlImportedType: false, // Not a direct URL import itself
+                                             { sort: 'imdbvotes', order: 'desc' },
+                            isMerged: false, 
+                            source: 'addon_manifest',
+                            isUrlImportedType: false, 
                             isMDBListUrlImport: false, 
                             isTraktPublicList: false,
                         });
@@ -666,7 +761,6 @@ module.exports = function(router) {
             }
         }
         
-        // Apply overall list order
         if (req.userConfig.listOrder?.length > 0) {
             const orderMap = new Map(req.userConfig.listOrder.map((id, index) => [String(id), index]));
             processedLists.sort((a, b) => {
@@ -675,7 +769,7 @@ module.exports = function(router) {
                 if (indexA !== undefined && indexB !== undefined) return indexA - indexB;
                 if (indexA !== undefined) return -1; 
                 if (indexB !== undefined) return 1;  
-                return 0; // Keep original relative order for new/unsorted items
+                return 0; 
             });
         }
         
@@ -684,10 +778,9 @@ module.exports = function(router) {
             importedAddons: req.userConfig.importedAddons || {},
             availableSortOptions: req.userConfig.availableSortOptions || defaultConfig.availableSortOptions,
             traktSortOptions: req.userConfig.traktSortOptions || defaultConfig.traktSortOptions,
-            listsMetadata: req.userConfig.listsMetadata // Send back potentially updated metadata
+            listsMetadata: req.userConfig.listsMetadata
         };
 
-        // If metadata was fetched and changed config, provide new hash
         if (configChangedDueToMetadataFetch) {
             req.userConfig.lastUpdated = new Date().toISOString();
             const newConfigHash = await compressConfig(req.userConfig);
@@ -699,4 +792,5 @@ module.exports = function(router) {
         res.status(500).json({ error: 'Failed to fetch lists', details: error.message });
     }
   });
+
 };
