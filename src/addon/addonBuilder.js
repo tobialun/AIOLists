@@ -262,32 +262,32 @@ async function createAddon(userConfig) {
                   return true; 
               });
 
-          let extraSupportedForCatalog = ['skip'];
-          extraSupportedForCatalog.push(...tempExtraSupported);
+          let extraSupportedForCatalog = ['skip']; // AIOLists always adds 'skip'
+          extraSupportedForCatalog.push(...tempExtraSupported); // Add other preserved extras
 
           let genresForThisCatalog = undefined; 
 
-          if (includeGenresInManifest) {
-              if (!extraSupportedForCatalog.includes('genre')) {
-                 extraSupportedForCatalog.push('genre');
+          if (includeGenresInManifest) { // This is userConfig.disableGenreFilter
+              if (!extraSupportedForCatalog.includes('genre')) { // Check if 'genre' (string) is already there
+                 extraSupportedForCatalog.push('genre'); // Add the 'genre' string identifier
               }
-              genresForThisCatalog = staticGenres;
+              genresForThisCatalog = staticGenres; // AIOLists provides its own staticGenres
           }
           
-          extraSupportedForCatalog = [...new Set(extraSupportedForCatalog)];
+          extraSupportedForCatalog = [...new Set(extraSupportedForCatalog)]; // Deduplicate
 
           manifest.catalogs.push({
               id: catalogIdForManifest, 
               type: catalog.type, 
               name: displayName,
-              extraSupported: extraSupportedForCatalog,
+              extraSupported: extraSupportedForCatalog, // This will now be lean
               extraRequired: catalog.extraRequired || [], 
-              genres: genresForThisCatalog
+              genres: genresForThisCatalog // AIOLists' own genres
           });
       });
     }
   });
-  
+
   if (listOrder && listOrder.length > 0) {
     const orderMap = new Map(listOrder.map((id, index) => [String(id), index]));
     manifest.catalogs.sort((a, b) => {

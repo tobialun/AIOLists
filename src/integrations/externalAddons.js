@@ -44,64 +44,56 @@ class ExternalAddon {
       
       this.setApiBaseUrlFromManifestUrl(); // Set the API base URL
 
-      // Process catalogs to make their IDs unique within AIOLists if necessary
-      // and store original IDs for fetching.
       const idUsageMap = new Map(); // Tracks usage of originalId|originalType to ensure unique AIOLists IDs
 
       const processedCatalogs = this.manifest.catalogs.map(catalog => {
         if (!catalog.id || !catalog.type) {
-            // console.warn('[AIOLists ExternalAddon] Skipping catalog without id or type in external addon:', catalog.name || 'Unnamed', 'Full catalog object:', catalog);
             return null; // Skip invalid catalog entries
         }
 
         const originalCatalogId = catalog.id;
-        const originalCatalogType = catalog.type; // e.g., movie, series, tv, anime
-        let stremioFinalCatalogType = originalCatalogType; // What AIOLists will use for this catalog type
+        const originalCatalogType = catalog.type;
+        let stremioFinalCatalogType = originalCatalogType;
 
-        // Normalize types like 'tv' to 'series', or handle 'anime'
         if (originalCatalogType === 'tv') stremioFinalCatalogType = 'series';
-        // If it's a type Stremio doesn't natively show in main sections (like 'anime' directly),
-        // decide if you want to map it to 'series' or 'movie', or keep as 'all' / specific if your addon handles it.
-        // For simplicity, if it's not movie/series, map to 'all' or the closest if possible.
-        // Let's assume 'anime' might be treated as 'series' for broad compatibility or kept if 'all' type catalog.
-        // For this example, if not movie/series, we might need to be careful.
-        // Let's assume for now that if type is not movie/series, it might be problematic unless catalog.type='all'
         if (originalCatalogType !== 'movie' && originalCatalogType !== 'series' && originalCatalogType !== 'all') {
-            // console.warn(`[AIOLists ExternalAddon] Unhandled originalType '${originalCatalogType}' from catalog '${originalCatalogId}'. Defaulting AIOLists catalog type to 'all'.`);
-            stremioFinalCatalogType = 'all'; // Or map based on content if possible
+            stremioFinalCatalogType = 'all';
         }
 
-
-        // Create a unique key for tracking to handle cases where an addon might (incorrectly) reuse catalog IDs for different types
         const uniquenessTrackingKey = `${originalCatalogId}|${originalCatalogType}`;
         const instanceCount = (idUsageMap.get(uniquenessTrackingKey) || 0) + 1;
         idUsageMap.set(uniquenessTrackingKey, instanceCount);
 
-        // Construct a unique ID for this catalog within AIOLists
-        // Format: parentAddonId_originalCatalogId_originalCatalogType[_instanceIfDuplicate]
         let aiolistsUniqueCatalogId = `${this.manifest.id}_${originalCatalogId}_${originalCatalogType}`;
         if (instanceCount > 1) {
           aiolistsUniqueCatalogId += `_${instanceCount}`;
         }
         
-        // Check for 'search' requirement which makes catalog unusable for Browse
         const hasSearchRequirement = (catalog.extra || []).some(e => e.name === 'search' && e.isRequired);
         if (hasSearchRequirement) {
-            // console.log(`[AIOLists ExternalAddon] Skipping catalog '${catalog.name}' as it requires search.`);
-            return null; // Skip catalogs that require search input
+            return null;
         }
 
+        let processedExtraSupported = [];
+        const originalExtra = catalog.extraSupported || catalog.extra || [];
+        originalExtra.forEach(extraItem => {
+            if (extraItem.name === "genre") {
+                processedExtraSupported.push({ name: "genre" }); // No options stored
+            } else {
+                processedExtraSupported.push(extraItem);
+            }
+        });
 
         return {
-          id: aiolistsUniqueCatalogId,        // Unique ID within AIOLists for this catalog
-          originalId: originalCatalogId,      // ID from the source manifest
-          originalType: originalCatalogType,  // Type from the source manifest
+          id: aiolistsUniqueCatalogId,
+          originalId: originalCatalogId,
+          originalType: originalCatalogType,
           name: catalog.name || 'Unnamed Catalog',
-          type: stremioFinalCatalogType, // Stremio compatible type (movie, series, all)
-          extraSupported: catalog.extraSupported || catalog.extra || [], // Preserve extra params
-          extraRequired: catalog.extraRequired || (catalog.extra || []).filter(e => e.isRequired) // Preserve required extra
+          type: stremioFinalCatalogType,
+          extraSupported: processedExtraSupported, // MODIFIED LINE
+          extraRequired: catalog.extraRequired || (catalog.extra || []).filter(e => e.isRequired)
         };
-      }).filter(catalog => catalog !== null); // Filter out skipped catalogs
+      }).filter(catalog => catalog !== null);
 
       // Resolve logo and background URLs relative to the manifest's base URL if they are relative paths
       let resolvedLogo = this.manifest.logo;
