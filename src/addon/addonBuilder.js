@@ -193,7 +193,6 @@ async function createAddon(userConfig) {
     if ((typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean' || metadata.errorFetching) && shouldFetchMetadata) {
         let success = false;
         let fetchRetries = 0;
-        // metadata.errorFetching might be true from a previous failed attempt, so retry.
         if(metadata.errorFetching) delete metadata.errorFetching;
 
 
@@ -201,27 +200,24 @@ async function createAddon(userConfig) {
 
         while (!success && fetchRetries < MAX_METADATA_FETCH_RETRIES) {
             try {
-                // Pass only necessary parts of userConfig to avoid issues if full userConfig is mutated elsewhere
                 const tempUserConfigForMetadata = { 
                     apiKey: userConfig.apiKey, 
                     traktAccessToken: userConfig.traktAccessToken,
-                    traktRefreshToken: userConfig.traktRefreshToken, // For potential refresh within fetchTraktListItems
-                    traktExpiresAt: userConfig.traktExpiresAt,       // For potential refresh
-                    listsMetadata: {}, // Use a clean slate for this specific fetch's listsMetadata context if needed by downstream
-                    rpdbApiKey: null,  // Avoid RPDB calls during this metadata check
-                    // DO NOT pass the main listsMetadata here, it will be updated below
+                    traktRefreshToken: userConfig.traktRefreshToken, 
+                    traktExpiresAt: userConfig.traktExpiresAt,       
+                    listsMetadata: {}, 
+                    rpdbApiKey: null,  
                 };
 
-                let typeForMetaCheck = 'all'; // Default for fetching mixed content to check types
+                let typeForMetaCheck = 'all'; 
                 if (listInfo.isMovieList) typeForMetaCheck = 'movie';
                 else if (listInfo.isShowList) typeForMetaCheck = 'series';
                 
-                // More specific type hints for known Trakt recommendation/trending/popular lists
                 if (manifestListIdBase.startsWith('trakt_recommendations_') || manifestListIdBase.startsWith('trakt_trending_') || manifestListIdBase.startsWith('trakt_popular_')) {
                     if (manifestListIdBase.includes("_shows")) typeForMetaCheck = 'series';
                     else if (manifestListIdBase.includes("_movies")) typeForMetaCheck = 'movie';
                 }
-                if (manifestListIdBase === 'trakt_watchlist') typeForMetaCheck = 'all'; // For Trakt watchlist, 'all' fetches both
+                if (manifestListIdBase === 'trakt_watchlist') typeForMetaCheck = 'all'; 
 
                 const content = await fetchListContent(manifestListIdBase, tempUserConfigForMetadata, 0, null, typeForMetaCheck);
                 
@@ -246,7 +242,6 @@ async function createAddon(userConfig) {
                     await delay(currentRetryDelay);
                 } else {
                     console.error(`[addonBuilder] Failed to fetch metadata for ${manifestListIdBase} after ${MAX_METADATA_FETCH_RETRIES} attempts. Marking as no content or using stale if available.`);
-                    // Keep potentially stale hasMovies/hasShows if they existed, otherwise default to false
                     hasMovies = userConfig.listsMetadata[manifestListIdBase]?.hasMovies || false;
                     hasShows = userConfig.listsMetadata[manifestListIdBase]?.hasShows || false;
                     if (!userConfig.listsMetadata) userConfig.listsMetadata = {};
@@ -254,48 +249,54 @@ async function createAddon(userConfig) {
                         ...(userConfig.listsMetadata[manifestListIdBase] || {}), 
                         hasMovies, 
                         hasShows, 
-                        errorFetching: true, // Mark that the latest attempt failed
+                        errorFetching: true, 
                         lastChecked: new Date().toISOString()
                     };
                 }
             }
-        } // End of retry while loop
+        } 
 
-        // Apply delay only if metadata was fetched for this list and it's an MDBList or Trakt list
         if (shouldFetchMetadata) {
             if (listInfo.source === 'mdblist') {
                 console.log(`[addonBuilder] Processed MDBList ${manifestListIdBase}. Waiting ${DELAY_BETWEEN_DIFFERENT_MDBLISTS_MS}ms before next list metadata fetch.`);
                 await delay(DELAY_BETWEEN_DIFFERENT_MDBLISTS_MS);
-            } else if (listInfo.source === 'trakt' && !manifestListIdBase.startsWith('traktpublic_')) { // Assuming Trakt public lists don't need this delay
+            } else if (listInfo.source === 'trakt' && !manifestListIdBase.startsWith('traktpublic_')) { 
                 console.log(`[addonBuilder] Processed Trakt list ${manifestListIdBase}. Waiting ${DELAY_BETWEEN_DIFFERENT_TRAKT_LISTS_MS}ms.`);
                 await delay(DELAY_BETWEEN_DIFFERENT_TRAKT_LISTS_MS);
             }
         }
-    } // End of if metadata needs fetching
+    } 
 
-    // Add to manifest catalogs
     if (hasMovies || hasShows) {
       const isMerged = (hasMovies && hasShows) ? (mergedLists[manifestListIdBase] !== false) : false;
-      const commonCatalogProps = {
+      
+      const catalogExtra = [];
+      const catalogExtraSupported = [];
+
+      catalogExtra.push({ name: "skip" });
+      catalogExtraSupported.push("skip");
+
+      if (includeGenresInManifest) {
+        catalogExtra.push({ name: "genre", options: staticGenres });
+        catalogExtraSupported.push("genre");
+      }
+      
+      const finalCatalogProps = {
         name: displayName,
-        extraSupported: ["skip"],
+        extra: catalogExtra,
+        extraSupported: catalogExtraSupported,
         extraRequired: [],
       };
-      if (includeGenresInManifest) {
-        commonCatalogProps.extraSupported.push("genre");
-        commonCatalogProps.genres = staticGenres;
-      }
 
       if (hasMovies && hasShows && isMerged) {
-        manifest.catalogs.push({ id: manifestListIdBase, type: 'all', ...commonCatalogProps });
+        manifest.catalogs.push({ id: manifestListIdBase, type: 'all', ...finalCatalogProps });
       } else {
-        if (hasMovies) manifest.catalogs.push({ id: manifestListIdBase, type: 'movie', ...commonCatalogProps });
-        if (hasShows) manifest.catalogs.push({ id: manifestListIdBase, type: 'series', ...commonCatalogProps });
+        if (hasMovies) manifest.catalogs.push({ id: manifestListIdBase, type: 'movie', ...finalCatalogProps });
+        if (hasShows) manifest.catalogs.push({ id: manifestListIdBase, type: 'series', ...finalCatalogProps });
       }
     }
-  } // End of for...of activeListsInfo
+  }
 
-  // Process imported addons (URL imports and manifest imports)
   Object.values(importedAddons || {}).forEach(addon => {
     const addonGroupId = String(addon.id);
     if (removedListsSet.has(addonGroupId) || hiddenListsSet.has(addonGroupId)) {
@@ -306,23 +307,30 @@ async function createAddon(userConfig) {
     const isTraktPublicList = !!addon.isTraktPublicList;
 
     if (isMDBListUrlImport || isTraktPublicList) { 
-      if (isMDBListUrlImport && !apiKey) return; // Skip if MDBList key missing for MDBList URL import
+      if (isMDBListUrlImport && !apiKey) return;
       
-      // For URL imports, hasMovies/hasShows is determined at import time and stored in addon object
       if (addon.hasMovies || addon.hasShows) { 
         let displayName = customListNames[addonGroupId] || addon.name;
         const canBeMerged = addon.hasMovies && addon.hasShows;
         const isMerged = canBeMerged ? (mergedLists?.[addonGroupId] !== false) : false;
         
+        const catalogExtraForUrlImport = [];
+        const catalogExtraSupportedForUrlImport = [];
+
+        catalogExtraForUrlImport.push({ name: "skip" });
+        catalogExtraSupportedForUrlImport.push("skip");
+
+        if (includeGenresInManifest) {
+            catalogExtraForUrlImport.push({ name: "genre", options: staticGenres });
+            catalogExtraSupportedForUrlImport.push("genre");
+        }
+        
         const catalogPropsForUrlImport = {
             name: displayName,
-            extraSupported: ["skip"],
+            extra: catalogExtraForUrlImport,
+            extraSupported: catalogExtraSupportedForUrlImport,
             extraRequired: []
         };
-        if (includeGenresInManifest) {
-            catalogPropsForUrlImport.extraSupported.push("genre");
-            catalogPropsForUrlImport.genres = staticGenres;
-        }
 
         if (isMerged) { 
           manifest.catalogs.push({ id: addonGroupId, type: 'all', ...catalogPropsForUrlImport });
@@ -331,48 +339,61 @@ async function createAddon(userConfig) {
           if (addon.hasShows) manifest.catalogs.push({ id: addonGroupId, type: 'series', ...catalogPropsForUrlImport });
         }
       }
-    } else if (addon.catalogs && addon.catalogs.length > 0) { // Handle Manifest imports
+    } else if (addon.catalogs && addon.catalogs.length > 0) { 
       (addon.catalogs || []).forEach(catalog => {
           const catalogIdForManifest = String(catalog.id);
           if (removedListsSet.has(catalogIdForManifest) || hiddenListsSet.has(catalogIdForManifest)) return;
           
           let displayName = customListNames[catalogIdForManifest] || catalog.name;
           
-          let tempExtraSupported = (catalog.extraSupported || catalog.extra || [])
-              .map(e => (typeof e === 'string' ? e : ({ ...e }))) // Ensure deep copy if objects
-              .filter(e => { // Remove skip/genre if already there, we'll add them controlledly
-                  if (typeof e === 'string') return e !== 'skip' && e !== 'genre';
-                  if (typeof e === 'object' && e !== null) return e.name !== 'skip' && e.name !== 'genre';
-                  return true; 
-              });
+          const finalExtraForImported = [];
+          const finalExtraSupportedForImported = [];
 
-          let extraSupportedForCatalog = ['skip']; // Always support skip
-          extraSupportedForCatalog.push(...tempExtraSupported); // Add other supported extras from original manifest
+          finalExtraForImported.push({ name: "skip" });
+          finalExtraSupportedForImported.push("skip");
 
-          let genresForThisCatalog = undefined; 
-          if (includeGenresInManifest) {
-              if (!extraSupportedForCatalog.some(e => (typeof e === 'string' && e === 'genre') || (typeof e === 'object' && e.name === 'genre'))) {
-                 extraSupportedForCatalog.push('genre'); // Add genre if not already declared as supported
+          const originalExtras = (catalog.extraSupported || catalog.extra || []);
+          let importedGenreOptions = null;
+
+          originalExtras.forEach(ext => {
+              const extName = (typeof ext === 'string') ? ext : ext.name;
+              const extOptions = (typeof ext === 'object' && ext.options) ? ext.options : undefined;
+              const extIsRequired = (typeof ext === 'object' && ext.isRequired) ? ext.isRequired : false;
+
+              if (extName === "skip") return; 
+
+              if (extName === "genre") {
+                  if (extOptions) importedGenreOptions = extOptions;
+                  return; 
               }
-              genresForThisCatalog = staticGenres; // Provide our static list of genres
+              
+              if (typeof ext === 'string') {
+                  finalExtraForImported.push({ name: ext });
+              } else { // ext is an object
+                  finalExtraForImported.push({ name: extName, options: extOptions, isRequired: extIsRequired });
+              }
+              finalExtraSupportedForImported.push(extName);
+          });
+
+          if (includeGenresInManifest) {
+              finalExtraForImported.push({ name: "genre", options: importedGenreOptions || staticGenres });
+              if (!finalExtraSupportedForImported.includes("genre")) {
+                  finalExtraSupportedForImported.push("genre");
+              }
           }
           
-          extraSupportedForCatalog = [...new Set(extraSupportedForCatalog.map(e => typeof e === 'string' ? e : e.name))];
-          // Ensure final extraSupported is an array of strings or correct objects if needed by Stremio SDK
-
           manifest.catalogs.push({
               id: catalogIdForManifest, 
               type: catalog.type, 
               name: displayName,
-              extraSupported: extraSupportedForCatalog,
-              extraRequired: catalog.extraRequired || [], 
-              genres: genresForThisCatalog // Add genres if applicable
+              extra: finalExtraForImported,
+              extraSupported: [...new Set(finalExtraSupportedForImported)],
+              extraRequired: catalog.extraRequired || []
           });
       });
     }
   });
 
-  // Sort catalogs based on listOrder
   if (listOrder && listOrder.length > 0) {
     const orderMap = new Map(listOrder.map((id, index) => [String(id), index]));
     manifest.catalogs.sort((a, b) => {
@@ -380,14 +401,13 @@ async function createAddon(userConfig) {
       const indexB = orderMap.get(String(b.id));
       if (indexA !== undefined && indexB !== undefined) {
         if (indexA !== indexB) return indexA - indexB;
-        // If same order index, sort by type (movie then series)
         if (a.type === 'movie' && b.type === 'series') return -1;
         if (a.type === 'series' && b.type === 'movie') return 1;
         return 0;
       }
-      if (indexA !== undefined) return -1; // Ordered items first
-      if (indexB !== undefined) return 1;  // Ordered items first
-      return (a.name || '').localeCompare(b.name || ''); // Fallback sort for unordered items
+      if (indexA !== undefined) return -1; 
+      if (indexB !== undefined) return 1;  
+      return (a.name || '').localeCompare(b.name || ''); 
     });
   }
 
@@ -408,12 +428,11 @@ async function createAddon(userConfig) {
     
     let metas = await convertToStremioFormat(itemsResult, userConfig.rpdbApiKey);
 
-    // Filter by type if not 'all'
     if (type !== 'all' && (type === 'movie' || type === 'series')) {
       metas = metas.filter(meta => meta.type === type);
     } 
     console.log(`[CatalogHandler] Returning ${metas.length} metas for ID=${id}, Type=${type}`);
-    return Promise.resolve({ metas, cacheMaxAge: isWatchlist(id) ? 0 : (5 * 60) }); // 5 min cache for non-watchlists
+    return Promise.resolve({ metas, cacheMaxAge: isWatchlist(id) ? 0 : (5 * 60) }); 
   });
 
   builder.defineMetaHandler(({ type, id }) => {
