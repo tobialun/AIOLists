@@ -4,25 +4,26 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AIOLists</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="/assets/logo.ico" type="image/x-icon">
 </head>
 <body>
   <div class="container">
-    <h1>AIOLists Stremio Addon Configuration</h1>
-
     <div id="status" class="status hidden"></div>
 
-    <!-- API Keys Section -->
     <div class="api-section">
       <div class="section-header">
         <h2>API Keys</h2>
-        <span id="apiKeysNotification" class="section-notification">API keys saved successfully ✅</span>
+        <span id="apiKeysNotification" class="section-notification"></span>
       </div>
       <div class="form-group">
         <label for="apiKey">MDBList:</label>
         <div class="input-container">
           <input type="password" id="apiKey" placeholder="Enter your MDBList API key">
-          <div id="mdblistConnected" class="connected-state">
+          <div id="mdblistConnected" class="connected-state" style="display: none;">
             <span class="connected-text"></span>
             <button type="button" class="disconnect-btn" onclick="window.disconnectMDBList()">Disconnect</button>
           </div>
@@ -32,7 +33,7 @@
         <label for="rpdbApiKey">RPDB:</label>
         <div class="input-container">
           <input type="password" id="rpdbApiKey" placeholder="Enter your RPDB API key">
-          <div id="rpdbConnected" class="connected-state">
+          <div id="rpdbConnected" class="connected-state" style="display: none;">
             <span class="connected-text"></span>
             <button type="button" class="disconnect-btn" onclick="window.disconnectRPDB()">Disconnect</button>
           </div>
@@ -40,106 +41,84 @@
       </div>
     </div>
 
-    <!-- Connections Section -->
     <div class="api-section">
       <div class="section-header">
         <h2>Connections</h2>
         <span id="connectionsNotification" class="section-notification"></span>
       </div>
       <div class="connections-row">
-        <!-- Trakt Connection -->
         <div id="traktConnection">
           <a href="/api/trakt/login" id="traktLoginBtn" class="trakt-login-btn" target="_blank">
             Connect to Trakt
             <img src="https://walter.trakt.tv/hotlink-ok/public/favicon.ico" alt="Trakt.tv">
           </a>
-          <div id="traktConnectedState" class="connected-state">
+          <div id="traktConnectedState" class="connected-state" style="display: none;">
             <b>Connected to Trakt.tv</b>
             <button onclick="window.disconnectTrakt()" class="disconnect-btn">Disconnect</button>
           </div>
-          <div id="traktPinContainer">
+          <div id="traktPinContainer" style="display: none;">
             <input type="text" id="traktPin" placeholder="Enter PIN" maxlength="8">
-            <button id="submitTraktPin" class="trakt-login-btn">Submit PIN</button>
+            <button id="submitTraktPin" class="trakt-login-btn action-btn">Submit PIN</button>
           </div>
         </div>
       </div>
       <div id="traktStatus"></div>
     </div>
 
-    <!-- Import Section -->
-    <div class="import-section">
+    <div class="import-section api-section">
       <div class="section-header">
-        <h2>Import Lists from URL</h2>
+        <h2>Import</h2>
         <span id="importNotification" class="section-notification"></span>
       </div>
-      
-      <!-- MDBList URL Import -->
+      <p class="info-text">Supports Trakt.tv and MDBList URLs, External Addon Manifest URLs, AIOLists config hashes.</p>
       <div class="form-group">
-        <label for="mdblistUrl">MDBList:</label>
+        <label for="universalImportInput">Link/Hash:</label>
         <div class="input-container">
-          <input type="text" id="mdblistUrl" placeholder="https://mdblist.com/lists/username/list-name">
-          <button type="button" id="importMDBListBtn" class="action-btn">Import</button>
+          <input type="text" id="universalImportInput" placeholder="Paste URL or AIOLists config hash here">
         </div>
       </div>
-      
-      <!-- External Addon Import -->
-      <div class="form-group">
-        <label for="manifestUrl">Addons:</label>
-        <div class="input-container">
-          <input type="text" id="manifestUrl" placeholder="https://url.com/manifest.json">
-          <button type="button" id="importAddonBtn" class="action-btn">Import</button>
-        </div>
-      </div>
-      
-      <div id="importStatus" class="status-message"></div>
-      
-      <!-- Imported Addons List -->
-      <div id="importedAddons" class="imported-addons">
-        <h3>Imported Lists</h3>
+      <div id="importStatus" class="status-message" style="display:none;"></div>
+      <div id="importedAddons" class="imported-addons hidden">
+        <h3>Imported Addon Groups (from Manifest URLs)</h3>
         <div id="addonsList" class="addons-list"></div>
       </div>
     </div>
+    
+    <div class="settings-section api-section">
+        <div class="collapsible-header" id="settingsHeader">
+            <span class="collapsible-arrow">▶</span>
+            <h2>Settings</h2>
+            <span id="settingsNotification" class="section-notification"></span>
+        </div>
+        <div class="collapsible-content" id="settingsContent">
+            <div class="setting-item">
+                <button type="button" id="toggleGenreFilterBtn" class="action-btn">Disable Genre Filter</button>
+                <span id="genreFilterStatusInfo" class="setting-info-text">Genre filters are currently ENABLED.</span>
+            </div>
+            <div class="setting-item" id="copyConfigHashContainer">
+            </div>
+        </div>
+    </div>
 
-    <!-- Manage Lists Section -->
     <div id="listContainer" class="list-container hidden">
       <div class="list-heading">
         <h2>Manage Your Lists</h2>
-        <span id="listsNotification" class="saved-indicator">Lists updated successfully ✅</span>
+        <span id="listsNotification" class="section-notification"></span>
       </div>
-      
-      <!-- Icon Legend -->
       <div class="icon-legend">
-        <div class="legend-item">
-          <span class="eye-icon eye-open"></span>
-          <span class="legend-text">Show/Hide list from main view (still accessible in Discover)</span>
-        </div>
-        <div class="legend-item">
-          <span class="legend-icon">❌</span>
-          <span class="legend-text">Remove list</span>
-        </div>
-        <div class="legend-item">
-          <span class="legend-icon">✏️</span>
-          <span class="legend-text">Edit list name</span>
-        </div>
-        <div class="legend-item">
-          <span class="legend-icon">☰</span>
-          <span class="legend-text">Drag to rearrange lists</span>
-        </div>
-        <div class="legend-item">
-          <span class="merge-toggle merged" style="margin: 0;">Merged</span>
-          <span class="legend-text">Toggle between merged and split view for lists with both movies and series</span>
-        </div>
+        <div class="legend-item"><span class="legend-icon-text">☰</span><span class="legend-text">Reorder</span></div>
+        <div class="legend-item"><span class="merge-toggle merged" style="margin: 0; height:24px; padding: 0 8px; font-size:11px;">Merged</span><span class="legend-text">Merge/Split lists with movies and shows</span></div>
+        <div class="legend-item"><span class="legend-icon-text">✏️</span><span class="legend-text">Edit Name</span></div>
+        <div class="legend-item"><span class="eye-icon eye-open-svg"></span><span class="legend-text">Show/Hide</span></div>
+        <div class="legend-item"><span class="legend-icon-text">❌</span><span class="legend-text">Remove</span></div>
       </div>
-      
       <ul id="listItems"></ul>
     </div>
 
-    <!-- Install in Stremio Section -->
-    <p class="notice-text">Notice: If your config is too large the URL will become too long to auto import. Copy and paste it manually instead.</p>
-    <p class="notice-text">ALSO DON'T SHARE URL! It got your encoded api keys in it.</p>
+    <p class="notice-text">Notice: If your config is too large the URL will become too long to auto import. Copy and paste it manually instead. Your configuration URL contains your (encoded) API keys; do not share it.</p>
     <div id="addonInfo" class="addon-info">
       <div class="stremio-buttons">
-        <a href="" id="updateStremioBtn" class="stremio-refresh-btn">Install/Upgrade in Stremio</a>
+        <a href="" id="updateStremioBtn" class="stremio-refresh-btn">Install/Update in Stremio</a>
         <button id="copyManifestBtn" class="copy-manifest-btn" title="Copy Manifest URL">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
             <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/>
