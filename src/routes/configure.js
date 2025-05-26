@@ -9,4 +9,8 @@ module.exports = function(router) {
   router.get('/configure', (req, res) => {
     res.sendFile(path.join(__dirname, '..', '..', 'public', 'index.html'));
   });
+
+  router.get('/import-shared/:shareableHash', (req, res) => {
+    res.sendFile(path.join(__dirname, '..', '..', 'public', 'index.html'));
+  });
 };

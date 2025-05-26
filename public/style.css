@@ -364,3 +364,39 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 .action-btn.active-setting:hover {
   background-color: #45a049;
 }
+
+.list-item.requires-connection {
+  opacity: 0.6;
+  background-color: #f9f9f9; /* Slightly different background for clarity */
+}
+
+.info-icon {
+  margin-left: 8px;
+  color: #007bff; /* Or your preferred info color */
+  cursor: help;
+  font-size: 14px;
+  font-weight: bold;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  line-height: 1; /* Ensure text is centered vertically */
+}
+
+.list-item.requires-connection .drag-handle,
+.list-item.requires-connection .edit-button,
+.list-item.requires-connection .visibility-toggle,
+.list-item.requires-connection .merge-toggle,
+.list-item.requires-connection .sort-controls {
+  display: none !important; /* Hide actions if connection is required */
+}
+
+/* Adjustments for remove button when connection is required */
+.list-item.requires-connection .remove-list-button {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none; /* Make sure it's truly not clickable */
+}

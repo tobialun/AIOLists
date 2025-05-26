@@ -78,7 +78,37 @@ async function decompressConfig(compressed) {
   }
 }
 
+/**
+ * Creates a shareable version of the config by removing sensitive API keys.
+ * @param {Object} config The full configuration object.
+ * @returns {Object} A configuration object suitable for sharing.
+ */
+function createShareableConfig(config) {
+  const shareableConfig = JSON.parse(JSON.stringify(config)); // Deep clone
+
+  delete shareableConfig.apiKey;
+  delete shareableConfig.rpdbApiKey;
+  delete shareableConfig.traktAccessToken;
+  delete shareableConfig.traktRefreshToken;
+  delete shareableConfig.traktExpiresAt;
+  delete shareableConfig.mdblistUsername; // Also remove username if present
+
+  return shareableConfig;
+}
+
+/**
+ * Compress a shareable configuration object into a URL-safe string.
+ * @param {Object} config Configuration object to compress (should be pre-stripped of API keys).
+ * @returns {Promise<string>} URL-safe compressed string for sharing.
+ */
+async function compressShareableConfig(config) {
+  const shareable = createShareableConfig(config); // Ensure it's stripped
+  return compressConfig(shareable);
+}
+
 module.exports = {
   compressConfig,
   decompressConfig,
-}; 
+  createShareableConfig,
+  compressShareableConfig,
+};
