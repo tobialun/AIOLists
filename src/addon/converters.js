@@ -1,13 +1,6 @@
 // src/addon/converters.js
 const { batchFetchPosters } = require('../utils/posters');
 
-/**
- * Konverterar API-objekt till Stremio-format.
- * Denna funktion antar nu att 'items' är en redan paginerad lista med objekt.
- * @param {Object} listContent - Objekt som innehåller .movies och/eller .shows arrayer, eller en .metas array.
- * @param {string} rpdbApiKey - RPDB API-nyckel.
- * @returns {Promise<Array>} Array av Stremio meta-objekt.
- */
 async function convertToStremioFormat(listContent, rpdbApiKey = null) {
   let metas = [];
   if (!listContent) return metas;
@@ -16,11 +9,47 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null) {
   
   let itemsToProcess = [];
 
-  if (listContent.metas && Array.isArray(listContent.metas)) {
-    // Om redan i Stremio-format (från externa tillägg)
+  if (listContent.allItems && Array.isArray(listContent.allItems)) {
+    itemsToProcess = listContent.allItems.map(item => {
+        let imdbId = item.imdb_id || item.imdbid;
+        if (imdbId && !imdbId.startsWith('tt')) imdbId = `tt${imdbId}`;
+        if (!imdbId) return null;
+
+        const baseMeta = {
+            id: imdbId,
+            type: item.type,
+            name: item.title || item.name || `Untitled ${item.type}`,
+            poster: item.poster,
+            background: item.backdrop || item.background,
+            description: item.overview || item.description,
+            releaseInfo: item.year || item.release_year || 
+                         (item.release_date ? item.release_date.split('-')[0] : 
+                         (item.first_air_date ? item.first_air_date.split('-')[0] : undefined)),
+            imdbRating: item.imdbRating || (item.imdbrating ? (typeof item.imdbrating === 'number' ? item.imdbrating.toFixed(1) : item.imdbrating) : undefined),
+            runtime: item.runtime ? `${item.runtime}`.includes(' min') ? item.runtime : `${item.runtime} min` : undefined,
+            genres: item.genres || item.genre,
+            cast: item.cast,
+            director: item.director,
+            writer: item.writer,
+            awards: item.awards,
+            country: item.country,
+            trailers: item.trailers,
+            trailerStreams: item.trailerStreams,
+            dvdRelease: item.dvdRelease,
+            links: item.links,
+            popularity: item.popularity,
+            slug: item.slug,
+            behaviorHints: item.behaviorHints || { hasScheduledVideos: false },
+        };
+        if (item.type === 'series') {
+            baseMeta.status = item.status;
+        }
+        return baseMeta;
+    }).filter(item => item !== null);
+
+  } else if (listContent.metas && Array.isArray(listContent.metas)) {
     itemsToProcess = listContent.metas;
   } else {
-    // Bygg upp itemsToProcess från .movies och .shows
     const movies = listContent.movies || [];
     const shows = listContent.shows || [];
 
@@ -37,7 +66,7 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null) {
         background: movie.backdrop || movie.background,
         description: movie.overview || movie.description,
         releaseInfo: movie.year || movie.release_year || (movie.release_date ? movie.release_date.split('-')[0] : undefined),
-        imdbRating: movie.imdbRating || (movie.imdbrating ? movie.imdbrating.toFixed(1) : undefined),
+        imdbRating: movie.imdbRating || (movie.imdbrating ? (typeof movie.imdbrating === 'number' ? movie.imdbrating.toFixed(1) : movie.imdbrating) : undefined),
         runtime: movie.runtime ? `${movie.runtime}`.includes(' min') ? movie.runtime : `${movie.runtime} min` : undefined,
         genres: movie.genres || movie.genre,
         cast: movie.cast,
@@ -70,7 +99,7 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null) {
         background: show.backdrop || show.background,
         description: show.overview || show.description,
         releaseInfo: show.year || show.release_year || (show.first_air_date ? show.first_air_date.split('-')[0] : undefined),
-        imdbRating: show.imdbRating || (show.imdbrating ? show.imdbrating.toFixed(1) : undefined),
+        imdbRating: show.imdbRating || (show.imdbrating ? (typeof show.imdbrating === 'number' ? show.imdbrating.toFixed(1) : show.imdbrating) : undefined),
         runtime: show.runtime ? `${show.runtime}`.includes(' min') ? show.runtime : `${show.runtime} min` : undefined,
         genres: show.genres || show.genre,
         cast: show.cast,
@@ -92,7 +121,6 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null) {
     });
   }
   
-  // Ta bort undefined nycklar
   itemsToProcess.forEach(meta => {
     Object.keys(meta).forEach(key => meta[key] === undefined && delete meta[key]);
     if (meta.genres && typeof meta.genres === 'string') {

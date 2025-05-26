@@ -1,3 +1,4 @@
+// src/addon/addonBuilder.js
 const { addonBuilder } = require('stremio-addon-sdk');
 const { fetchTraktListItems, fetchTraktLists } = require('../integrations/trakt');
 const { fetchListItems: fetchMDBListItems, fetchAllLists: fetchAllMDBLists } = require('../integrations/mdblist');
@@ -21,12 +22,11 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
     if (parts.length >= 2) originalListIdForSortLookup = parts[1] === 'watchlist' ? 'watchlist' : parts[1];
   } else if (isUrlImport) {
     if (addonDetails.isMDBListUrlImport) originalListIdForSortLookup = addonDetails.mdblistId;
-    else if (addonDetails.isTraktPublicList) originalListIdForSortLookup = addonDetails.id; // or construct from traktUser/slug if needed
+    else if (addonDetails.isTraktPublicList) originalListIdForSortLookup = addonDetails.id; 
     else originalListIdForSortLookup = addonDetails.id;
-  } else if (importedAddons) { // For manifest sub-catalogs
+  } else if (importedAddons) { 
       let found = false;
       for (const addon of Object.values(importedAddons)) {
-          // Ensure we are not trying to find a sub-catalog within a URL import
           if (addon.isMDBListUrlImport || addon.isTraktPublicList) continue;
           
           const foundCatalog = addon.catalogs?.find(c => c.id === catalogIdFromRequest);
@@ -36,7 +36,7 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
               break;
           }
       }
-      if (!found && !originalListIdForSortLookup.startsWith('trakt_')) { // Default if not found
+      if (!found && !originalListIdForSortLookup.startsWith('trakt_')) { 
         originalListIdForSortLookup = catalogIdFromRequest;
       }
   }
@@ -48,7 +48,7 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
 
   let itemsResult;
 
-  if (isUrlImport) { // Check based on derived isUrlImport
+  if (isUrlImport) { 
     const addonConfig = importedAddons[catalogIdFromRequest];
     if (addonConfig.isTraktPublicList) {
       itemsResult = await fetchTraktListItems(
@@ -58,15 +58,15 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
     } else if (addonConfig.isMDBListUrlImport && apiKey) {
       itemsResult = await fetchMDBListItems(
         addonConfig.mdblistId, apiKey, listsMetadata, skip, sortPrefsForImported.sort, sortPrefsForImported.order,
-        true, genre // Pass true for isUrlImported
+        true, genre 
       );
     }
   }
 
 
-  if (!itemsResult && importedAddons) { // For manifest sub-catalogs
+  if (!itemsResult && importedAddons) { 
     for (const parentAddon of Object.values(importedAddons)) {
-      if (parentAddon.isMDBListUrlImport || parentAddon.isTraktPublicList) continue; // Skip URL imports when looking for sub-catalogs
+      if (parentAddon.isMDBListUrlImport || parentAddon.isTraktPublicList) continue; 
       const catalogEntry = parentAddon.catalogs?.find(c => String(c.id) === String(catalogIdFromRequest));
       if (catalogEntry) {
         const subCatalogSortPrefs = userConfig.sortPreferences?.[catalogEntry.originalId] || { sort: 'imdbvotes', order: 'desc' };
@@ -79,12 +79,21 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
   }
 
   if (!itemsResult && catalogIdFromRequest.startsWith('trakt_') && !catalogIdFromRequest.startsWith('traktpublic_') && traktAccessToken) {
-    const sortPrefs = sortPreferences?.[catalogIdFromRequest] ||
+    let sortPrefs = sortPreferences?.[originalListIdForSortLookup] || // Use originalListIdForSortLookup for Trakt native lists as well
                       (catalogIdFromRequest.startsWith('trakt_watchlist') ? { sort: 'added', order: 'desc'} : { sort: 'rank', order: 'asc' });
     
+    if (catalogIdFromRequest === 'trakt_watchlist' && itemTypeHintForFetching === null) { // Merged watchlist
+        sortPrefs.sort = 'added'; // Default to 'added' for merged watchlist Stremio view
+    }
+
+
     let actualItemTypeHint = itemTypeHintForFetching;
     if (catalogIdFromRequest.includes("_movies")) actualItemTypeHint = 'movie';
     if (catalogIdFromRequest.includes("_shows")) actualItemTypeHint = 'series';
+    if (catalogIdFromRequest === 'trakt_watchlist' && itemTypeHintForFetching === null) {
+      actualItemTypeHint = 'all'; // To use /sync/watchlist/all
+    }
+
 
     itemsResult = await fetchTraktListItems(
       catalogIdFromRequest, userConfig, skip, sortPrefs.sort, sortPrefs.order,
@@ -99,9 +108,15 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
       mdbListOriginalIdFromCatalog = 'watchlist';
     }
     const mdbListSortPrefs = sortPreferences?.[mdbListOriginalIdFromCatalog] || { sort: 'imdbvotes', order: 'desc' };
+    
+    let sortForMdbList = mdbListSortPrefs.sort;
+    if (mdbListOriginalIdFromCatalog === 'watchlist' && itemTypeHintForFetching === null) { // Merged MDBList watchlist
+        sortForMdbList = 'added'; // Assuming 'added' is a valid sort key for MDBList watchlist for recency
+    }
+
     itemsResult = await fetchMDBListItems(
-      mdbListOriginalIdFromCatalog, apiKey, listsMetadata, skip, mdbListSortPrefs.sort, mdbListSortPrefs.order,
-      false, genre // Pass false for isUrlImported for native MDBLists
+      mdbListOriginalIdFromCatalog, apiKey, listsMetadata, skip, sortForMdbList, mdbListSortPrefs.order,
+      false, genre 
     );
   }
   return itemsResult || null;
@@ -162,7 +177,6 @@ async function createAddon(userConfig) {
     let hasMovies = metadata.hasMovies === true;
     let hasShows = metadata.hasShows === true;
     
-    // Re-fetch metadata if missing, but only if necessary API keys are present
     let shouldFetchMetadata = true;
     if (listInfo.source === 'mdblist' && !apiKey) shouldFetchMetadata = false;
     if (listInfo.source === 'trakt' && !traktAccessToken) shouldFetchMetadata = false;
@@ -175,6 +189,8 @@ async function createAddon(userConfig) {
       if (manifestListIdBase === 'trakt_recommendations_shows' || manifestListIdBase === 'trakt_trending_shows' || manifestListIdBase === 'trakt_popular_shows') {
           typeForMetaCheck = 'series';
       }
+       if (manifestListIdBase === 'trakt_watchlist') typeForMetaCheck = 'all';
+
 
       const content = await fetchListContent(manifestListIdBase, tempUserConfigForMetadata, 0, null, typeForMetaCheck);
       hasMovies = content?.hasMovies || false;
@@ -182,7 +198,6 @@ async function createAddon(userConfig) {
       if (!userConfig.listsMetadata) userConfig.listsMetadata = {};
       userConfig.listsMetadata[manifestListIdBase] = { ...userConfig.listsMetadata[manifestListIdBase], hasMovies, hasShows };
     } else if (!shouldFetchMetadata && (typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean')) {
-        // If keys are missing and metadata isn't there, assume no content to avoid errors
         hasMovies = false;
         hasShows = false;
     }
@@ -208,28 +223,23 @@ async function createAddon(userConfig) {
         if (hasMovies) manifest.catalogs.push({ id: manifestListIdBase, type: 'movie', ...commonCatalogProps });
         if (hasShows) manifest.catalogs.push({ id: manifestListIdBase, type: 'series', ...commonCatalogProps });
       }
-    } else {
-        // console.log(`[DEBUG createAddon] SKIPPING ${manifestListIdBase} (${displayName}) from manifest because hasMovies and hasShows are both false.`);
     }
   }
 
   Object.values(importedAddons || {}).forEach(addon => {
     const addonGroupId = String(addon.id);
     if (removedListsSet.has(addonGroupId) || hiddenListsSet.has(addonGroupId)) {
-        return; // Skip if the entire addon group is hidden/removed
+        return; 
     }
 
     const isMDBListUrlImport = !!addon.isMDBListUrlImport;
     const isTraktPublicList = !!addon.isTraktPublicList;
 
-    if (isMDBListUrlImport || isTraktPublicList) { // Handle URL imports
-      // If API keys are missing for this URL import type, skip adding to manifest
+    if (isMDBListUrlImport || isTraktPublicList) { 
       if (isMDBListUrlImport && !apiKey) return;
-      // Trakt public lists don't need user's Trakt token, so no check here for traktAccessToken
-
-      if (addon.hasMovies || addon.hasShows) { // This check is from the stored addon config
+      
+      if (addon.hasMovies || addon.hasShows) { 
         let displayName = customListNames[addonGroupId] || addon.name;
-        // Only allow merge if addon has both movies and shows
         const canBeMerged = addon.hasMovies && addon.hasShows;
         const isMerged = canBeMerged ? (mergedLists?.[addonGroupId] !== false) : false;
         
@@ -244,14 +254,14 @@ async function createAddon(userConfig) {
             catalogPropsForUrlImport.genres = staticGenres;
         }
 
-        if (isMerged) { // This will only be true if canBeMerged is true
+        if (isMerged) { 
           manifest.catalogs.push({ id: addonGroupId, type: 'all', ...catalogPropsForUrlImport });
         } else {
           if (addon.hasMovies) manifest.catalogs.push({ id: addonGroupId, type: 'movie', ...catalogPropsForUrlImport });
           if (addon.hasShows) manifest.catalogs.push({ id: addonGroupId, type: 'series', ...catalogPropsForUrlImport });
         }
       }
-    } else if (addon.catalogs && addon.catalogs.length > 0) { // Handle Manifest imports (sub-catalogs)
+    } else if (addon.catalogs && addon.catalogs.length > 0) { 
       (addon.catalogs || []).forEach(catalog => {
           const catalogIdForManifest = String(catalog.id);
           if (removedListsSet.has(catalogIdForManifest) || hiddenListsSet.has(catalogIdForManifest)) return;
@@ -323,12 +333,12 @@ async function createAddon(userConfig) {
     if (!itemsResult) {
         return Promise.resolve({ metas: [] });
     }
-
+    
     let metas = await convertToStremioFormat(itemsResult, userConfig.rpdbApiKey);
 
     if (type !== 'all' && (type === 'movie' || type === 'series')) {
       metas = metas.filter(meta => meta.type === type);
-    } // No specific else for 'all' or other types here, they are passed through
+    } 
 
     if (genre && metas.length > 0) {
         const lowerGenre = String(genre).toLowerCase();
@@ -339,7 +349,7 @@ async function createAddon(userConfig) {
 
   builder.defineMetaHandler(({ type, id }) => {
     if (!id.startsWith('tt')) return Promise.resolve({ meta: null });
-    return Promise.resolve({ meta: { id, type, name: "Loading details..." } }); // Basic meta, Cinemeta enriches it
+    return Promise.resolve({ meta: { id, type, name: "Loading details..." } }); 
   });
 
   return builder.getInterface();
