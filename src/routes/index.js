@@ -13,4 +13,6 @@ module.exports = function(app) {
   app.use('/api', apiRouter); // För /api/config/create, /api/validate-keys etc.
   app.use('/', configureRouter); // För /, /configure
   app.use('/', apiRouter); // För /:configHash/* rutter
+
+  return { apiRouter, configureRouter };
 };

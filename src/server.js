@@ -6,21 +6,27 @@ const configureRoutes = require('./routes');
 
 async function initializeApp() {
   try {
+    console.log("Initializing Express app (Worker env:", process.env.FOR_WORKERS,")");
     const app = express();
 
     app.use(cors());
     app.use(express.json());
-    app.use(express.static(path.join(__dirname, '..', 'public')));
+    if (process.env.FOR_WORKERS !== 'true') {
+        app.use(express.static(path.join(__dirname, '..', 'public')));
+    }
 
-    configureRoutes(app);
-    
-    app.listen(PORT, () => {
-      if (!IS_PRODUCTION) {
-        console.log(`AIOLists Stremio Addon running on port ${PORT}`);
-        console.log(`Admin panel: http://localhost:${PORT}/configure`);
+    const routers = configureRoutes(app);
+    app.routes = routers; 
+
+    if (process.env.FOR_WORKERS !== 'true') {
+      app.listen(PORT, () => {
+        if (!IS_PRODUCTION) {
+          console.log(`AIOLists Stremio Addon running on port ${PORT}`);
+          console.log(`Admin panel: http://localhost:${PORT}/configure`);
+        }
+      });
       }
-    });
-    
+
     return app;
   } catch (err) {
     if (!IS_PRODUCTION) {
@@ -30,7 +36,7 @@ async function initializeApp() {
   }
 }
 
-if (require.main === module) {
+if (require.main === module && process.env.FOR_WORKERS !== 'true') {
   initializeApp().catch(err => {
     console.error('Applikationen failed to start:', err);
     process.exit(1);
