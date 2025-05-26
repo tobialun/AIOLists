@@ -32,10 +32,10 @@ async function fetchAllLists(apiKey) {
       console.error(`Error fetching MDBList ${endpoint.type} lists:`, err.message);
       if (err.response && (err.response.status === 503 || err.response.status === 429)) {
         console.log(`Rate limit or server error for ${endpoint.type}, adding a longer delay...`);
-        await delay(1000);
+        await delay(1250);
       }
     }
-    await delay(1000);
+    await delay(1250);
   }
   allLists.push({ id: 'watchlist', name: 'My Watchlist', listType: 'W', isWatchlist: true });
   return allLists;
