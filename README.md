@@ -52,7 +52,6 @@ You can easily deploy AIOLists on Hugging Face Spaces using their Docker Space o
     FROM ghcr.io/sebastianmorel/aiolists:latest
     ENV PORT=7860
     ```
-    *(Note: The `:latest` tag assumes `docker-publish.yml` pushes a `latest` tag. If it only pushes versioned or branch tags like `dev`, you'll need to use one of those, e.g., `ghcr.io/sebastianmorel/aiolists:dev`)*
 5.  Hugging Face will expose your application, typically on port `7860` (as configured by `ENV PORT=7860`). Access the `/configure` path on the URL provided by Hugging Face.
 
 #### Deploying on Railway, Render, Fly.io, etc.
@@ -68,7 +67,7 @@ You can also run the addon directly with Node.js if you prefer not to use Docker
 
 1.  **Clone your fork:**
     ```bash
-    git clone [https://github.com/YOUR_USERNAME/AIOLists.git](https://github.com/YOUR_USERNAME/AIOLists.git)
+    git clone https://github.com/YOUR_USERNAME/AIOLists.git
     cd AIOLists
     ```
 2.  **Install dependencies:**
