@@ -23,12 +23,13 @@ const defaultConfig = {
 document.addEventListener('DOMContentLoaded', function() {
   const state = {
     configHash: null,
-    userConfig: { /* Initialized in loadConfiguration */ },
+    userConfig: { },
     currentLists: [],
     validationTimeout: null,
+    universalImportTimeout: null,
     isMobile: window.matchMedia('(max-width: 600px)').matches,
     appVersion: "...",
-    isPotentiallySharedConfig: false // New state variable
+    isPotentiallySharedConfig: false
   };
 
   const elements = {
@@ -43,10 +44,7 @@ document.addEventListener('DOMContentLoaded', function() {
     traktPinContainer: document.getElementById('traktPinContainer'),
     traktPin: document.getElementById('traktPin'),
     submitTraktPin: document.getElementById('submitTraktPin'),
-    listUrlInput: document.getElementById('listUrlInput'),
-    importListUrlBtn: document.getElementById('importListUrlBtn'),
-    manifestUrlInput: document.getElementById('manifestUrl'),
-    importAddonBtn: document.getElementById('importAddonBtn'),
+    universalImportInput: document.getElementById('universalImportInput'),
     importedAddonsContainer: document.getElementById('importedAddons'),
     addonsList: document.getElementById('addonsList'),
     listContainer: document.getElementById('listContainer'),
@@ -56,26 +54,28 @@ document.addEventListener('DOMContentLoaded', function() {
     apiKeysNotification: document.getElementById('apiKeysNotification'),
     connectionsNotification: document.getElementById('connectionsNotification'),
     importNotification: document.getElementById('importNotification'),
+    settingsNotification: document.getElementById('settingsNotification'),
     toggleGenreFilterBtn: document.getElementById('toggleGenreFilterBtn'),
     genreFilterStatusInfo: document.getElementById('genreFilterStatusInfo'),  
     listsNotification: document.getElementById('listsNotification'),
-    shareConfigBtn: null, // Will be created dynamically
-    loadSharedConfigInput: document.getElementById('loadSharedConfigInput'), // Assuming you add this input
-    loadSharedConfigBtn: document.getElementById('loadSharedConfigBtn'), // Assuming you add this button
+    copyConfigHashBtn: null,
+    copyConfigHashContainer: document.getElementById('copyConfigHashContainer'),
+    settingsSection: document.querySelector('.settings-section'),
+    settingsHeader: document.getElementById('settingsHeader'),
+    settingsContent: document.getElementById('settingsContent'),
+    settingsArrow: document.querySelector('.settings-section .collapsible-arrow')
   };
 
   async function init() {
     setupEventListeners();
     const pathParts = window.location.pathname.split('/').filter(Boolean);
     let initialConfigHash = null;
-    let action = null; // To detect if we are loading a shared config
+    let action = null;
 
     if (pathParts.length === 0 || (pathParts.length === 1 && pathParts[0] === 'configure')) {
-        // Base / or /configure
     } else if (pathParts.length >= 1 && pathParts[0] === 'import-shared' && pathParts[1]) {
         action = 'import-shared';
-        initialConfigHash = pathParts[1]; // This is the shared hash
-        // We'll create a new config based on this shared hash later
+        initialConfigHash = pathParts[1];
     } else if (pathParts.length >= 1 && pathParts[0] !== 'api' && pathParts[0] !== 'configure') {
         initialConfigHash = pathParts[0];
         if (pathParts.length === 1 || (pathParts.length > 1 && pathParts[1] !== 'configure')) {
@@ -85,23 +85,22 @@ document.addEventListener('DOMContentLoaded', function() {
     
     if (action === 'import-shared' && initialConfigHash) {
         try {
-            const response = await fetch('/api/config/create', { // Use POST for body
+            const response = await fetch('/api/config/create', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sharedConfig: initialConfigHash }) // Send shared hash in body
+                body: JSON.stringify({ sharedConfig: initialConfigHash })
             });
             const data = await response.json();
             if (data.success && data.configHash) {
                 state.configHash = data.configHash;
-                state.isPotentiallySharedConfig = true; // Mark that it was loaded from shared
-                window.history.replaceState({}, '', `/${state.configHash}/configure`); // Navigate to the new personal config URL
+                state.isPotentiallySharedConfig = true;
+                window.history.replaceState({}, '', `/${state.configHash}/configure`);
             } else {
                 throw new Error(data.error || 'Failed to create new config from shared hash');
             }
         } catch (error) {
             console.error('Init Error creating config from shared:', error);
             showNotification('apiKeys', `Error loading shared config: ${error.message}. Creating a new empty config.`, 'error', true);
-            // Fallback to creating a new empty config if shared loading fails
             await createNewEmptyConfig();
         }
     } else if (initialConfigHash) {
@@ -112,7 +111,11 @@ document.addEventListener('DOMContentLoaded', function() {
     
     await fetchAppVersionAndApplyStyles();
     updateURLAndLoadData();
-    createShareButton();
+    createCopyConfigHashButton();
+    if(elements.settingsContent) elements.settingsContent.style.display = 'none';
+    if(elements.settingsArrow) elements.settingsArrow.textContent = '▶';
+    if(elements.settingsSection) elements.settingsSection.classList.remove('open');
+
   }
 
   async function createNewEmptyConfig() {
@@ -131,25 +134,29 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   }
 
-
-  function createShareButton() {
-    if (elements.shareConfigBtn) return; // Already created
-    elements.shareConfigBtn = document.createElement('button');
-    elements.shareConfigBtn.id = 'shareConfigBtn';
-    elements.shareConfigBtn.textContent = 'Share Configuration';
-    elements.shareConfigBtn.title = 'Copy a shareable link (without API keys)';
-    elements.shareConfigBtn.className = 'action-btn'; // Use existing button styling
-    elements.shareConfigBtn.style.marginLeft = '10px';
-
-    const copyManifestBtn = document.getElementById('copyManifestBtn');
-    if (copyManifestBtn && copyManifestBtn.parentNode) {
-        copyManifestBtn.parentNode.insertBefore(elements.shareConfigBtn, copyManifestBtn.nextSibling);
-        elements.shareConfigBtn.addEventListener('click', handleShareConfig);
+  function createCopyConfigHashButton() {
+    if (elements.copyConfigHashBtnInstance) return; 
+  
+    elements.copyConfigHashBtnInstance = document.createElement('button');
+    elements.copyConfigHashBtnInstance.id = 'copyConfigHashBtn';
+    elements.copyConfigHashBtnInstance.textContent = 'Copy Config Hash'; // Changed text
+    elements.copyConfigHashBtnInstance.title = 'Copy a shareable config hash (API keys excluded)';
+    elements.copyConfigHashBtnInstance.className = 'action-btn';
+    
+    const descriptionText = document.createElement('span');
+    descriptionText.className = 'setting-info-text';
+    descriptionText.textContent = 'Copy config to share with others (API Keys excluded).';
+    descriptionText.style.marginLeft = '10px'; 
+  
+    if (elements.copyConfigHashContainer) {
+        elements.copyConfigHashContainer.appendChild(elements.copyConfigHashBtnInstance);
+        elements.copyConfigHashContainer.appendChild(descriptionText); 
+        elements.copyConfigHashBtnInstance.addEventListener('click', handleCopyConfigHash);
     }
   }
-
-  async function handleShareConfig() {
-    if (!state.configHash) return showNotification('lists', 'Configuration not ready to share.', 'error');
+  
+  async function handleCopyConfigHash() {
+    if (!state.configHash) return showNotification('settings', 'Configuration not ready to share.', 'error');
     try {
         const response = await fetch(`/${state.configHash}/shareable-hash`);
         const data = await response.json();
@@ -157,21 +164,22 @@ document.addEventListener('DOMContentLoaded', function() {
             throw new Error(data.error || 'Failed to generate shareable hash.');
         }
         await navigator.clipboard.writeText(data.shareableHash);
-
-        const originalText = elements.shareConfigBtn.textContent;
-        elements.shareConfigBtn.textContent = 'Hash Copied!';
-        elements.shareConfigBtn.disabled = true;
+  
+        const buttonInstance = elements.copyConfigHashBtnInstance || document.getElementById('copyConfigHashBtn');
+        const originalText = 'Copy Config Hash';
+        buttonInstance.textContent = 'Shareable Hash Copied!';
+        buttonInstance.disabled = true;
         setTimeout(() => {
-            elements.shareConfigBtn.textContent = originalText;
-            elements.shareConfigBtn.disabled = false;
+            buttonInstance.textContent = originalText;
+            buttonInstance.disabled = false;
         }, 2500);
-        showNotification('lists', 'Shareable hash copied to clipboard! Others can paste this into the "Load Shared" input.', 'success');
+        showNotification('settings', 'Shareable config hash copied to clipboard!', 'success');
     } catch (err) {
         console.error('Share config error:', err);
-        showNotification('lists', `Error: ${err.message}`, 'error', true);
+        showNotification('settings', `Error: ${err.message}`, 'error', true);
     }
   }
-
+  
   async function fetchAppVersionAndApplyStyles() {
     if (!state.configHash) {
         state.appVersion = "N/A";
@@ -222,7 +230,7 @@ document.addEventListener('DOMContentLoaded', function() {
   function updateURL() {
     if (!state.configHash) return;
     const expectedPath = `/${state.configHash}/configure`;
-    if (window.location.pathname !== expectedPath && !window.location.pathname.startsWith('/import-shared/')) { // Avoid changing URL during import
+    if (window.location.pathname !== expectedPath && !window.location.pathname.startsWith('/import-shared/')) {
         window.history.replaceState({}, '', expectedPath);
     }
   }
@@ -232,25 +240,62 @@ document.addEventListener('DOMContentLoaded', function() {
     elements.rpdbApiKeyInput.addEventListener('input', () => handleApiKeyInput(elements.rpdbApiKeyInput, 'rpdb'));
     elements.traktLoginBtn?.addEventListener('click', () => { elements.traktPinContainer.style.display = 'flex'; });
     elements.submitTraktPin?.addEventListener('click', handleTraktPinSubmit);
-    elements.importListUrlBtn?.addEventListener('click', handleListUrlImport);
-    elements.importAddonBtn?.addEventListener('click', handleAddonImport);
+    elements.universalImportInput.addEventListener('paste', handleUniversalPaste);
+    elements.universalImportInput.addEventListener('input', handleUniversalInputChange);
     elements.copyManifestBtn?.addEventListener('click', copyManifestUrlToClipboard);
     elements.toggleGenreFilterBtn?.addEventListener('click', handleToggleGenreFilter);
+    elements.settingsHeader?.addEventListener('click', toggleSettingsSection);
     window.addEventListener('resize', () => {
         const oldMobileState = state.isMobile;
         state.isMobile = window.matchMedia('(max-width: 600px)').matches;
         if (oldMobileState !== state.isMobile && state.currentLists.length > 0) { renderLists(); }
     });
-    // Event listener for loading shared config via input (optional, if you add an input field)
-    elements.loadSharedConfigBtn?.addEventListener('click', () => {
-        const sharedHash = elements.loadSharedConfigInput?.value?.trim();
-        if (sharedHash) {
-            window.location.href = `/import-shared/${sharedHash}`;
-        } else {
-            showNotification('apiKeys', 'Please paste a shared configuration link or hash.', 'error');
-        }
-    });
   }
+
+  function toggleSettingsSection() {
+    const isOpen = elements.settingsSection.classList.toggle('open');
+    elements.settingsContent.style.display = isOpen ? 'block' : 'none';
+    elements.settingsArrow.textContent = isOpen ? '▼' : '▶';
+  }
+  
+  async function handleUniversalPaste(event) {
+    event.preventDefault();
+    const pastedText = (event.clipboardData || window.clipboardData).getData('text').trim();
+    if (!pastedText) return;
+    elements.universalImportInput.value = pastedText;
+    showNotification('import', `Processing pasted input...`, 'info');
+    await processUniversalImport(pastedText);
+    elements.universalImportInput.value = '';
+  }
+
+  function handleUniversalInputChange() {
+    if(state.universalImportTimeout) clearTimeout(state.universalImportTimeout);
+    state.universalImportTimeout = setTimeout(async () => {
+        const value = elements.universalImportInput.value.trim();
+        if(!value) return;
+        showNotification('import', `Processing input...`, 'info');
+        await processUniversalImport(value);
+        elements.universalImportInput.value = '';
+    }, 1200);
+  }
+  
+  async function processUniversalImport(value) {
+    let MOCK_listUrlInput = {value: ''};
+    let MOCK_manifestUrlInput = {value: ''};
+
+    if ((value.includes('trakt.tv/users/') && value.includes('/lists/')) || value.includes('mdblist.com/lists/')) {
+        MOCK_listUrlInput.value = value;
+        await handleListUrlImport(MOCK_listUrlInput);
+    } else if (value.endsWith('/manifest.json') || value.includes('/manifest.json?')) {
+        MOCK_manifestUrlInput.value = value;
+        await handleAddonImport(MOCK_manifestUrlInput);
+    } else if (value.startsWith('H4sIAAAAAAA') && value.length > 200) {
+        window.location.href = `/import-shared/${value}`;
+    } else {
+        showNotification('import', 'Cannot determine input type or invalid. Supported: Trakt/MDBList URLs, manifest URLs, AIOLists config hashes.', 'error', true);
+    }
+  }
+
 
   async function handleToggleGenreFilter() {
     const newDisableState = !state.userConfig.disableGenreFilter;
@@ -272,10 +317,10 @@ document.addEventListener('DOMContentLoaded', function() {
         updateURL();
         updateStremioButtonHref();
       }
-      showNotification('lists', `Genre filter setting updated. Manifest will reflect this on next update/install.`, 'success');
+      showNotification('settings', `Genre filter setting updated.`, 'success');
     } catch (error) {
       console.error('Error updating genre filter setting:', error);
-      showNotification('lists', `Error: ${error.message}`, 'error', true);
+      showNotification('settings', `Error: ${error.message}`, 'error', true);
       state.userConfig.disableGenreFilter = !newDisableState;
       updateGenreFilterButtonText();
     }
@@ -286,11 +331,11 @@ document.addEventListener('DOMContentLoaded', function() {
       if (state.userConfig.disableGenreFilter) {
         elements.toggleGenreFilterBtn.textContent = 'Enable Genre Filter';
         elements.toggleGenreFilterBtn.classList.remove('active-setting');
-        elements.genreFilterStatusInfo.textContent = 'Genre filters are currently DISABLED. Manifest will be smaller.';
+        elements.genreFilterStatusInfo.textContent = 'Genre filters are DISABLED.';
       } else {
         elements.toggleGenreFilterBtn.textContent = 'Disable Genre Filter';
         elements.toggleGenreFilterBtn.classList.add('active-setting');
-        elements.genreFilterStatusInfo.textContent = 'Genre filters are currently ENABLED. Manifest includes genre lists.';
+        elements.genreFilterStatusInfo.textContent = 'Genre filters are ENABLED.';
       }
     }
   }
@@ -302,11 +347,10 @@ document.addEventListener('DOMContentLoaded', function() {
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(data.error || `Failed to load config data. Status: ${response.status}`);
 
-      state.userConfig = { // Ensure default structure first
-        ...defaultConfig, // Spread defaults
-        ...state.userConfig, // Spread existing state (in case of re-load)
-        ...data.config, // Spread fetched config
-        // Ensure Sets and other complex structures are correctly initialized
+      state.userConfig = {
+        ...defaultConfig,
+        ...state.userConfig,
+        ...data.config,
         hiddenLists: new Set(data.config.hiddenLists || []),
         removedLists: new Set(data.config.removedLists || []),
         importedAddons: data.config.importedAddons || {},
@@ -315,7 +359,7 @@ document.addEventListener('DOMContentLoaded', function() {
         availableSortOptions: (Array.isArray(data.config.availableSortOptions) && data.config.availableSortOptions.length > 0) ? data.config.availableSortOptions : [...defaultConfig.availableSortOptions],
         traktSortOptions: (Array.isArray(data.config.traktSortOptions) && data.config.traktSortOptions.length > 0) ? data.config.traktSortOptions : [...defaultConfig.traktSortOptions]
       };
-      state.isPotentiallySharedConfig = data.isPotentiallySharedConfig || false; // Update from server
+      state.isPotentiallySharedConfig = data.isPotentiallySharedConfig || false;
 
 
       const mdblistApiKey = state.userConfig.apiKey;
@@ -324,8 +368,8 @@ document.addEventListener('DOMContentLoaded', function() {
       updateApiKeyUI(elements.rpdbApiKeyInput, rpdbApiKey, 'rpdb');
       updateGenreFilterButtonText();
 
-      if (mdblistApiKey || rpdbApiKey) { // Only validate if keys are present
-        await validateAndSaveApiKeys(mdblistApiKey, rpdbApiKey, true); // silentCheck = true
+      if (mdblistApiKey || rpdbApiKey) {
+        await validateAndSaveApiKeys(mdblistApiKey, rpdbApiKey, true);
       }
       updateTraktUI(!!state.userConfig.traktAccessToken);
       await loadUserListsAndAddons();
@@ -346,9 +390,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
   async function validateAndSaveApiKeys(mdblistApiKeyToValidate, rpdbApiKeyToValidate, isInitialLoadOrSilentCheck = false) {
     try {
-      // Skip validation if keys are empty and it's a silent check (e.g. initial load of shared config)
       if (isInitialLoadOrSilentCheck && !mdblistApiKeyToValidate && !rpdbApiKeyToValidate) {
-          updateApiKeyUI(elements.apiKeyInput, '', 'mdblist', null, null); // Reset UI if keys are empty
+          updateApiKeyUI(elements.apiKeyInput, '', 'mdblist', null, null);
           updateApiKeyUI(elements.rpdbApiKeyInput, '', 'rpdb', null, null);
           return;
       }
@@ -367,7 +410,6 @@ document.addEventListener('DOMContentLoaded', function() {
       updateApiKeyUI(elements.apiKeyInput, mdblistApiKeyToValidate, 'mdblist', mdblistUsername, mdblistValid);
       updateApiKeyUI(elements.rpdbApiKeyInput, rpdbApiKeyToValidate, 'rpdb', null, rpdbValid);  
   
-      // Only save if keys are not empty or if they were previously set (to allow clearing)
       if (mdblistApiKeyToValidate || rpdbApiKeyToValidate || state.userConfig.apiKey || state.userConfig.rpdbApiKey) {
           const saveResponse = await fetch(`/${state.configHash}/apikey`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -382,14 +424,13 @@ document.addEventListener('DOMContentLoaded', function() {
           state.userConfig.apiKey = mdblistApiKeyToValidate;
           state.userConfig.rpdbApiKey = rpdbApiKeyToValidate;
           if (mdblistValid) state.userConfig.mdblistUsername = mdblistUsername;
-          else if (!mdblistApiKeyToValidate) delete state.userConfig.mdblistUsername; // Clear username if key is removed
+          else if (!mdblistApiKeyToValidate) delete state.userConfig.mdblistUsername;
       }
   
       if (!isInitialLoadOrSilentCheck) {
           showNotification('apiKeys', 'API keys updated.', 'success');
       }
   
-      // Reload lists if keys changed and it wasn't a silent check, or if keys became valid
       if (!isInitialLoadOrSilentCheck && ( (mdblistApiKeyToValidate && mdblistValid) || (rpdbApiKeyToValidate && rpdbValid) || state.userConfig.traktAccessToken) ) {
           await loadUserListsAndAddons();
       } else if (!isInitialLoadOrSilentCheck && !mdblistApiKeyToValidate && !state.userConfig.traktAccessToken) {
@@ -417,7 +458,7 @@ document.addEventListener('DOMContentLoaded', function() {
       inputElement.style.display = 'block';
       connectedDiv.style.display = 'none';
       inputElement.value = key || '';
-      if (isValid === false) { // Only add invalid if explicitly false (not null)
+      if (isValid === false) {
           if (inputElement.classList) inputElement.classList.add('invalid');
       }
     }
@@ -450,8 +491,8 @@ document.addEventListener('DOMContentLoaded', function() {
     } catch (error) { console.error('Trakt Error:', error); showNotification('connections', `Trakt Error: ${error.message}`, 'error', true); }
   }
 
-  async function handleListUrlImport() {
-    const url = elements.listUrlInput.value.trim();
+  async function handleListUrlImport(mockListUrlInput) {
+    const url = (mockListUrlInput || elements.listUrlInput).value.trim();
     if (!url) return showNotification('import', 'Please enter a MDBList or Trakt list URL.', 'error');
     try {
       const response = await fetch(`/${state.configHash}/import-list-url`, {
@@ -460,14 +501,14 @@ document.addEventListener('DOMContentLoaded', function() {
       if (!response.ok || !data.success) throw new Error(data.error || data.details || `Failed to import URL`);
       
       state.configHash = data.configHash;
-      updateURL(); updateStremioButtonHref(); elements.listUrlInput.value = '';
+      updateURL(); updateStremioButtonHref();
       showNotification('import', data.message || `${data.addon.name} imported.`, 'success');
       await loadUserListsAndAddons();
     } catch (error) { console.error('Import Error:', error); showNotification('import', `Import Error: ${error.message}`, 'error', true); }
   }
 
-  async function handleAddonImport() {
-    const manifestUrl = elements.manifestUrlInput.value.trim();
+  async function handleAddonImport(mockManifestUrlInput) {
+    const manifestUrl = (mockManifestUrlInput || elements.manifestUrlInput).value.trim();
     if (!manifestUrl) return showNotification('import', 'Please enter a manifest URL.', 'error');
     try {
       const response = await fetch(`/${state.configHash}/import-addon`, {
@@ -476,11 +517,12 @@ document.addEventListener('DOMContentLoaded', function() {
       if (!response.ok || !data.success) throw new Error(data.error || data.details || 'Failed to import addon');
 
       state.configHash = data.configHash;
-      updateURL(); updateStremioButtonHref(); elements.manifestUrlInput.value = '';
+      updateURL(); updateStremioButtonHref();
       showNotification('import', data.message || `${data.addon.name} imported.`, 'success');
       await loadUserListsAndAddons();
     } catch (error) { console.error('Addon Import Error:', error); showNotification('import', `Addon Import Error: ${error.message}`, 'error', true); }
   }
+
 
   async function loadUserListsAndAddons() {
     if (!state.configHash) return;
@@ -495,7 +537,7 @@ document.addEventListener('DOMContentLoaded', function() {
       state.userConfig.listsMetadata = data.listsMetadata || state.userConfig.listsMetadata;
       state.userConfig.availableSortOptions = data.availableSortOptions || defaultConfig.availableSortOptions;
       state.userConfig.traktSortOptions = data.traktSortOptions || defaultConfig.traktSortOptions;
-      state.isPotentiallySharedConfig = data.isPotentiallySharedConfig || false; // Update from server
+      state.isPotentiallySharedConfig = data.isPotentiallySharedConfig || false;
       
       if (data.newConfigHash && data.newConfigHash !== state.configHash) {
         state.configHash = data.newConfigHash;
@@ -540,83 +582,29 @@ document.addEventListener('DOMContentLoaded', function() {
     let apiKeyMissing = false;
 
     if (list.source === 'mdblist' || list.source === 'mdblist_url') {
-        needsApiKey = true;
-        apiKeyType = 'MDBList';
+        needsApiKey = true; apiKeyType = 'MDBList';
         if (!state.userConfig.apiKey) apiKeyMissing = true;
-    } else if (list.source === 'trakt' && (list.isTraktList || list.isTraktWatchlist)) { // Native Trakt lists/watchlist
-        needsApiKey = true;
-        apiKeyType = 'Trakt';
+    } else if (list.source === 'trakt' && (list.isTraktList || list.isTraktWatchlist)) {
+        needsApiKey = true; apiKeyType = 'Trakt';
         if (!state.userConfig.traktAccessToken) apiKeyMissing = true;
     }
-    // Trakt Public URL lists don't need user's Trakt token.
 
     if (apiKeyMissing && state.isPotentiallySharedConfig) {
         li.classList.add('requires-connection');
     }
 
-
-    const contentWrapper = document.createElement('div'); contentWrapper.className = 'list-item-content';
-    const dragHandle = document.createElement('span'); dragHandle.className = 'drag-handle'; dragHandle.innerHTML = '☰';
-    const mainCol = document.createElement('div'); mainCol.className = 'list-item-main';
-
-    const tag = document.createElement('span');
-    tag.className = `tag`;
-    let tagTypeChar = list.tag;
-    let tagImageSrc = list.tagImage;
-
-    if (!tagTypeChar) { // Fallback tag determination
-        if (list.source === 'mdblist' || list.source === 'mdblist_url') { tagTypeChar = list.isWatchlist ? 'W' : (list.listType || 'L');}
-        else if (list.source === 'trakt' || list.source === 'trakt_public') { tagTypeChar = 'T'; }
-        else { tagTypeChar = 'A'; } // Default for addon_manifest etc.
-    }
-    if ((list.source === 'trakt' || list.source === 'trakt_public') && !tagImageSrc) {
-        tagImageSrc = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico';
-    } else if (list.source === 'addon_manifest' && list.tagImage) { // Use addon logo for manifest sub-catalogs
-        tagImageSrc = list.tagImage;
-    }
-
-
-    tag.classList.add(tagTypeChar.toLowerCase());
-    if (tagImageSrc) {
-        const img = document.createElement('img'); img.src = tagImageSrc; img.alt = list.source || 'icon';
-        tag.appendChild(img);
-        if (list.source === 'trakt' || list.source === 'trakt_public' || list.source === 'addon_manifest') tag.style.backgroundColor = 'transparent';
-    } else {
-        tag.textContent = tagTypeChar;
-    }
-
-    const nameContainer = document.createElement('div'); nameContainer.className = 'name-container';
-    const nameSpan = document.createElement('span'); nameSpan.className = 'list-name';
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'list-name';
     let displayName = list.customName || list.name;
-    
-    // Determine if it's a URL imported type without relying on a single 'isUrlImportedType' flag
     const isEffectivelyUrlImported = list.source === 'mdblist_url' || list.source === 'trakt_public';
-
-    if (isEffectivelyUrlImported || list.source === 'addon_manifest') { // Apply to manifest sub-catalogs as well
+    if (isEffectivelyUrlImported || list.source === 'addon_manifest') {
         displayName = displayName.replace(/\s*\((Movies|Series)\)$/i, '').trim();
     }
     nameSpan.textContent = displayName;
-    nameContainer.appendChild(nameSpan);
-
-    // Info icon for shared configs requiring connection
-    if (apiKeyMissing && state.isPotentiallySharedConfig) {
-        const infoIcon = document.createElement('span');
-        infoIcon.className = 'info-icon';
-        infoIcon.innerHTML = '&#9432;'; // Circled i
-        infoIcon.title = `Connect to ${apiKeyType} to activate this list.`;
-        nameContainer.appendChild(infoIcon);
-        li.style.opacity = '0.6'; // Grey out
-        // Disable most actions for lists requiring connection
-        contentWrapper.style.pointerEvents = 'none'; // Disables clicks on content
-        dragHandle.style.display = 'none'; // Hide drag handle
-    }
-
 
     const removeBtn = createButton('❌', 'remove-list-button action-icon', (e) => { e.stopPropagation(); removeListItem(li, String(list.id)); }, 'Remove List Permanently');
-    if (apiKeyMissing && state.isPotentiallySharedConfig) { // Also disable remove button if keys missing
-        removeBtn.disabled = true;
-        removeBtn.style.opacity = '0.5';
-        removeBtn.style.cursor = 'not-allowed';
+    if (apiKeyMissing && state.isPotentiallySharedConfig) {
+        removeBtn.disabled = true; removeBtn.style.opacity = '0.5'; removeBtn.style.cursor = 'not-allowed';
     }
     
     const isHiddenInManifest = state.userConfig.hiddenLists.has(String(list.id));
@@ -626,15 +614,14 @@ document.addEventListener('DOMContentLoaded', function() {
         (e) => { e.stopPropagation(); toggleListVisibility(li, String(list.id)); },
         isHiddenInManifest ? 'Click to Show in Stremio Manifest' : 'Click to Hide from Stremio Manifest'
     );
-    if (apiKeyMissing && state.isPotentiallySharedConfig) visibilityToggleBtn.style.display = 'none';
+     if (apiKeyMissing && state.isPotentiallySharedConfig) visibilityToggleBtn.style.display = 'none';
 
 
     const editBtn = createButton('✏️', 'edit-button action-icon', (e) => { e.stopPropagation(); startNameEditing(li, list); }, 'Edit List Name');
-    if (apiKeyMissing && state.isPotentiallySharedConfig) editBtn.style.display = 'none';
-
+     if (apiKeyMissing && state.isPotentiallySharedConfig) editBtn.style.display = 'none';
 
     let mergeToggle = null;
-    const canMerge = list.hasMovies && list.hasShows; // Use hasMovies/hasShows from the list object
+    const canMerge = list.hasMovies && list.hasShows;
     if (canMerge) {
       const isListMerged = state.userConfig.mergedLists?.[String(list.id)] !== false;
       mergeToggle = createButton(isListMerged ? 'Merged' : 'Split', `merge-toggle ${isListMerged ? 'merged' : 'split'}`,
@@ -642,17 +629,13 @@ document.addEventListener('DOMContentLoaded', function() {
               e.stopPropagation();
               const currentIsMerged = state.userConfig.mergedLists?.[String(list.id)] !== false;
               const newMergedState = !currentIsMerged;
-              
               mergeToggle.textContent = newMergedState ? 'Merged' : 'Split';
               mergeToggle.className = `merge-toggle ${newMergedState ? 'merged' : 'split'}`;
-              
-              if (!state.userConfig.mergedLists) {
-                  state.userConfig.mergedLists = {};
-              }
+              if (!state.userConfig.mergedLists) state.userConfig.mergedLists = {};
               state.userConfig.mergedLists[String(list.id)] = newMergedState;
               await updateListPreference(String(list.id), 'merge', { merged: newMergedState });
           }, isListMerged ? 'Click to split into Movies/Series lists' : 'Click to merge into one list');
-      if (apiKeyMissing && state.isPotentiallySharedConfig) mergeToggle.style.display = 'none';
+       if (apiKeyMissing && state.isPotentiallySharedConfig) mergeToggle.style.display = 'none';
     }
 
     let sortControlsContainer = null;
@@ -666,9 +649,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const sortSelect = document.createElement('select'); sortSelect.className = 'sort-select';
         const currentSortOptions = (list.source === 'trakt' || list.source === 'trakt_public') ?
             (state.userConfig.traktSortOptions) : (state.userConfig.availableSortOptions);
-        
-        const sortPrefKey = String(list.originalId); // Use originalId for sort prefs key
-        let currentSortPref = state.userConfig.sortPreferences?.[sortPrefKey] || list.sortPreferences; // list.sortPreferences comes from server
+        const sortPrefKey = String(list.originalId);
+        let currentSortPref = state.userConfig.sortPreferences?.[sortPrefKey] || list.sortPreferences;
         if (!currentSortPref || typeof currentSortPref.sort === 'undefined' || typeof currentSortPref.order === 'undefined') {
              currentSortPref = { sort: (list.source === 'trakt' || list.source === 'trakt_public') ? 'rank' : 'imdbvotes', order: (list.source === 'trakt' || list.source === 'trakt_public') ? 'asc' : 'desc' };
         }
@@ -695,31 +677,106 @@ document.addEventListener('DOMContentLoaded', function() {
             updateSortAndOrder(e.target.value, cs.order || 'desc');
         };
         sortControlsContainer.append(orderToggleBtn, sortSelect);
-        if (apiKeyMissing && state.isPotentiallySharedConfig) sortControlsContainer.style.display = 'none';
+         if (apiKeyMissing && state.isPotentiallySharedConfig) sortControlsContainer.style.display = 'none';
     }
-
-    const actionsGroup = document.createElement('div'); actionsGroup.className = 'list-actions-group';
-    if (mergeToggle) actionsGroup.appendChild(mergeToggle);
-    if (sortControlsContainer) actionsGroup.appendChild(sortControlsContainer);
-    actionsGroup.appendChild(editBtn);
-    actionsGroup.appendChild(visibilityToggleBtn);
-    actionsGroup.appendChild(removeBtn); // Remove button is always last, may be disabled
-
+    
     if (state.isMobile) {
-        if (!(apiKeyMissing && state.isPotentiallySharedConfig)) contentWrapper.appendChild(dragHandle); // Only add drag handle if not greyed out
-        const topRow = document.createElement('div'); topRow.className = 'list-item-row list-item-row-top';
-        topRow.append(tag, nameContainer);
-        const bottomRow = document.createElement('div'); bottomRow.className = 'list-item-row list-item-row-bottom';
+        li.classList.add('mobile-list-item');
+        const mobileLayoutContainer = document.createElement('div');
+        mobileLayoutContainer.className = 'mobile-layout-container';
+
+        const dragHandle = document.createElement('span');
+        dragHandle.className = 'drag-handle mobile-drag-handle';
+        dragHandle.innerHTML = '☰';
+        if (apiKeyMissing && state.isPotentiallySharedConfig) dragHandle.style.display = 'none';
+
+
+        const contentRowsContainer = document.createElement('div');
+        contentRowsContainer.className = 'mobile-content-rows';
+
+        const topRow = document.createElement('div');
+        topRow.className = 'mobile-top-row';
+        const nameContainer = document.createElement('div');
+        nameContainer.className = 'name-container';
+        const tag = document.createElement('span'); tag.className = `tag`;
+        let tagTypeChar = list.tag; let tagImageSrc = list.tagImage;
+        if (!tagTypeChar) {
+            if (list.source === 'mdblist' || list.source === 'mdblist_url') { tagTypeChar = list.isWatchlist ? 'W' : (list.listType || 'L');}
+            else if (list.source === 'trakt' || list.source === 'trakt_public') { tagTypeChar = 'T'; }
+            else { tagTypeChar = 'A'; }
+        }
+        if ((list.source === 'trakt' || list.source === 'trakt_public') && !tagImageSrc) tagImageSrc = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico';
+        else if (list.source === 'addon_manifest' && list.tagImage) tagImageSrc = list.tagImage;
+        tag.classList.add(tagTypeChar.toLowerCase());
+        if (tagImageSrc) { const img = document.createElement('img'); img.src = tagImageSrc; img.alt = list.source || 'icon'; tag.appendChild(img); if (list.source === 'trakt' || list.source === 'trakt_public' || list.source === 'addon_manifest') tag.style.backgroundColor = 'transparent'; }
+        else { tag.textContent = tagTypeChar; }
+
+        nameContainer.appendChild(tag);
+        nameContainer.appendChild(nameSpan);
+        
+        if (apiKeyMissing && state.isPotentiallySharedConfig) {
+            const infoIcon = document.createElement('span'); infoIcon.className = 'info-icon'; infoIcon.innerHTML = '&#9432;'; infoIcon.title = `Connect to ${apiKeyType} to activate this list.`;
+            nameContainer.appendChild(infoIcon);
+        }
+        topRow.appendChild(nameContainer);
+        topRow.appendChild(editBtn);
+
+        const bottomRow = document.createElement('div');
+        bottomRow.className = 'mobile-bottom-row';
+        const actionsGroup = document.createElement('div');
+        actionsGroup.className = 'list-actions-group mobile-actions-group';
+        if (mergeToggle) actionsGroup.appendChild(mergeToggle);
+        if (sortControlsContainer) actionsGroup.appendChild(sortControlsContainer);
+        actionsGroup.appendChild(visibilityToggleBtn);
+        actionsGroup.appendChild(removeBtn);
         bottomRow.appendChild(actionsGroup);
-        mainCol.append(topRow, bottomRow);
+
+        contentRowsContainer.appendChild(topRow);
+        contentRowsContainer.appendChild(bottomRow);
+        mobileLayoutContainer.appendChild(dragHandle);
+        mobileLayoutContainer.appendChild(contentRowsContainer);
+        li.appendChild(mobileLayoutContainer);
+
     } else {
-        if (!(apiKeyMissing && state.isPotentiallySharedConfig)) contentWrapper.appendChild(dragHandle);
+        const contentWrapper = document.createElement('div'); contentWrapper.className = 'list-item-content';
+        const dragHandle = document.createElement('span'); dragHandle.className = 'drag-handle'; dragHandle.innerHTML = '☰';
+        if (apiKeyMissing && state.isPotentiallySharedConfig) dragHandle.style.display = 'none';
+
+        const mainCol = document.createElement('div'); mainCol.className = 'list-item-main';
+        const tag = document.createElement('span'); tag.className = `tag`;
+        let tagTypeChar = list.tag; let tagImageSrc = list.tagImage;
+        if (!tagTypeChar) {
+            if (list.source === 'mdblist' || list.source === 'mdblist_url') { tagTypeChar = list.isWatchlist ? 'W' : (list.listType || 'L');}
+            else if (list.source === 'trakt' || list.source === 'trakt_public') { tagTypeChar = 'T'; }
+            else { tagTypeChar = 'A'; }
+        }
+        if ((list.source === 'trakt' || list.source === 'trakt_public') && !tagImageSrc) tagImageSrc = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico';
+        else if (list.source === 'addon_manifest' && list.tagImage) tagImageSrc = list.tagImage;
+        tag.classList.add(tagTypeChar.toLowerCase());
+        if (tagImageSrc) { const img = document.createElement('img'); img.src = tagImageSrc; img.alt = list.source || 'icon'; tag.appendChild(img); if (list.source === 'trakt' || list.source === 'trakt_public' || list.source === 'addon_manifest') tag.style.backgroundColor = 'transparent'; }
+        else { tag.textContent = tagTypeChar; }
+        
+        const nameContainer = document.createElement('div'); nameContainer.className = 'name-container';
+        nameContainer.appendChild(nameSpan);
+        if (apiKeyMissing && state.isPotentiallySharedConfig) {
+            const infoIcon = document.createElement('span'); infoIcon.className = 'info-icon'; infoIcon.innerHTML = '&#9432;'; infoIcon.title = `Connect to ${apiKeyType} to activate this list.`;
+            nameContainer.appendChild(infoIcon);
+        }
+
+        const actionsGroup = document.createElement('div'); actionsGroup.className = 'list-actions-group';
+        if (mergeToggle) actionsGroup.appendChild(mergeToggle);
+        if (sortControlsContainer) actionsGroup.appendChild(sortControlsContainer);
+        actionsGroup.appendChild(editBtn);
+        actionsGroup.appendChild(visibilityToggleBtn);
+        actionsGroup.appendChild(removeBtn);
+        
         const desktopRow = document.createElement('div'); desktopRow.className = 'list-item-row list-item-row-desktop';
         desktopRow.append(tag, nameContainer); desktopRow.appendChild(actionsGroup);
         mainCol.appendChild(desktopRow);
+        contentWrapper.appendChild(dragHandle);
+        contentWrapper.appendChild(mainCol);
+        li.appendChild(contentWrapper);
     }
-    contentWrapper.appendChild(mainCol);
-    li.appendChild(contentWrapper);
     return li;
   }
 
@@ -741,22 +798,50 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   function startNameEditing(listItemElement, list) {
-    const nameSpan = listItemElement.querySelector('.list-name');
+    let nameSpanToReplace;
+    let actionsGroupToHide;
+    let nameContainerForInput;
+
+    if (state.isMobile) {
+        nameContainerForInput = listItemElement.querySelector('.mobile-top-row .name-container');
+        nameSpanToReplace = nameContainerForInput.querySelector('.list-name');
+        actionsGroupToHide = listItemElement.querySelector('.mobile-bottom-row .list-actions-group');
+    } else {
+        nameContainerForInput = listItemElement.querySelector('.list-item-row-desktop .name-container');
+        nameSpanToReplace = nameContainerForInput.querySelector('.list-name');
+        actionsGroupToHide = listItemElement.querySelector('.list-item-row-desktop .list-actions-group');
+    }
+    if (!nameSpanToReplace || !nameContainerForInput) return;
+
     let currentDisplayName = list.customName || list.name;
     const isEffectivelyUrlImported = list.source === 'mdblist_url' || list.source === 'trakt_public';
      if (isEffectivelyUrlImported || list.source === 'addon_manifest') {
         currentDisplayName = currentDisplayName.replace(/\s*\((Movies|Series)\)$/i, '').trim();
     }
-    const nameContainer = nameSpan.parentElement;
+
     const input = document.createElement('input'); input.type = 'text'; input.className = 'edit-name-input'; input.value = currentDisplayName;
     const saveBtn = createButton('✓', 'save-name-btn action-btn', (e) => handleSave(e));
     const cancelBtn = createButton('✕', 'cancel-name-btn action-btn', (e) => handleCancel(e));
     const editActionsDiv = document.createElement('div'); editActionsDiv.className = 'actions edit-actions';
     editActionsDiv.append(saveBtn, cancelBtn);
-    const otherActionsGroup = listItemElement.querySelector('.list-actions-group');
-    if(otherActionsGroup) otherActionsGroup.style.display = 'none';
+    
+    const originalEditButton = listItemElement.querySelector('.edit-button');
+    if(originalEditButton) originalEditButton.style.display = 'none';
+    if(actionsGroupToHide && actionsGroupToHide !== originalEditButton?.parentElement) actionsGroupToHide.style.display = 'none';
 
-    nameContainer.innerHTML = ''; nameContainer.append(input, editActionsDiv);
+
+    nameSpanToReplace.style.display = 'none';
+    if (state.isMobile) {
+      const tagElement = nameContainerForInput.querySelector('.tag');
+      nameContainerForInput.innerHTML = '';
+      if(tagElement) nameContainerForInput.appendChild(tagElement);
+      nameContainerForInput.appendChild(input);
+      nameContainerForInput.appendChild(editActionsDiv);
+
+    } else {
+      nameContainerForInput.insertBefore(input, nameSpanToReplace.nextSibling);
+      nameContainerForInput.insertBefore(editActionsDiv, input.nextSibling);
+    }
     input.focus(); input.select();
 
     async function handleSave(e) {
@@ -765,15 +850,15 @@ document.addEventListener('DOMContentLoaded', function() {
         const listIdToUpdate = String(list.id);
         
         await updateListPreference(listIdToUpdate, 'name', { customName: newName });
-        list.customName = newName; // Update in-memory list object
+        list.customName = newName;
         if(!state.userConfig.customListNames) state.userConfig.customListNames = {};
         state.userConfig.customListNames[listIdToUpdate] = newName;
-        finishEditing(true);
+        finishEditing();
     }
-    function handleCancel(e) { if(e) e.stopPropagation(); finishEditing(false); }
+    function handleCancel(e) { if(e) e.stopPropagation(); finishEditing(); }
 
-    function finishEditing(isSaved) { // isSaved is not directly used here but good for clarity
-        const newListItemElement = createListItemElement(list); // Re-render the item with updated data
+    function finishEditing() {
+        const newListItemElement = createListItemElement(list);
         listItemElement.replaceWith(newListItemElement);
     }
     input.addEventListener('keydown', e => {
@@ -781,6 +866,7 @@ document.addEventListener('DOMContentLoaded', function() {
         else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); handleCancel(e); }
     });
   }
+
 
   async function toggleListVisibility(listItemElement, listId) {
     const listIdStr = String(listId);
@@ -809,17 +895,16 @@ document.addEventListener('DOMContentLoaded', function() {
     listItemElement.remove();
     state.currentLists = state.currentLists.filter(l => String(l.id) !== listToRemoveIdStr);
     state.userConfig.removedLists.add(listToRemoveIdStr);
-    state.userConfig.hiddenLists.delete(listToRemoveIdStr); // Ensure it's not in hidden if removed
+    state.userConfig.hiddenLists.delete(listToRemoveIdStr);
     delete state.userConfig.customListNames[listToRemoveIdStr];
     
-    // Find the list object, using previousCurrentLists as a fallback if it was already filtered out
     const listObject = state.currentLists.find(l => String(l.id) === listToRemoveIdStr) || 
                        (state.previousCurrentLists && state.previousCurrentLists.find(l => String(l.id) === listToRemoveIdStr));
     
-    if(listObject && listObject.originalId) { // Use originalId for sortPreferences
+    if(listObject && listObject.originalId) {
         delete state.userConfig.sortPreferences[String(listObject.originalId)];
     }
-    delete state.userConfig.mergedLists[listToRemoveIdStr]; // Use manifest ID for merge
+    delete state.userConfig.mergedLists[listToRemoveIdStr];
     await updateListPreference(null, 'remove', { listIds: [listToRemoveIdStr] });
   }
   state.previousCurrentLists = []; 
@@ -830,8 +915,8 @@ document.addEventListener('DOMContentLoaded', function() {
         visibility: `/${state.configHash}/lists/visibility`,
         remove: `/${state.configHash}/lists/remove`,
         order: `/${state.configHash}/lists/order`,
-        sort: `/${state.configHash}/lists/sort`, // Expects originalId in listIdForPref
-        merge: `/${state.configHash}/lists/merge` // Expects manifestId in listIdForPref
+        sort: `/${state.configHash}/lists/sort`,
+        merge: `/${state.configHash}/lists/merge`
     };
     const endpoint = endpointMap[type];
     if (!endpoint) {
@@ -840,14 +925,11 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     let body = { ...payload };
-    // For name, sort, merge, listId is the primary identifier in the payload
-    // For sort, listIdForPref should be the originalId of the list.
-    // For name and merge, listIdForPref should be the manifest/UI display ID.
     if (listIdForPref && ['name', 'sort', 'merge'].includes(type)) {
         body.listId = listIdForPref;
     }
-
-    showNotification('lists', 'Saving...', 'info');
+    const notifSection = (type === 'order' || type === 'visibility' || type === 'name' || type === 'remove' || type === 'sort' || type === 'merge') ? 'lists' : 'settings';
+    showNotification(notifSection, 'Saving...', 'info');
     try {
         const response = await fetch(endpoint, {
             method: 'POST',
@@ -865,33 +947,29 @@ document.addEventListener('DOMContentLoaded', function() {
             updateURL();
             updateStremioButtonHref();
         }
-        showNotification('lists', `${type.charAt(0).toUpperCase() + type.slice(1)} updated.`, 'success', false);
+        showNotification(notifSection, `${type.charAt(0).toUpperCase() + type.slice(1)} updated.`, 'success', false);
         
-        // Critical changes that might affect list structure or content being displayed
         const criticalChangeTypesRequiringFullReload = ['name', 'visibility', 'remove', 'sort', 'merge'];
         
         if (criticalChangeTypesRequiringFullReload.includes(type)) {
-            state.previousCurrentLists = [...state.currentLists]; // Store current state before reload
-            await loadUserListsAndAddons(); // Reload all lists from server
+            state.previousCurrentLists = [...state.currentLists];
+            await loadUserListsAndAddons();
         } else if (type === 'order') {
-            // If only order changed, re-sort client-side if lists are already loaded
             if (state.userConfig.listOrder && state.userConfig.listOrder.length > 0 && state.currentLists.length > 0) {
                 const orderMap = new Map(state.userConfig.listOrder.map((id, index) => [String(id), index]));
                 state.currentLists.sort((a, b) => {
                     const indexA = orderMap.get(String(a.id));
                     const indexB = orderMap.get(String(b.id));
-                    if (indexA === undefined && indexB === undefined) return 0; // Should not happen if listOrder is accurate
-                    if (indexA === undefined) return 1; // Unordered items to the end
+                    if (indexA === undefined && indexB === undefined) return 0;
+                    if (indexA === undefined) return 1;
                     if (indexB === undefined) return -1;
                     return indexA - indexB;
                 });
-                // No need to call renderLists() here, as handleListReorder from SortableJS will manage the DOM
             }
         }
     } catch (error) {
         console.error(`Update Error for ${type}:`, error);
-        showNotification('lists', `Error updating ${type}: ${error.message}`, 'error', true);
-        // Attempt to reload to get a consistent state from server on error
+        showNotification(notifSection, `Error updating ${type}: ${error.message}`, 'error', true);
         state.previousCurrentLists = [...state.currentLists]; 
         await loadUserListsAndAddons(); 
     }
@@ -900,15 +978,14 @@ document.addEventListener('DOMContentLoaded', function() {
   function renderImportedAddons() {
     elements.addonsList.innerHTML = '';
     const addonGroups = Object.values(state.userConfig.importedAddons || {})
-                              .filter(addon => addon && !(addon.isMDBListUrlImport || addon.isTraktPublicList)); // Filter out URL imports
+                              .filter(addon => addon && !(addon.isMDBListUrlImport || addon.isTraktPublicList));
     if (addonGroups.length === 0) {
       elements.importedAddonsContainer.classList.add('hidden'); return;
     }
     elements.importedAddonsContainer.classList.remove('hidden');
     addonGroups.forEach(addon => {
       const item = document.createElement('div'); item.className = 'addon-item-group';
-      // Use addon.logo for manifest imports
-      const logoSrc = addon.logo || '/assets/logo.ico'; // Fallback if no logo
+      const logoSrc = addon.logo || '/assets/logo.ico';
       item.innerHTML = `
         <img src="${logoSrc}" alt="${addon.name} logo" class="addon-group-logo">
         <div class="addon-group-details">
@@ -977,12 +1054,12 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   window.disconnectMDBList = async function() {
-    updateApiKeyUI(elements.apiKeyInput, '', 'mdblist', null, false); // Update UI immediately
-    await validateAndSaveApiKeys('', elements.rpdbApiKeyInput.value.trim()); // Save and reload
+    updateApiKeyUI(elements.apiKeyInput, '', 'mdblist', null, false);
+    await validateAndSaveApiKeys('', elements.rpdbApiKeyInput.value.trim());
   };
   window.disconnectRPDB = async function() {
-    updateApiKeyUI(elements.rpdbApiKeyInput, '', 'rpdb', null, false); // Update UI immediately
-    await validateAndSaveApiKeys(elements.apiKeyInput.value.trim(), ''); // Save and reload
+    updateApiKeyUI(elements.rpdbApiKeyInput, '', 'rpdb', null, false);
+    await validateAndSaveApiKeys(elements.apiKeyInput.value.trim(), '');
   };
   window.disconnectTrakt = async function() {
     try {

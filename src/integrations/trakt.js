@@ -110,7 +110,8 @@ async function fetchPublicTraktListDetails(traktListUrl) {
     const listData = listDetailsResponse.data;
     let hasMovies = false, hasShows = false;
     if (listData.item_count > 0) {
-      const itemsResp = await axios.get(`${TRAKT_API_URL}/users/${username}/lists/${listData.ids.slug}/items?limit=1&extended=full`, { headers });
+      const sampleLimit = Math.min(listData.item_count, 100);
+      const itemsResp = await axios.get(`${TRAKT_API_URL}/users/${username}/lists/${listData.ids.slug}/items?limit=${sampleLimit}&extended=full`, { headers });
       if (itemsResp.data && Array.isArray(itemsResp.data)) {
         for (const item of itemsResp.data) {
           if (item.type === 'movie' && item.movie) hasMovies = true;
@@ -256,8 +257,6 @@ async function fetchTraktListItems(
           return null;
       }
 
-      // Filter by hint if the hint was specific and doesn't match the resolved type.
-      // This is mainly for mixed lists (watchlist, user list with no type hint) being filtered by a typed Stremio catalog.
       if (itemTypeHint && resolvedStremioType !== itemTypeHint && !(listId === 'trakt_watchlist' && !itemTypeHint)) {
          return null;
       }

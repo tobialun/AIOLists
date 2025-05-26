@@ -64,43 +64,40 @@
       </div>
       <div id="traktStatus"></div>
     </div>
-    <div class="api-section">
-      <div class="section-header">
-        <h2>Load Shared Configuration</h2>
-      </div>
-      <div class="form-group">
-        <label for="loadSharedConfigInput">Shared Link/Hash:</label>
-        <div class="input-container">
-          <input type="text" id="loadSharedConfigInput" placeholder="Paste shared config link or hash here">
-          <button type="button" id="loadSharedConfigBtn" class="action-btn">Load Shared</button>
-        </div>
-      </div>
-    </div>    
 
     <div class="import-section api-section">
       <div class="section-header">
-        <h2>Import Lists</h2>
+        <h2>Universal Import</h2>
         <span id="importNotification" class="section-notification"></span>
       </div>
+      <p class="info-text">Supports Trakt.tv and MDBList URLs, External Addon Manifest URLs, AIOLists config hashes.</p>
       <div class="form-group">
-        <label for="listUrlInput">List URL:</label>
+        <label for="universalImportInput">Link/Hash:</label>
         <div class="input-container">
-          <input type="text" id="listUrlInput" placeholder="MDBList or Trakt Public URL">
-          <button type="button" id="importListUrlBtn" class="action-btn">Import URL</button>
-        </div>
-      </div>
-      <div class="form-group">
-        <label for="manifestUrl">Addon URL:</label>
-        <div class="input-container">
-          <input type="text" id="manifestUrl" placeholder="https://url.com/manifest.json">
-          <button type="button" id="importAddonBtn" class="action-btn">Import Addon</button>
+          <input type="text" id="universalImportInput" placeholder="Paste URL or AIOLists config hash here">
         </div>
       </div>
       <div id="importStatus" class="status-message" style="display:none;"></div>
       <div id="importedAddons" class="imported-addons hidden">
-        <h3>Imported Addon Groups</h3>
+        <h3>Imported Addon Groups (from Manifest URLs)</h3>
         <div id="addonsList" class="addons-list"></div>
       </div>
+    </div>
+    
+    <div class="settings-section api-section">
+        <div class="collapsible-header" id="settingsHeader">
+            <span class="collapsible-arrow">▶</span>
+            <h2>Settings</h2>
+            <span id="settingsNotification" class="section-notification"></span>
+        </div>
+        <div class="collapsible-content" id="settingsContent">
+            <div class="setting-item">
+                <button type="button" id="toggleGenreFilterBtn" class="action-btn">Disable Genre Filter</button>
+                <span id="genreFilterStatusInfo" class="setting-info-text">Genre filters are currently ENABLED.</span>
+            </div>
+            <div class="setting-item" id="copyConfigHashContainer">
+            </div>
+        </div>
     </div>
 
     <div id="listContainer" class="list-container hidden">
@@ -114,14 +111,6 @@
         <div class="legend-item"><span class="legend-icon-text">✏️</span><span class="legend-text">Edit Name</span></div>
         <div class="legend-item"><span class="legend-icon-text">☰</span><span class="legend-text">Reorder</span></div>
         <div class="legend-item"><span class="merge-toggle merged" style="margin: 0; height:24px; padding: 0 8px; font-size:11px;">Merged</span><span class="legend-text">Merge/Split</span></div>
-      </div>
-      <div class="list-settings-section" style="margin-top: 15px; margin-bottom:15px; padding: 15px; background-color: #f9f9f9; border-radius: 6px;">
-        <div style="display: flex; align-items: center; gap: 10px;">
-          <button type="button" id="toggleGenreFilterBtn" class="action-btn">Disable Genre Filter</button>
-          <span id="genreFilterStatusInfo" style="font-size: 13px; color: #555;">
-            Disabling genre filters can reduce manifest size, allowing for more lists.
-          </span>
-        </div>
       </div>
       <ul id="listItems"></ul>
     </div>
