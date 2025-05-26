@@ -331,11 +331,11 @@ document.addEventListener('DOMContentLoaded', function() {
       if (state.userConfig.disableGenreFilter) {
         elements.toggleGenreFilterBtn.textContent = 'Enable Genre Filter';
         elements.toggleGenreFilterBtn.classList.remove('active-setting');
-        elements.genreFilterStatusInfo.textContent = 'Genre filters are DISABLED.';
+        elements.genreFilterStatusInfo.textContent = 'Genre filters are DISABLED. More list capacity.';
       } else {
         elements.toggleGenreFilterBtn.textContent = 'Disable Genre Filter';
         elements.toggleGenreFilterBtn.classList.add('active-setting');
-        elements.genreFilterStatusInfo.textContent = 'Genre filters are ENABLED.';
+        elements.genreFilterStatusInfo.textContent = 'Genre filters are ENABLED. Reduced list capacity.';
       }
     }
   }
