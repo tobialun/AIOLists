@@ -13,6 +13,8 @@ async function validateMDBListKey(apiKey) {
   }
 }
 
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 async function fetchAllLists(apiKey) {
   if (!apiKey) return [];
   let allLists = [];
@@ -26,7 +28,14 @@ async function fetchAllLists(apiKey) {
       if (response.data && Array.isArray(response.data)) {
         allLists.push(...response.data.map(list => ({ ...list, listType: endpoint.type, name: list.name })));
       }
-    } catch (err) { console.error(`Error fetching MDBList ${endpoint.type} lists:`, err.message); }
+    } catch (err) {
+      console.error(`Error fetching MDBList ${endpoint.type} lists:`, err.message);
+      if (err.response && (err.response.status === 503 || err.response.status === 429)) {
+        console.log(`Rate limit or server error for ${endpoint.type}, adding a longer delay...`);
+        await delay(1000);
+      }
+    }
+    await delay(1000);
   }
   allLists.push({ id: 'watchlist', name: 'My Watchlist', listType: 'W', isWatchlist: true });
   return allLists;
