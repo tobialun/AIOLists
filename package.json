@@ -6,9 +6,7 @@
     "scripts": {
         "start": "node src/server.js",
         "dev": "nodemon src/server.js",
-        "prod": "node src/server.js",
-        "worker:dev": "wrangler dev",
-        "worker:deploy": "wrangler deploy"
+        "prod": "node src/server.js"
     },
     "keywords": [
         "stremio",
@@ -23,9 +21,7 @@
         "axios": "^1.6.2",
         "cors": "^2.8.5",
         "express": "^4.18.2",
-        "itty-router": "^5.0.18",
-        "stremio-addon-sdk": "^1.6.10",
-        "wrangler": "^4.16.1"
+        "stremio-addon-sdk": "^1.6.10"
     },
     "devDependencies": {
         "cross-env": "^7.0.3",

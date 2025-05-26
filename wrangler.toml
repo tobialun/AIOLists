@@ -1,8 +1,0 @@
-# ./wrangler.toml
-name = "aiolists-worker"
-main = "cf-worker/worker.js"
-compatibility_date = "2024-05-26" # Ensure this is a recent date
-compatibility_flags = ["nodejs_compat"] # THIS IS THE CORRECT WAY
-
-[site]
-bucket = "./public"
