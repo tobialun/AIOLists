@@ -5,8 +5,8 @@ const { enrichItemsWithCinemeta } = require('../utils/metadataFetcher');
 
 // Helper function for delay
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-const MAX_RETRIES = 4; // Increased max retries
-const INITIAL_RETRY_DELAY_MS = 5000; // Increased initial delay to 3 seconds
+const MAX_RETRIES = 4; 
+const INITIAL_RETRY_DELAY_MS = 5000; 
 
 async function validateMDBListKey(apiKey) {
   if (!apiKey) return null;
@@ -14,7 +14,6 @@ async function validateMDBListKey(apiKey) {
     const response = await axios.get(`https://api.mdblist.com/user?apikey=${apiKey}`, { timeout: 5000 });
     return (response.status === 200 && response.data) ? response.data : null;
   } catch (error) {
-    // Consider adding retries here if this becomes a frequent point of failure
     console.error('Error validating MDBList Key:', error.message);
     return null;
   }
@@ -24,8 +23,8 @@ async function fetchAllLists(apiKey) {
   if (!apiKey) return [];
   let allLists = [];
   const listEndpoints = [
-    { url: `https://api.mdblist.com/lists/user?apikey=${apiKey}`, type: 'L' },
-    { url: `https://api.mdblist.com/external/lists/user?apikey=${apiKey}`, type: 'E' }
+    { url: `https://api.mdblist.com/lists/user?apikey=${apiKey}`, type: 'L' }, // For authenticated user's lists
+    { url: `https://api.mdblist.com/external/lists/user?apikey=${apiKey}`, type: 'E' } // For authenticated user's external lists
   ];
 
   for (const endpoint of listEndpoints) {
@@ -58,6 +57,49 @@ async function fetchAllLists(apiKey) {
   allLists.push({ id: 'watchlist', name: 'My Watchlist', listType: 'W', isWatchlist: true });
   return allLists;
 }
+
+// Updated function to fetch all lists for a specific MDBList username
+async function fetchAllListsForUser(apiKey, username) {
+  if (!apiKey || !username) return [];
+  let userLists = [];
+  
+  // Fetch user's "standard" public lists
+  try {
+    // Using the path structure you confirmed works: /lists/user/{username}
+    const response = await axios.get(`https://api.mdblist.com/lists/user/${username}?apikey=${apiKey}`, { timeout: 10000 });
+    if (response.data && Array.isArray(response.data)) {
+      // Add a property to distinguish if needed, or rely on list.user_name if present in response
+      userLists.push(...response.data.map(list => ({ ...list, listType: 'L', fetchedForUser: username })));
+    }
+  } catch (error) {
+    console.error(`Error fetching lists for MDBList user ${username} (path /lists/user/${username}):`, error.message);
+    if (error.response) {
+        console.error(`Response status: ${error.response.status}`, error.response.data ? `Data: ${JSON.stringify(error.response.data).substring(0, 200)}` : '');
+    }
+  }
+
+  // Fetch user's "external" public lists
+  try {
+    await delay(1000); // Be respectful to the API
+    // Assuming a similar structure for external lists of another user
+    const extResponse = await axios.get(`https://api.mdblist.com/external/lists/user/${username}?apikey=${apiKey}`, { timeout: 10000 });
+    if (extResponse.data && Array.isArray(extResponse.data)) {
+      userLists.push(...extResponse.data.map(list => ({ ...list, listType: 'E', fetchedForUser: username })));
+    }
+  } catch (error) {
+    console.error(`Error fetching external lists for MDBList user ${username} (path /external/lists/user/${username}):`, error.message);
+     if (error.response) {
+        console.error(`Response status: ${error.response.status}`, error.response.data ? `Data: ${JSON.stringify(error.response.data).substring(0, 200)}` : '');
+    }
+  }
+
+  // Filter for public lists (MDBList API usually handles this, but an explicit check is good)
+  // and ensure the list has items.
+  return userLists.filter(list => 
+    (list.private === false || list.public === true) && list.items > 0 // Simplified check for public and ensure items
+  );
+}
+
 
 function processMDBListApiResponse(data, isWatchlistUnified = false) {
   if (!data || data.error) {
@@ -96,24 +138,23 @@ function processMDBListApiResponse(data, isWatchlistUnified = false) {
 }
 
 async function fetchListItems(
-    listId,
+    listId, // This will be the MDBList list ID (numeric) or slug
     apiKey,
-    listsMetadata,
+    listsMetadata, // Generally not used when fetching a specific list's items directly
     stremioSkip = 0,
     sort = 'imdbvotes',
     order = 'desc',
-    isUrlImported = false,
-    genre = null
+    isUrlImported = false, // Not directly relevant here, but part of original signature
+    genre = null,
+    usernameForRandomList = null // The username whose list we are fetching
 ) {
   if (!apiKey) return null;
 
   const MAX_ATTEMPTS_FOR_GENRE_FILTER = 1; 
   const MDBLIST_PAGE_LIMIT = ITEMS_PER_PAGE;
 
-  let effectiveMdbListId = listId;
-  if (isUrlImported && listId.startsWith('mdblisturl_')) {
-    effectiveMdbListId = listId.replace('mdblisturl_', '');
-  }
+  let effectiveMdbListId = String(listId); // Ensure it's a string (could be numeric ID or slug)
+  // No need to strip prefixes if we are directly passing the listId/slug for a random list
 
   let mdbListOffset = 0;
   let attemptsForGenreCompletion = 0;
@@ -121,7 +162,10 @@ async function fetchListItems(
   let morePagesFromMdbList = true;
   let allItems = [];
 
-  if (genre) {
+  // The usernameForRandomList parameter indicates we are fetching items for a list from a specific user (not the API key owner)
+  const listOwnerUsername = usernameForRandomList; 
+
+  if (genre) { // If genre filtering is needed
     while (allEnrichedGenreItems.length < stremioSkip + MDBLIST_PAGE_LIMIT && attemptsForGenreCompletion < MAX_ATTEMPTS_FOR_GENRE_FILTER && morePagesFromMdbList) {
       let apiUrl;
       const params = new URLSearchParams({
@@ -131,21 +175,24 @@ async function fetchListItems(
         limit: MDBLIST_PAGE_LIMIT,
         offset: mdbListOffset
       });
-      if (effectiveMdbListId === 'watchlist' || effectiveMdbListId === 'watchlist-W') {
+
+      if (listOwnerUsername) { // Fetching specific user's list (e.g., random catalog's chosen list)
+        apiUrl = `https://api.mdblist.com/lists/${listOwnerUsername}/${effectiveMdbListId}/items?${params.toString()}`;
+      } else if (effectiveMdbListId === 'watchlist' || effectiveMdbListId === 'watchlist-W') { // Authenticated user's watchlist
         params.append('unified', 'true');
         apiUrl = `https://api.mdblist.com/watchlist/items?${params.toString()}`;
-      } else {
+      } else { // Authenticated user's own list (not a URL import or random)
         let listPrefix = '';
-        if (!isUrlImported) {
-            const metadata = listsMetadata && (listsMetadata[listId] || listsMetadata[`aiolists-${listId}-L`] || listsMetadata[`aiolists-${listId}-E`]);
-            let effectiveListType = metadata?.listType;
-            if (!effectiveListType) {
-                const allUserLists = await fetchAllLists(apiKey);
-                const listObj = allUserLists.find(l => String(l.id) === String(effectiveMdbListId));
-                effectiveListType = listObj?.listType;
-            }
-            if (effectiveListType === 'E') listPrefix = 'external/';
+        // This part is for API key owner's lists, might need listsMetadata to determine if it's 'L' or 'E' type
+        // However, for the random catalog, listOwnerUsername will be set, so this branch won't be hit for that.
+        const metadata = listsMetadata && (listsMetadata[listId] || listsMetadata[`aiolists-${listId}-L`] || listsMetadata[`aiolists-${listId}-E`]);
+        let effectiveListType = metadata?.listType;
+        if (!isUrlImported && !effectiveListType) {
+            const allUserLists = await fetchAllLists(apiKey); // Fetches for the API key owner
+            const listObj = allUserLists.find(l => String(l.id) === String(effectiveMdbListId));
+            effectiveListType = listObj?.listType;
         }
+        if (effectiveListType === 'E') listPrefix = 'external/';
         apiUrl = `https://api.mdblist.com/${listPrefix}lists/${effectiveMdbListId}/items?${params.toString()}`;
       }
 
@@ -156,83 +203,78 @@ async function fetchListItems(
         try {
           response = await axios.get(apiUrl, { timeout: 15000 });
           if (response.status === 429 && currentRetries < MAX_RETRIES) {
+            // ... (rate limit handling as before)
             currentRetries++;
             const retryDelay = INITIAL_RETRY_DELAY_MS * Math.pow(2, currentRetries - 1);
-            console.error(`Rate limited by MDBList API for ${listId} (offset ${mdbListOffset}), attempt ${currentRetries}/${MAX_RETRIES}. Retrying after ${retryDelay}ms...`);
+            console.error(`Rate limited by MDBList API for list ${effectiveMdbListId} of user ${listOwnerUsername || 'self'} (offset ${mdbListOffset}), attempt ${currentRetries}/${MAX_RETRIES}. Retrying after ${retryDelay}ms...`);
             await delay(retryDelay);
             continue;
           }
           success = true;
         } catch (error) {
+          // ... (error handling as before)
           currentRetries++;
-          console.error(`Error fetching MDBList page for list ID ${listId} (offset ${mdbListOffset}, attempt ${currentRetries}/${MAX_RETRIES}):`, error.message);
+          console.error(`Error fetching MDBList page for list ${effectiveMdbListId} of user ${listOwnerUsername || 'self'} (offset ${mdbListOffset}, attempt ${currentRetries}/${MAX_RETRIES}):`, error.message);
           if (error.response && (error.response.status === 503 || error.response.status === 429) && currentRetries < MAX_RETRIES) {
               const retryDelay = INITIAL_RETRY_DELAY_MS * Math.pow(2, currentRetries - 1);
-              console.log(`Rate limit or server error during genre filtering for ${listId}, retrying after ${retryDelay}ms...`);
+              console.log(`Rate limit or server error during genre filtering for ${effectiveMdbListId}, retrying after ${retryDelay}ms...`);
               await delay(retryDelay);
+          } else if (error.response && error.response.status === 404 && listOwnerUsername) {
+             console.warn(`MDBList user ${listOwnerUsername} or list ${effectiveMdbListId} not found (genre fetch). Returning null.`);
+             return null; 
           } else {
-              console.error(`Failed to fetch page for ${listId} (genre filter) after ${currentRetries} attempts.`);
+              console.error(`Failed to fetch page for ${effectiveMdbListId} (genre filter) after ${currentRetries} attempts.`);
               morePagesFromMdbList = false;
               break; 
           }
         }
       }
-
-      if (!success || !morePagesFromMdbList) {
-        console.log(`Stopping genre filter pagination for ${listId} due to fetch failure or no more pages.`);
-        break; 
-      }
-
+      if (!success || !morePagesFromMdbList) break;
       const mdbApiResponseData = response.data;
-      const isWatchlistCall = effectiveMdbListId === 'watchlist' || effectiveMdbListId === 'watchlist-W';
+      const isWatchlistCall = !listOwnerUsername && (effectiveMdbListId === 'watchlist' || effectiveMdbListId === 'watchlist-W');
       const initialItemsFlat = processMDBListApiResponse(mdbApiResponseData, isWatchlistCall);
-
-      if (!initialItemsFlat || initialItemsFlat.length === 0) {
-        morePagesFromMdbList = false;
-        break;
-      }
-
+      if (!initialItemsFlat || initialItemsFlat.length === 0) { morePagesFromMdbList = false; break; }
       const enrichedPageItems = await enrichItemsWithCinemeta(initialItemsFlat);
       const genreItemsFromPage = enrichedPageItems.filter(item => item.genres && item.genres.map(g => String(g).toLowerCase()).includes(String(genre).toLowerCase()));
       allEnrichedGenreItems.push(...genreItemsFromPage);
-
       mdbListOffset += MDBLIST_PAGE_LIMIT;
       attemptsForGenreCompletion++;
-      if (morePagesFromMdbList && attemptsForGenreCompletion < MAX_ATTEMPTS_FOR_GENRE_FILTER) {
-        await delay(1250); 
-      }
+      if (morePagesFromMdbList && attemptsForGenreCompletion < MAX_ATTEMPTS_FOR_GENRE_FILTER) await delay(1250);
     }
     allItems = allEnrichedGenreItems.slice(stremioSkip, stremioSkip + ITEMS_PER_PAGE);
 
-  } else { 
+  } else { // No genre filtering, direct fetch
     let apiUrl;
     mdbListOffset = stremioSkip;
     const params = new URLSearchParams({
         apikey: apiKey,
         sort: sort,
         order: order,
-        limit: ITEMS_PER_PAGE,
+        limit: ITEMS_PER_PAGE, // Use ITEMS_PER_PAGE from config
         offset: mdbListOffset
       });
 
-    if (effectiveMdbListId === 'watchlist' || effectiveMdbListId === 'watchlist-W') {
+    if (listOwnerUsername) { // Fetching specific user's list (e.g., random catalog's chosen list)
+        apiUrl = `https://api.mdblist.com/lists/${listOwnerUsername}/${effectiveMdbListId}/items?${params.toString()}`;
+    } else if (effectiveMdbListId === 'watchlist' || effectiveMdbListId === 'watchlist-W') { // Authenticated user's watchlist
         params.append('unified', 'true');
         apiUrl = `https://api.mdblist.com/watchlist/items?${params.toString()}`;
-    } else {
+    } else { // Authenticated user's own list
         let listPrefix = '';
-         if (!isUrlImported) {
+        // This logic is primarily for the API key owner's lists
+        if (!isUrlImported) { // This check might be redundant if listOwnerUsername is the primary switch
             const metadata = listsMetadata && (listsMetadata[listId] || listsMetadata[`aiolists-${listId}-L`] || listsMetadata[`aiolists-${listId}-E`]);
-            let effectiveListType = metadata?.listType;
-             if (!effectiveListType) {
+            let originalListType = metadata?.listType;
+             if (!originalListType) {
                 const allUserLists = await fetchAllLists(apiKey);
                 const listObj = allUserLists.find(l => String(l.id) === String(effectiveMdbListId));
-                effectiveListType = listObj?.listType;
+                originalListType = listObj?.listType;
             }
-            if (effectiveListType === 'E') listPrefix = 'external/';
+            if (originalListType === 'E') listPrefix = 'external/';
         }
         apiUrl = `https://api.mdblist.com/${listPrefix}lists/${effectiveMdbListId}/items?${params.toString()}`;
     }
-
+    // ... (axios call and error handling as before for single page fetch)
     let response;
     let success = false;
     let currentRetries = 0;
@@ -242,32 +284,35 @@ async function fetchListItems(
           if (response.status === 429 && currentRetries < MAX_RETRIES) { 
              currentRetries++;
              const retryDelay = INITIAL_RETRY_DELAY_MS * Math.pow(2, currentRetries - 1);
-             console.error(`Rate limited by MDBList API for ${listId} (single page fetch), attempt ${currentRetries}/${MAX_RETRIES}. Retrying after ${retryDelay}ms...`);
+             console.error(`Rate limited by MDBList API for list ${effectiveMdbListId} of user ${listOwnerUsername || 'self'} (single page), attempt ${currentRetries}/${MAX_RETRIES}. Retrying after ${retryDelay}ms...`);
              await delay(retryDelay);
              continue;
           }
           success = true;
       } catch (error) {
           currentRetries++;
-          console.error(`Error fetching MDBList items for list ID ${listId} (offset ${mdbListOffset}, attempt ${currentRetries}/${MAX_RETRIES}):`, error.message);
+          console.error(`Error fetching MDBList items for list ${effectiveMdbListId} of user ${listOwnerUsername || 'self'} (offset ${mdbListOffset}, attempt ${currentRetries}/${MAX_RETRIES}):`, error.message);
           if (error.response && (error.response.status === 503 || error.response.status === 429) && currentRetries < MAX_RETRIES) {
               const retryDelay = INITIAL_RETRY_DELAY_MS * Math.pow(2, currentRetries - 1);
-              console.log(`Rate limit or server error fetching single page for ${listId}, retrying after ${retryDelay}ms...`);
+              console.log(`Rate limit or server error fetching single page for ${effectiveMdbListId}, retrying after ${retryDelay}ms...`);
               await delay(retryDelay);
+          } else if (error.response && error.response.status === 404 && listOwnerUsername) {
+             console.warn(`MDBList user ${listOwnerUsername} or list ${effectiveMdbListId} not found. Returning null.`);
+             return null; 
           } else {
-              console.error(`Failed to fetch items for ${listId} after ${currentRetries} attempts.`);
+              console.error(`Failed to fetch items for ${effectiveMdbListId} after ${currentRetries} attempts.`);
               return null; 
           }
       }
     }
 
     if (!success) {
-        console.error(`All retries failed for fetching items for list ID ${listId}.`);
+        console.error(`All retries failed for fetching items for list ID ${effectiveMdbListId} of user ${listOwnerUsername || 'self'}.`);
         return null; 
     }
 
     const mdbApiResponseData = response.data;
-    const isWatchlistCall = effectiveMdbListId === 'watchlist' || effectiveMdbListId === 'watchlist-W';
+    const isWatchlistCall = !listOwnerUsername && (effectiveMdbListId === 'watchlist' || effectiveMdbListId === 'watchlist-W');
     const initialItemsFlat = processMDBListApiResponse(mdbApiResponseData, isWatchlistCall);
 
     if (!initialItemsFlat || initialItemsFlat.length === 0) {
@@ -292,13 +337,17 @@ async function extractListFromUrl(url, apiKey) {
       const urlMatch = url.match(urlPattern);
       if (!urlMatch) throw new Error('Invalid MDBList URL format. Expected: https://mdblist.com/lists/username/list-slug');
       const [, username, listSlug] = urlMatch;
+      // This endpoint gets details of a specific list, not all lists from a user
       const apiResponse = await axios.get(`https://api.mdblist.com/lists/${username}/${listSlug}?apikey=${apiKey}`, { timeout: 15000 });
       if (!apiResponse.data || !Array.isArray(apiResponse.data) || apiResponse.data.length === 0) {
+         // The response for a single list is an array with one object.
         throw new Error('Could not fetch list details from MDBList API or list is empty/not found.');
       }
-      const listData = apiResponse.data[0];
+      const listData = apiResponse.data[0]; // Get the first (and only) element
       return {
-        listId: String(listData.id),
+        listId: String(listData.id), // MDBList's internal ID for the list
+        listSlug: listData.slug, 
+        username: listData.user.username, 
         listName: listData.name,
         isUrlImport: true,
         hasMovies: listData.movies > 0,
@@ -321,6 +370,7 @@ async function extractListFromUrl(url, apiKey) {
 
 module.exports = {
   fetchAllLists,
+  fetchAllListsForUser, 
   fetchListItems,
   validateMDBListKey,
   extractListFromUrl

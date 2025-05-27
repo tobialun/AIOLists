@@ -1,3 +1,4 @@
+// src/config/index.js
 const ITEMS_PER_PAGE = 100;
 const PORT = process.env.PORT || 7000;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
@@ -26,6 +27,8 @@ const defaultConfig = {
   importedAddons: {},
   sortPreferences: {},
   disableGenreFilter: false,
+  enableRandomListFeature: false,
+  randomMDBListUsernames: ['showtime416', 'garycrawfordgc', 'linaspurinis', 'hdlists'], 
   availableSortOptions: [
     { value: 'rank', label: 'Rank' },
     { value: 'score', label: 'Score' },
