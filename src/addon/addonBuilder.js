@@ -185,7 +185,7 @@ async function createAddon(userConfig) {
     types: ['movie', 'series', 'all'],
     idPrefixes: ['tt'],
     catalogs: [],
-    logo: `https://i.imgur.com/nyIDmcb.png`,
+    logo: `https://i.imgur.com/DigFuAQ.png`,
     behaviorHints: { configurable: true, configurationRequired: false }
   };
 
