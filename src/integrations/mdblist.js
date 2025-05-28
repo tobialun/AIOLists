@@ -336,18 +336,27 @@ async function extractListFromUrl(url, apiKey) {
       const urlPattern = /^https?:\/\/mdblist\.com\/lists\/([\w-]+)\/([\w-]+)\/?$/;
       const urlMatch = url.match(urlPattern);
       if (!urlMatch) throw new Error('Invalid MDBList URL format. Expected: https://mdblist.com/lists/username/list-slug');
-      const [, username, listSlug] = urlMatch;
-      // This endpoint gets details of a specific list, not all lists from a user
-      const apiResponse = await axios.get(`https://api.mdblist.com/lists/${username}/${listSlug}?apikey=${apiKey}`, { timeout: 15000 });
+      const [, usernameFromUrl, listSlug] = urlMatch; // Renamed to avoid confusion with username in response
+
+      const apiResponse = await axios.get(`https://api.mdblist.com/lists/${usernameFromUrl}/${listSlug}?apikey=${apiKey}`, { timeout: 15000 });
+
       if (!apiResponse.data || !Array.isArray(apiResponse.data) || apiResponse.data.length === 0) {
-         // The response for a single list is an array with one object.
-        throw new Error('Could not fetch list details from MDBList API or list is empty/not found.');
+        throw new Error('Could not fetch list details from MDBList API or list is empty/not found. Response: ' + JSON.stringify(apiResponse.data));
       }
-      const listData = apiResponse.data[0]; // Get the first (and only) element
+      
+      const listData = apiResponse.data[0]; // Correct: Access the first (and only) object in the array
+
+      // Corrected check: Ensure listData.user_name exists
+      if (typeof listData.user_name === 'undefined') {
+        // It's helpful to include the actual response in the error for debugging
+        const actualResponse = JSON.stringify(listData);
+        throw new Error(`API response did not include expected 'user_name'. Response: ${actualResponse}`);
+      }
+
       return {
-        listId: String(listData.id), // MDBList's internal ID for the list
-        listSlug: listData.slug, 
-        username: listData.user.username, 
+        listId: String(listData.id),
+        listSlug: listData.slug,
+        username: listData.user_name, // Corrected: Use listData.user_name
         listName: listData.name,
         isUrlImport: true,
         hasMovies: listData.movies > 0,
@@ -355,13 +364,15 @@ async function extractListFromUrl(url, apiKey) {
       };
     } catch (error) {
       currentRetries++;
-      console.error(`Error extracting MDBList from URL (attempt ${currentRetries}/${MAX_RETRIES}):`, error.response ? error.response.data : error.message);
+      console.error(`Error extracting MDBList from URL (attempt ${currentRetries}/${MAX_RETRIES}):`, error.response ? (error.response.data || error.response.status) : error.message);
       if (error.response && (error.response.status === 503 || error.response.status === 429) && currentRetries < MAX_RETRIES) {
         const retryDelay = INITIAL_RETRY_DELAY_MS * Math.pow(2, currentRetries - 1);
         console.log(`Retrying after ${retryDelay}ms...`);
         await delay(retryDelay);
       } else {
-        throw new Error(`Failed to extract MDBList: ${error.response?.data?.error || error.message}`);
+        const errorMessage = error.response?.data?.error || error.message;
+        const actualResponseContent = error.response?.data ? JSON.stringify(error.response.data) : (error.message.includes("Response:") ? error.message.split("Response:")[1] : "No detailed response data in error.");
+        throw new Error(`Failed to extract MDBList: ${errorMessage}. Actual API response structure: ${actualResponseContent}`);
       }
     }
   }
