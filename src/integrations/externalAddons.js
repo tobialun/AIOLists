@@ -1,6 +1,6 @@
+// src/integrations/externalAddons.js
 const axios = require('axios');
-const { enrichItemsWithCinemeta } = require('../utils/metadataFetcher');
-
+const { enrichItemsWithCinemeta } = require('../utils/metadataFetcher'); // Ensure this path is correct
 
 class ExternalAddon {
   constructor(manifestUrl) {
@@ -87,7 +87,7 @@ class ExternalAddon {
           originalType: originalCatalogType,
           name: catalog.name || 'Unnamed Catalog',
           type: stremioFinalCatalogType,
-          extraSupported: processedExtraSupported, // MODIFIED LINE
+          extraSupported: processedExtraSupported,
           extraRequired: catalog.extraRequired || (catalog.extra || []).filter(e => e.isRequired)
         };
       }).filter(catalog => catalog !== null);
@@ -96,16 +96,12 @@ class ExternalAddon {
       if (resolvedLogo && !resolvedLogo.startsWith('http://') && !resolvedLogo.startsWith('https://') && !resolvedLogo.startsWith('data:')) {
         try { resolvedLogo = new URL(resolvedLogo, this.apiBaseUrl).href; } catch (e) { resolvedLogo = this.manifest.logo; }
       }
-      // Background and description are intentionally not resolved or stored for config minimization
 
       return {
         id: this.manifest.id,
         name: this.manifest.name || 'Unknown Addon',
         version: this.manifest.version || '0.0.0',
-        // description: this.manifest.description || '', // Removed for config minimization
         logo: resolvedLogo,
-        // background: resolvedBackground, // Removed for config minimization
-        // url: this.originalManifestUrl, // Removed, apiBaseUrl is sufficient if needed later
         apiBaseUrl: this.apiBaseUrl,
         catalogs: processedCatalogs,
         types: this.manifest.types || [],
@@ -123,17 +119,14 @@ class ExternalAddon {
   }
 
   detectAnimeCatalogs() {
-    // Heuristic to detect if an addon is anime-focused
     const nameIncludesAnime = this.manifest?.name?.toLowerCase().includes('anime');
     const urlIncludesAnimeSource = ['myanimelist', 'anilist', 'anidb', 'kitsu', 'livechart', 'notify.moe'].some(src => this.originalManifestUrl.toLowerCase().includes(src));
-    const hasAnimeTypeInManifestTypes = this.manifest?.types?.includes('anime'); // if manifest.types includes 'anime'
-    const hasAnimeTypeCatalog = this.manifest?.catalogs?.some(cat => cat.type === 'anime'); // if any catalog is explicitly 'anime'
+    const hasAnimeTypeInManifestTypes = this.manifest?.types?.includes('anime');
+    const hasAnimeTypeCatalog = this.manifest?.catalogs?.some(cat => cat.type === 'anime');
     return !!(nameIncludesAnime || urlIncludesAnimeSource || hasAnimeTypeInManifestTypes || hasAnimeTypeCatalog);
   }
 
   buildCatalogUrl(catalogOriginalId, catalogOriginalType, skip = 0, genre = null) {
-    // Construct the URL path for fetching catalog items
-    // Example: /catalog/movie/catalog_id.json or /catalog/series/another_id/skip=50&genre=Action.json
     let urlPath = `catalog/${catalogOriginalType}/${encodeURIComponent(catalogOriginalId)}`;
     
     const extraParams = [];
@@ -159,7 +152,7 @@ async function fetchExternalAddonItems(targetOriginalId, targetOriginalType, sou
   try {
     if (!sourceAddonConfig || !sourceAddonConfig.apiBaseUrl || !sourceAddonConfig.catalogs) {
       console.error('[AIOLists ExternalAddon] Invalid source addon configuration for fetching items. Config:', sourceAddonConfig);
-      return { metas: [] };
+      return { metas: [], hasMovies: false, hasShows: false };
     }
 
     const catalogEntry = sourceAddonConfig.catalogs.find(
@@ -167,34 +160,58 @@ async function fetchExternalAddonItems(targetOriginalId, targetOriginalType, sou
     );
 
     if (!catalogEntry) {
-      return { metas: [] };
+      return { metas: [], hasMovies: false, hasShows: false };
     }
     
-    const tempExternalAddon = new ExternalAddon(sourceAddonConfig.apiBaseUrl); // Use apiBaseUrl for context
+    const tempExternalAddon = new ExternalAddon(sourceAddonConfig.apiBaseUrl); 
     tempExternalAddon.apiBaseUrl = sourceAddonConfig.apiBaseUrl;
 
     attemptedUrl = tempExternalAddon.buildCatalogUrl(catalogEntry.originalId, catalogEntry.originalType, skip, genre);
-    
-    // console.log(`[AIOLists Debug] Attempting to fetch external addon items from: ${attemptedUrl}`);
     
     const response = await axios.get(attemptedUrl, { timeout: 20000 });
     
     if (!response.data || !Array.isArray(response.data.metas)) {
       console.error(`[AIOLists ExternalAddon] Invalid metadata response from ${attemptedUrl}: Data or metas array missing. Response:`, response.data);
-      return { metas: [] };
+      return { metas: [], hasMovies: false, hasShows: false };
     }
 
-    let metas = response.data.metas;
+    let metasFromExternal = response.data.metas;
 
-    if (genre && metas.length > 0) {
-        const enrichedMetas = await enrichItemsWithCinemeta(metas);
-        metas = enrichedMetas.filter(meta => meta.genres && meta.genres.includes(genre));
+    // MODIFICATION: Apply correction if the source addon's name includes "Trakt up next" (case-insensitive)
+    if (sourceAddonConfig && typeof sourceAddonConfig.name === 'string' && sourceAddonConfig.name.toLowerCase().includes('trakt up next')) {
+        metasFromExternal = metasFromExternal.map(meta => {
+            if (meta && typeof meta.id === 'string' && meta.id.startsWith('tun_')) {
+                const correctedId = meta.id.substring(4);
+                // Ensure the corrected ID looks like an IMDb ID (e.g., tt1234567)
+                if (/^tt\d+$/.test(correctedId)) {
+                    // Return a new object with the corrected ID, spreading other properties
+                    return { ...meta, id: correctedId };
+                }
+            }
+            return meta; // Return original meta if no correction needed or applicable
+        });
     }
     
-    const hasMovies = metas.some(m => m.type === 'movie');
-    const hasShows = metas.some(m => m.type === 'series');
+    // Enrich items with Cinemeta data (using potentially corrected IDs)
+    let enrichedMetas = [];
+    if (metasFromExternal.length > 0) {
+        enrichedMetas = await enrichItemsWithCinemeta(metasFromExternal);
+    }
+    
+    // Apply genre filtering if a genre is specified, to the enriched metas
+    let finalMetas = enrichedMetas;
+    if (genre && finalMetas.length > 0) {
+        finalMetas = finalMetas.filter(meta => 
+            meta.genres && 
+            Array.isArray(meta.genres) && 
+            meta.genres.map(g => String(g).toLowerCase()).includes(String(genre).toLowerCase())
+        );
+    }
+    
+    const hasMovies = finalMetas.some(m => m.type === 'movie');
+    const hasShows = finalMetas.some(m => m.type === 'series');
 
-    return { metas, hasMovies, hasShows };
+    return { metas: finalMetas, hasMovies, hasShows };
 
   } catch (error) {
     console.error(`[AIOLists ExternalAddon] Error fetching items for external catalog ID '${targetOriginalId}' (type: '${targetOriginalType}', from addon '${sourceAddonConfig?.name}'). Attempted URL: ${attemptedUrl}. Error:`, error.message);
@@ -203,12 +220,12 @@ async function fetchExternalAddonItems(targetOriginalId, targetOriginalType, sou
     } else {
         console.error("[AIOLists ExternalAddon] Error stack:", error.stack);
     }
-    return { metas: [] };
+    return { metas: [], hasMovies: false, hasShows: false };
   }
 }
 
 module.exports = {
   importExternalAddon,
   fetchExternalAddonItems,
-  ExternalAddon
+  ExternalAddon 
 };
