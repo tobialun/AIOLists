@@ -72,7 +72,7 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
 
   const sortPrefsForImported = userConfig.sortPreferences?.[originalListIdForSortLookup] ||
                                ( (catalogIdFromRequest.startsWith('traktpublic_') || (addonDetails?.isTraktPublicList && originalListIdForSortLookup?.startsWith('traktpublic_'))) ? 
-                                 { sort: 'rank', order: 'asc' } : { sort: 'imdbvotes', order: 'desc' } );
+                                 { sort: 'rank', order: 'asc' } : { sort: 'default', order: 'desc' } );
 
   let itemsResult;
   
@@ -91,7 +91,7 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
         apiKey, 
         {}, // listsMetadata not typically needed for direct item fetch
         skip, 
-        'imdbvotes',
+        'default',
         'desc',      // Default order
         false,       // isUrlImported = false
         genre, 
@@ -160,7 +160,7 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
     if (catalogIdFromRequest === 'aiolists-watchlist-W') {
       mdbListOriginalIdFromCatalog = 'watchlist';
     }
-    const mdbListSortPrefs = sortPreferences?.[mdbListOriginalIdFromCatalog] || { sort: 'imdbvotes', order: 'desc' };
+    const mdbListSortPrefs = sortPreferences?.[mdbListOriginalIdFromCatalog] || { sort: 'default', order: 'desc' };
     
     let sortForMdbList = mdbListSortPrefs.sort;
     if (mdbListOriginalIdFromCatalog === 'watchlist' && itemTypeHintForFetching === null) { 

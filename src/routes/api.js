@@ -816,7 +816,7 @@ module.exports = function(router) {
                     listType: list.listType, 
                     tagImage: list.source === 'trakt' ? 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico' : null,
                     sortPreferences: req.userConfig.sortPreferences?.[originalListIdStr] || 
-                                     { sort: (list.source === 'trakt') ? 'rank' : 'imdbvotes', 
+                                     { sort: (list.source === 'trakt') ? 'rank' : 'default', 
                                        order: (list.source === 'trakt') ? 'asc' : 'desc' },
                     isMerged: (metadata.hasMovies && metadata.hasShows) ? (req.userConfig.mergedLists?.[manifestListId] !== false) : false, 
                     source: list.source 
@@ -856,7 +856,7 @@ module.exports = function(router) {
                             tag: tagType, 
                             tagImage: tagImage,
                             sortPreferences: req.userConfig.sortPreferences?.[sortOriginalId] || 
-                                             { sort: (isTraktPublicList ? 'rank' : 'imdbvotes'), 
+                                             { sort: (isTraktPublicList ? 'rank' : 'default'), 
                                                order: (isTraktPublicList ? 'asc' : 'desc') },
                             isMerged: (addon.hasMovies && addon.hasShows) ? (req.userConfig.mergedLists?.[addonGroupId] !== false) : false, 
                             source: isMDBListUrlImport ? 'mdblist_url' : (isTraktPublicList ? 'trakt_public' : 'addon_url_import'),
@@ -900,7 +900,7 @@ module.exports = function(router) {
                             tag: tagType, 
                             tagImage: tagImage,
                             sortPreferences: req.userConfig.sortPreferences?.[sortOriginalIdForSubCatalog] || 
-                                             { sort: 'imdbvotes', order: 'desc' }, 
+                                             { sort: 'default', order: 'desc' }, 
                             isMerged: (catalogHasMovies && catalogHasShows) ? (req.userConfig.mergedLists?.[catalogIdStr] !== false) : false, 
                             source: 'addon_manifest',
                             isUrlImportedType: false, 

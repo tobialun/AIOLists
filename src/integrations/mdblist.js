@@ -142,7 +142,7 @@ async function fetchListItems(
     apiKey,
     listsMetadata, // Generally not used when fetching a specific list's items directly
     stremioSkip = 0,
-    sort = 'imdbvotes',
+    sort = 'default',
     order = 'desc',
     isUrlImported = false, // Not directly relevant here, but part of original signature
     genre = null,

@@ -3,6 +3,7 @@
 // Define defaultConfig at a scope accessible by loadUserListsAndAddons if not already global
 const defaultConfig = { 
   availableSortOptions: [
+    { value: 'default', label: 'Default' },
     { value: 'imdbvotes', label: 'IMDb Votes' }, { value: 'rank', label: 'Rank' },
     { value: 'score', label: 'Score' }, { value: 'score_average', label: 'Score Average' },
     { value: 'released', label: 'Released' }, { value: 'releasedigital', label: 'Digital Release' },
@@ -758,7 +759,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const sortPrefKey = String(list.originalId);
         let currentSortPref = state.userConfig.sortPreferences?.[sortPrefKey] || list.sortPreferences; 
         if (!currentSortPref || typeof currentSortPref.sort === 'undefined' || typeof currentSortPref.order === 'undefined') {
-             currentSortPref = { sort: (list.source === 'trakt' || list.source === 'trakt_public') ? 'rank' : 'imdbvotes', order: (list.source === 'trakt' || list.source === 'trakt_public') ? 'asc' : 'desc' };
+             currentSortPref = { sort: (list.source === 'trakt' || list.source === 'trakt_public') ? 'rank' : 'default', order: (list.source === 'trakt' || list.source === 'trakt_public') ? 'asc' : 'desc' };
         }
         
         (currentSortOptions || []).forEach(opt => {
