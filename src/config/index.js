@@ -30,6 +30,7 @@ const defaultConfig = {
   enableRandomListFeature: false,
   randomMDBListUsernames: ['showtime416', 'garycrawfordgc', 'linaspurinis', 'hdlists'], 
   availableSortOptions: [
+    { value: 'default', label: 'Default' },
     { value: 'rank', label: 'Rank' },
     { value: 'score', label: 'Score' },
     { value: 'score_average', label: 'Average Score' },
