@@ -1,6 +1,4 @@
 // public/script.js
-
-// Define defaultConfig at a scope accessible by loadUserListsAndAddons if not already global
 const defaultConfig = { 
   availableSortOptions: [
     { value: 'default', label: 'Default' },
@@ -22,17 +20,16 @@ const defaultConfig = {
     { value: 'runtime', label: 'Runtime' }, { value: 'popularity', label: 'Trakt Popularity' },
     { value: 'votes', label: 'Trakt Votes' }, { value: 'my_rating', label: 'My Trakt Rating' }
   ],
-  enableRandomListFeature: false, // Added for client-side defaults
-  randomMDBListUsernames: ['showtime416', 'garycrawfordgc', 'linaspurinis', 'hdlists'] // Added
+  enableRandomListFeature: false,
+  randomMDBListUsernames: ['showtime416', 'garycrawfordgc', 'linaspurinis', 'hdlists']
 };
-
 
 document.addEventListener('DOMContentLoaded', function() {
   const state = {
     configHash: null,
     userConfig: { 
-        enableRandomListFeature: defaultConfig.enableRandomListFeature, // Initialize from defaultConfig
-        randomMDBListUsernames: [...defaultConfig.randomMDBListUsernames] // Initialize
+        enableRandomListFeature: defaultConfig.enableRandomListFeature,
+        randomMDBListUsernames: [...defaultConfig.randomMDBListUsernames]
     },
     currentLists: [],
     validationTimeout: null,

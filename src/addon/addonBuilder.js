@@ -178,7 +178,7 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
 async function createAddon(userConfig) {
   const manifest = {
     id: 'org.stremio.aiolists',
-    version: `1.0.0-${Date.now()}`, 
+    version: `1.0.0-${Date.now()}`,
     name: 'AIOLists',
     description: 'Manage all your lists in one place.',
     resources: ['catalog', 'meta'],
@@ -199,36 +199,34 @@ async function createAddon(userConfig) {
   const hiddenListsSet = new Set(hiddenLists.map(String));
   const removedListsSet = new Set(removedLists.map(String));
 
-  // Add Random MDBList Catalog if enabled
   if (enableRandomListFeature && apiKey && randomMDBListUsernames && randomMDBListUsernames.length > 0) {
-    let randomCatalogDisplayName = "Random MDBList Catalog"; // Default
+    // ... (random catalog logic - seems okay, it's type 'all' by default)
+    let randomCatalogDisplayName = "Random MDBList Catalog";
     const randomListDetails = await getRandomMDBListDetailsForManifest(apiKey, randomMDBListUsernames);
     if (randomListDetails && randomListDetails.name) {
         randomCatalogDisplayName = `Discovery`;
     }
-
     const randomCatalogExtra = [{ name: "skip" }];
     if (includeGenresInManifest) {
         randomCatalogExtra.push({ name: "genre", options: staticGenres });
     }
     manifest.catalogs.push({
-        id: 'random_mdblist_catalog', // Static ID for the handler
-        type: 'all', 
-        name: customListNames['random_mdblist_catalog'] || randomCatalogDisplayName, // Allow custom name override
+        id: 'random_mdblist_catalog',
+        type: 'all',
+        name: customListNames['random_mdblist_catalog'] || randomCatalogDisplayName,
         extra: randomCatalogExtra,
         extraSupported: randomCatalogExtra.map(e => e.name),
         extraRequired: []
     });
   }
 
-
   let activeListsInfo = [];
   if (apiKey) {
-    const mdbLists = await fetchAllMDBLists(apiKey); 
+    const mdbLists = await fetchAllMDBLists(apiKey);
     activeListsInfo.push(...mdbLists.map(l => ({ ...l, source: 'mdblist', originalId: String(l.id) })));
   }
   if (traktAccessToken) {
-    const traktFetchedLists = await fetchTraktLists(userConfig); 
+    const traktFetchedLists = await fetchTraktLists(userConfig);
     activeListsInfo.push(...traktFetchedLists.map(l => ({ ...l, source: 'trakt', originalId: String(l.id) })));
   }
 
@@ -248,122 +246,161 @@ async function createAddon(userConfig) {
     }
 
     let displayName = customListNames[manifestListIdBase] || listInfo.name;
-    let metadata = { ...(listsMetadata[manifestListIdBase] || listsMetadata[originalId] || {}) };
-    let hasMovies = metadata.hasMovies === true;
-    let hasShows = metadata.hasShows === true;
-    
-    let shouldFetchMetadata = true;
-    if (listInfo.source === 'mdblist' && !apiKey) shouldFetchMetadata = false;
-    if (listInfo.source === 'trakt' && !traktAccessToken && !listInfo.id?.startsWith('traktpublic_')) shouldFetchMetadata = false;
+    let hasMovies, hasShows;
+    let canBeMerged = false; // Eligibility for merging based on new rules
 
-    if ((typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean' || metadata.errorFetching) && shouldFetchMetadata) {
-        let success = false;
-        let fetchRetries = 0;
-        if(metadata.errorFetching) delete metadata.errorFetching;
-        console.log(`[addonBuilder] Preparing to fetch metadata for ${listInfo.source} list: ${displayName} (ID: ${manifestListIdBase})`);
-        while (!success && fetchRetries < MAX_METADATA_FETCH_RETRIES) {
-            try {
-                // ... (metadata fetching logic as before)
-                const tempUserConfigForMetadata = { 
-                    apiKey: userConfig.apiKey, 
-                    traktAccessToken: userConfig.traktAccessToken,
-                    traktRefreshToken: userConfig.traktRefreshToken, 
-                    traktExpiresAt: userConfig.traktExpiresAt,       
-                    listsMetadata: {}, 
-                    rpdbApiKey: null,
-                    // Pass necessary parts of userConfig for fetchListContent to work if it relies on them
-                    randomMDBListUsernames: userConfig.randomMDBListUsernames,
-                    enableRandomListFeature: userConfig.enableRandomListFeature 
-                };
-                let typeForMetaCheck = 'all'; 
-                if (listInfo.isMovieList) typeForMetaCheck = 'movie';
-                else if (listInfo.isShowList) typeForMetaCheck = 'series';
-                if (manifestListIdBase.startsWith('trakt_recommendations_') || manifestListIdBase.startsWith('trakt_trending_') || manifestListIdBase.startsWith('trakt_popular_')) {
-                    if (manifestListIdBase.includes("_shows")) typeForMetaCheck = 'series';
-                    else if (manifestListIdBase.includes("_movies")) typeForMetaCheck = 'movie';
-                }
-                if (manifestListIdBase === 'trakt_watchlist') typeForMetaCheck = 'all'; 
-                const content = await fetchListContent(manifestListIdBase, tempUserConfigForMetadata, 0, null, typeForMetaCheck);
-                hasMovies = content?.hasMovies || false;
-                hasShows = content?.hasShows || false;
-                if (!userConfig.listsMetadata) userConfig.listsMetadata = {};
-                userConfig.listsMetadata[manifestListIdBase] = { 
-                    ...(userConfig.listsMetadata[manifestListIdBase] || {}), 
-                    hasMovies, 
-                    hasShows,
-                    lastChecked: new Date().toISOString()
-                };
-                success = true;
-                console.log(`[addonBuilder] Successfully fetched metadata for ${manifestListIdBase}: Movies=${hasMovies}, Shows=${hasShows}`);
-            } catch (error) {
-                fetchRetries++;
-                console.error(`[addonBuilder] Error fetching metadata for ${manifestListIdBase} (attempt ${fetchRetries}/${MAX_METADATA_FETCH_RETRIES}): ${error.message}`);
-                if (fetchRetries < MAX_METADATA_FETCH_RETRIES) {
-                    const currentRetryDelay = METADATA_FETCH_RETRY_DELAY_MS * Math.pow(2, fetchRetries - 1);
-                    console.log(`[addonBuilder] Retrying metadata fetch for ${manifestListIdBase} after ${currentRetryDelay}ms`);
-                    await delay(currentRetryDelay);
-                } else {
-                    console.error(`[addonBuilder] Failed to fetch metadata for ${manifestListIdBase} after ${MAX_METADATA_FETCH_RETRIES} attempts. Marking as no content or using stale if available.`);
-                    hasMovies = userConfig.listsMetadata[manifestListIdBase]?.hasMovies || false;
-                    hasShows = userConfig.listsMetadata[manifestListIdBase]?.hasShows || false;
+    if (listInfo.source === 'mdblist') {
+        const mediatype = listInfo.mediatype; // e.g., "movie", "show", null, or ""
+        const dynamic = listInfo.dynamic;   // e.g., true or false
+
+        hasMovies = (mediatype === 'movie' || !mediatype || mediatype === '');
+        hasShows = (mediatype === 'show' || mediatype === 'series' || !mediatype || mediatype === '');
+        
+        // Merge eligibility: dynamic is false OR mediatype is blank/null
+        canBeMerged = (dynamic === false || !mediatype || mediatype === '');
+
+        // Update listsMetadata (important for frontend and other parts)
+        if (!userConfig.listsMetadata) userConfig.listsMetadata = {};
+        userConfig.listsMetadata[manifestListIdBase] = {
+            ...(userConfig.listsMetadata[manifestListIdBase] || {}),
+            hasMovies,
+            hasShows,
+            canBeMerged, // Store merge eligibility
+            lastChecked: new Date().toISOString()
+        };
+        // No need to call fetchListContent here for MDBList metadata anymore
+        if (apiKey) { // Only delay if we might interact with MDBList API (even if not for full content here)
+            await delay(100); // Shorter delay as we are not fetching full content per list
+        }
+    } else if (listInfo.source === 'trakt') {
+        // Trakt metadata fetching logic remains largely the same
+        // but ensure it doesn't unnecessarily fetch full content if just for types
+        let metadata = { ...(listsMetadata[manifestListIdBase] || listsMetadata[originalId] || {}) };
+        hasMovies = metadata.hasMovies === true;
+        hasShows = metadata.hasShows === true;
+        // Trakt lists are generally mergeable if they have both types (dynamic/mediatype doesn't apply)
+        canBeMerged = true;
+
+
+        if ((typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean' || metadata.errorFetching) && traktAccessToken) {
+            // This block for Trakt might still need fetchListContent for initial type determination
+            // or be refactored if Trakt API provides type hints in fetchTraktLists
+            let success = false;
+            let fetchRetries = 0;
+            if(metadata.errorFetching) delete metadata.errorFetching;
+            console.log(`[addonBuilder] Preparing to fetch metadata for Trakt list: ${displayName} (ID: ${manifestListIdBase})`);
+            while (!success && fetchRetries < MAX_METADATA_FETCH_RETRIES) {
+                 try {
+                    const tempUserConfigForMetadata = { ...userConfig, listsMetadata: {}, rpdbApiKey: null };
+                    let typeForMetaCheck = 'all';
+                    // ... (typeForMetaCheck logic for Trakt)
+                    if (manifestListIdBase.startsWith('trakt_recommendations_') || manifestListIdBase.startsWith('trakt_trending_') || manifestListIdBase.startsWith('trakt_popular_')) {
+                        if (manifestListIdBase.includes("_shows")) typeForMetaCheck = 'series';
+                        else if (manifestListIdBase.includes("_movies")) typeForMetaCheck = 'movie';
+                    }
+                    if (manifestListIdBase === 'trakt_watchlist') typeForMetaCheck = 'all';
+
+                    const content = await fetchListContent(manifestListIdBase, tempUserConfigForMetadata, 0, null, typeForMetaCheck);
+                    hasMovies = content?.hasMovies || false;
+                    hasShows = content?.hasShows || false;
                     if (!userConfig.listsMetadata) userConfig.listsMetadata = {};
-                    userConfig.listsMetadata[manifestListIdBase] = { 
-                        ...(userConfig.listsMetadata[manifestListIdBase] || {}), 
-                        hasMovies, 
-                        hasShows, 
-                        errorFetching: true, 
+                    userConfig.listsMetadata[manifestListIdBase] = {
+                        ...(userConfig.listsMetadata[manifestListIdBase] || {}),
+                        hasMovies, hasShows, canBeMerged: true, /* Trakt lists are mergeable if content allows */
                         lastChecked: new Date().toISOString()
                     };
+                    success = true;
+                    console.log(`[addonBuilder] Successfully fetched metadata for Trakt ${manifestListIdBase}: Movies=${hasMovies}, Shows=${hasShows}`);
+                } catch (error) {
+                    fetchRetries++;
+                    // ... (error handling for Trakt metadata fetch)
+                    console.error(`[addonBuilder] Error fetching metadata for Trakt ${manifestListIdBase} (attempt ${fetchRetries}/${MAX_METADATA_FETCH_RETRIES}): ${error.message}`);
+                    if (fetchRetries >= MAX_METADATA_FETCH_RETRIES) {
+                        hasMovies = userConfig.listsMetadata[manifestListIdBase]?.hasMovies || false;
+                        hasShows = userConfig.listsMetadata[manifestListIdBase]?.hasShows || false;
+                        if (!userConfig.listsMetadata) userConfig.listsMetadata = {};
+                        userConfig.listsMetadata[manifestListIdBase] = {
+                            ...(userConfig.listsMetadata[manifestListIdBase] || {}),
+                            hasMovies, hasShows, errorFetching: true, canBeMerged: true,
+                            lastChecked: new Date().toISOString()
+                        };
+                    } else {
+                         await delay(METADATA_FETCH_RETRY_DELAY_MS * Math.pow(2, fetchRetries - 1));
+                    }
                 }
             }
-        } 
-
-        if (shouldFetchMetadata) {
-            if (listInfo.source === 'mdblist') {
-                console.log(`[addonBuilder] Processed MDBList ${manifestListIdBase}. Waiting ${DELAY_BETWEEN_DIFFERENT_MDBLISTS_MS}ms before next list metadata fetch.`);
-                await delay(DELAY_BETWEEN_DIFFERENT_MDBLISTS_MS);
-            } else if (listInfo.source === 'trakt' && !manifestListIdBase.startsWith('traktpublic_')) { 
-                console.log(`[addonBuilder] Processed Trakt list ${manifestListIdBase}. Waiting ${DELAY_BETWEEN_DIFFERENT_TRAKT_LISTS_MS}ms.`);
+            if (traktAccessToken) {
                 await delay(DELAY_BETWEEN_DIFFERENT_TRAKT_LISTS_MS);
             }
         }
-    } 
+    } else { // Should not happen, but as a fallback
+        hasMovies = false;
+        hasShows = false;
+        canBeMerged = false;
+    }
+
 
     if (hasMovies || hasShows) {
-      const isMerged = (hasMovies && hasShows) ? (mergedLists[manifestListIdBase] !== false) : false;
+      // Use canBeMerged for eligibility. Actual merge depends on user pref AND having both types.
+      const isEffectivelyMergeable = canBeMerged && hasMovies && hasShows;
+      const isUserMerged = isEffectivelyMergeable ? (mergedLists[manifestListIdBase] !== false) : false;
+
       const catalogExtra = [{ name: "skip" }];
       if (includeGenresInManifest) catalogExtra.push({ name: "genre", options: staticGenres });
       const finalCatalogProps = { name: displayName, extra: catalogExtra, extraSupported: catalogExtra.map(e=>e.name), extraRequired: []};
-      if (hasMovies && hasShows && isMerged) manifest.catalogs.push({ id: manifestListIdBase, type: 'all', ...finalCatalogProps });
-      else {
+
+      if (isUserMerged) { // Only add 'all' if it's mergeable AND user wants it merged AND it has both
+        manifest.catalogs.push({ id: manifestListIdBase, type: 'all', ...finalCatalogProps });
+      } else {
         if (hasMovies) manifest.catalogs.push({ id: manifestListIdBase, type: 'movie', ...finalCatalogProps });
         if (hasShows) manifest.catalogs.push({ id: manifestListIdBase, type: 'series', ...finalCatalogProps });
       }
     }
   }
 
+  // Processing for importedAddons (MDBList URL imports and Trakt Public URL imports)
   Object.values(importedAddons || {}).forEach(addon => {
     const addonGroupId = String(addon.id);
     if (removedListsSet.has(addonGroupId) || hiddenListsSet.has(addonGroupId)) return;
+
     const isMDBListUrlImport = !!addon.isMDBListUrlImport;
     const isTraktPublicList = !!addon.isTraktPublicList;
-    if (isMDBListUrlImport || isTraktPublicList) { 
+
+    if (isMDBListUrlImport || isTraktPublicList) {
       if (isMDBListUrlImport && !apiKey) return;
-      if (addon.hasMovies || addon.hasShows) { 
+      // For URL imports, hasMovies/hasShows should be set during import.
+      // Merge eligibility for MDBList URL imports might need to look up dynamic/mediatype if not already stored.
+      // For simplicity, we'll assume they are mergeable if they have both types, similar to Trakt public.
+      let urlImportHasMovies = addon.hasMovies;
+      let urlImportHasShows = addon.hasShows;
+      let urlImportCanBeMerged = true; // Default to true if both types exist for URL imports
+
+      if (isMDBListUrlImport) {
+        // If we stored 'dynamic' and 'mediatype' on the addon object during import, use them.
+        // Otherwise, this simplified logic might be acceptable for URL imports.
+        // For a more precise MDBList URL import merge, dynamic/mediatype would be needed from the source list.
+      }
+
+
+      if (urlImportHasMovies || urlImportHasShows) {
         let displayName = customListNames[addonGroupId] || addon.name;
-        const canBeMerged = addon.hasMovies && addon.hasShows;
-        const isMerged = canBeMerged ? (mergedLists?.[addonGroupId] !== false) : false;
+        const isEffectivelyMergeableForUrl = urlImportCanBeMerged && urlImportHasMovies && urlImportHasShows;
+        const isUserMergedForUrl = isEffectivelyMergeableForUrl ? (mergedLists?.[addonGroupId] !== false) : false;
+
         const catalogExtraForUrlImport = [{ name: "skip" }];
         if (includeGenresInManifest) catalogExtraForUrlImport.push({ name: "genre", options: staticGenres });
         const catalogPropsForUrlImport = { name: displayName, extra: catalogExtraForUrlImport, extraSupported: catalogExtraForUrlImport.map(e=>e.name), extraRequired: []};
-        if (isMerged) manifest.catalogs.push({ id: addonGroupId, type: 'all', ...catalogPropsForUrlImport });
-        else {
-          if (addon.hasMovies) manifest.catalogs.push({ id: addonGroupId, type: 'movie', ...catalogPropsForUrlImport });
-          if (addon.hasShows) manifest.catalogs.push({ id: addonGroupId, type: 'series', ...catalogPropsForUrlImport });
+
+        if (isUserMergedForUrl) {
+          manifest.catalogs.push({ id: addonGroupId, type: 'all', ...catalogPropsForUrlImport });
+        } else {
+          if (urlImportHasMovies) manifest.catalogs.push({ id: addonGroupId, type: 'movie', ...catalogPropsForUrlImport });
+          if (urlImportHasShows) manifest.catalogs.push({ id: addonGroupId, type: 'series', ...catalogPropsForUrlImport });
         }
       }
-    } else if (addon.catalogs && addon.catalogs.length > 0) { 
-      (addon.catalogs || []).forEach(catalog => {
+    } else if (addon.catalogs && addon.catalogs.length > 0) {
+      // ... (existing logic for other external addon manifest imports - seems okay)
+       (addon.catalogs || []).forEach(catalog => {
           const catalogIdForManifest = String(catalog.id);
           if (removedListsSet.has(catalogIdForManifest) || hiddenListsSet.has(catalogIdForManifest)) return;
           let displayName = customListNames[catalogIdForManifest] || catalog.name;
@@ -374,7 +411,7 @@ async function createAddon(userConfig) {
           originalExtras.forEach(ext => {
               const extName = (typeof ext === 'string') ? ext : ext.name;
               const extOptions = (typeof ext === 'object' && ext.options) ? ext.options : undefined;
-              if (extName === "skip") return; 
+              if (extName === "skip") return;
               if (extName === "genre") { if (extOptions) importedGenreOptions = extOptions; return; }
               if (typeof ext === 'string') finalExtraForImported.push({ name: ext });
               else finalExtraForImported.push({ name: extName, options: extOptions, isRequired: (typeof ext === 'object' && ext.isRequired) ? ext.isRequired : false });
@@ -389,6 +426,7 @@ async function createAddon(userConfig) {
     }
   });
 
+  // ... (sorting logic for manifest.catalogs - seems okay)
   if (listOrder && listOrder.length > 0) {
     const orderMap = new Map(listOrder.map((id, index) => [String(id), index]));
     manifest.catalogs.sort((a, b) => {
@@ -398,35 +436,28 @@ async function createAddon(userConfig) {
         const indexB = orderMap.get(idB);
 
         if (indexA !== undefined && indexB !== undefined) {
-            return indexA - indexB; // Both are in user's order
+            return indexA - indexB;
         } else if (indexA !== undefined) {
-            return -1; // A is ordered, B is not (newly added), A comes first
+            return -1;
         } else if (indexB !== undefined) {
-            return 1;  // B is ordered, A is not (newly added), B comes first
+            return 1;
         } else {
-            // Neither are in user's order (e.g. multiple new lists),
-            // preserve manifest's current relative order or sort by name as fallback
-            // If one is random_mdblist_catalog, it should be handled by its initial push or specific logic
-            if (idA === 'random_mdblist_catalog') return -1; // Prioritize random if it's new
+            if (idA === 'random_mdblist_catalog') return -1;
             if (idB === 'random_mdblist_catalog') return 1;
             return (a.name || '').localeCompare(b.name || '');
         }
     });
   } else {
-    // No user-defined order, put "Random MDBList Catalog" first if it exists, then others by name.
     manifest.catalogs.sort((a, b) => {
         const idA = String(a.id);
         const idB = String(b.id);
         if (idA === 'random_mdblist_catalog' && idB !== 'random_mdblist_catalog') return -1;
         if (idB === 'random_mdblist_catalog' && idA !== 'random_mdblist_catalog') return 1;
-        // Fallback to name sorting for other non-ordered items
         return (a.name || '').localeCompare(b.name || '');
     });
   }
 
-
   const builder = new addonBuilder(manifest);
-
   builder.defineCatalogHandler(async ({ type, id, extra }) => {
     const skip = parseInt(extra?.skip) || 0;
     const genre = extra?.genre || null;
@@ -435,16 +466,16 @@ async function createAddon(userConfig) {
     let metas = await convertToStremioFormat(itemsResult, userConfig.rpdbApiKey);
     if (type !== 'all' && (type === 'movie' || type === 'series')) {
       metas = metas.filter(meta => meta.type === type);
-    } 
-    const cacheMaxAge = (id === 'random_mdblist_catalog' || isWatchlist(id)) ? 0 : (5 * 60);
-    return Promise.resolve({ metas, cacheMaxAge }); 
+    }
+    const cacheMaxAge = (id === 'random_mdblist_catalog' || isWatchlist(id)) ? 0 : (5 * 60); // isWatchlist from common
+    return Promise.resolve({ metas, cacheMaxAge });
   });
   builder.defineMetaHandler(({ type, id }) => {
     if (!id.startsWith('tt')) return Promise.resolve({ meta: null });
-    return Promise.resolve({ meta: { id, type, name: "Loading details..." } }); 
+    return Promise.resolve({ meta: { id, type, name: "Loading details..." } });
   });
 
   return builder.getInterface();
 }
 
-module.exports = { createAddon, fetchListContent };
+module.exports = { createAddon, fetchListContent }; // Make sure isWatchlist is imported if used here

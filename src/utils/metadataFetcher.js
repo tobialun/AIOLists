@@ -2,7 +2,7 @@
 const axios = require('axios');
 
 const MAX_IDS_PER_CINEMETA_REQUEST = 40; // Chunk size for Cinemeta requests (reduced for safety)
-const CINEMETA_REQUEST_TIMEOUT = 15000; // 15 seconds timeout for each Cinemeta chunk
+const CINEMETA_REQUEST_TIMEOUT = 20000; // 15 seconds timeout for each Cinemeta chunk
 
 /**
  * Fetches detailed metadata from Cinemeta for a chunk of IMDb IDs.

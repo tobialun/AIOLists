@@ -34,7 +34,7 @@ async function validateRPDBKey(rpdbApiKey) {
   
   try {
     const response = await axios.get(`https://api.ratingposterdb.com/${rpdbApiKey}/isValid`, {
-      timeout: 10000
+      timeout: 15000
     });
     
     return response.status === 200 && response.data && response.data.valid === true;
@@ -90,14 +90,14 @@ async function fetchPosterFromRPDB(imdbId, rpdbApiKey) {
   try {
     const url = `https://api.ratingposterdb.com/${rpdbApiKey}/imdb/poster-default/${imdbId}.jpg`;
     try {
-      await axios.head(url, { timeout: 5000, validateStatus: status => status === 200 });
+      await axios.head(url, { timeout: 10000, validateStatus: status => status === 200 });
       posterCache.set(cacheKey, url);
       return url;
     } catch (headError) {
       if (headError.response?.status === 404) {
         const mediumUrl = url.replace('poster-default', 'poster-medium');
          try {
-            await axios.head(mediumUrl, { timeout: 5000, validateStatus: status => status === 200 });
+            await axios.head(mediumUrl, { timeout: 10000, validateStatus: status => status === 200 });
             posterCache.set(cacheKey, mediumUrl);
             return mediumUrl;
         } catch (mediumHeadError) {
