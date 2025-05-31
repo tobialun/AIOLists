@@ -1,18 +1,24 @@
 const zlib = require('zlib');
 const { promisify } = require('util');
-const { defaultConfig } = require('../config');
+const { defaultConfig } = require('../config'); // Ensures defaultConfig is from the backend
 
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
 
 /**
- * Compress configuration object into a URL-safe string
+ * Compress configuration object into a URL-safe string.
+ * Sort options are excluded from the compressed string.
  * @param {Object} config Configuration object to compress
  * @returns {Promise<string>} URL-safe compressed string
  */
 async function compressConfig(config) {
   try {
-    const configString = JSON.stringify(config);
+    // Create a shallow copy for serialization, excluding specific keys
+    const configToSerialize = { ...config };
+    delete configToSerialize.availableSortOptions;
+    delete configToSerialize.traktSortOptions;
+
+    const configString = JSON.stringify(configToSerialize);
     const compressed = await gzip(Buffer.from(configString, 'utf-8'));
     // Convert to base64 and make URL safe
     return compressed.toString('base64')
@@ -26,7 +32,8 @@ async function compressConfig(config) {
 }
 
 /**
- * Decompress URL-safe string back into configuration object
+ * Decompress URL-safe string back into configuration object.
+ * Merges with defaultConfig to ensure all fields, including sort options, are present.
  * @param {string} compressed URL-safe compressed string
  * @returns {Promise<Object>} Configuration object
  */
@@ -37,44 +44,43 @@ async function decompressConfig(compressed) {
     }
 
     if (!compressed || typeof compressed !== 'string') {
+      console.warn('DecompressConfig: Invalid or empty compressed string, returning default config.');
       return { ...defaultConfig };
     }
 
-    // Clean the input string
     const cleanCompressed = compressed.trim();
     if (!cleanCompressed) {
+      console.warn('DecompressConfig: Cleaned compressed string is empty, returning default config.');
       return { ...defaultConfig };
     }
 
-    // Restore base64 standard characters
     const base64 = cleanCompressed
       .replace(/-/g, '+')
       .replace(/_/g, '/');
 
-    // Add padding if needed
     const pad = base64.length % 4;
     const paddedBase64 = pad ? base64 + '='.repeat(4 - pad) : base64;
 
+    let parsedConfig = {};
     try {
       const buffer = Buffer.from(paddedBase64, 'base64');
       const decompressed = await gunzip(buffer);
       const configString = decompressed.toString('utf-8');
-      
-      try {
-        const config = JSON.parse(configString);
-        // Ensure all required fields exist by merging with default config
-        return { ...defaultConfig, ...config };
-      } catch (parseError) {
-        console.error('Error parsing decompressed config:', parseError);
-        return { ...defaultConfig };
+      if (configString) {
+        parsedConfig = JSON.parse(configString);
+      } else {
+        console.warn('DecompressConfig: Decompressed string is empty.');
       }
-    } catch (decompressError) {
-      console.error('Error decompressing config:', decompressError);
+    } catch (decompressOrParseError) {
+      console.error('Error decompressing or parsing config:', decompressOrParseError.message, '- Hash was:', compressed.substring(0, 50) + "...");
+      // Fallback to default config on error
       return { ...defaultConfig };
     }
+    return { ...defaultConfig, ...parsedConfig };
+
   } catch (error) {
     console.error('Unexpected error in decompressConfig:', error);
-    return { ...defaultConfig };
+    return { ...defaultConfig }; // Final fallback
   }
 }
 
@@ -84,26 +90,29 @@ async function decompressConfig(compressed) {
  * @returns {Object} A configuration object suitable for sharing.
  */
 function createShareableConfig(config) {
-  const shareableConfig = JSON.parse(JSON.stringify(config)); // Deep clone
+  const shareableConfig = JSON.parse(JSON.stringify(config)); 
 
   delete shareableConfig.apiKey;
   delete shareableConfig.rpdbApiKey;
   delete shareableConfig.traktAccessToken;
   delete shareableConfig.traktRefreshToken;
   delete shareableConfig.traktExpiresAt;
-  delete shareableConfig.mdblistUsername; // Also remove username if present
+  delete shareableConfig.mdblistUsername; 
+  delete shareableConfig.availableSortOptions;
+  delete shareableConfig.traktSortOptions;
 
   return shareableConfig;
 }
 
 /**
  * Compress a shareable configuration object into a URL-safe string.
- * @param {Object} config Configuration object to compress (should be pre-stripped of API keys).
+ * @param {Object} config Configuration object to compress.
  * @returns {Promise<string>} URL-safe compressed string for sharing.
  */
 async function compressShareableConfig(config) {
-  const shareable = createShareableConfig(config); // Ensure it's stripped
-  return compressConfig(shareable);
+  const shareable = createShareableConfig(config); 
+  // The main compressConfig already omits sort options, but createShareableConfig also ensures API keys are gone.
+  return compressConfig(shareable); 
 }
 
 module.exports = {
