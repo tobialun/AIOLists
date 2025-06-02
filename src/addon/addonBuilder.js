@@ -178,7 +178,7 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
 async function createAddon(userConfig) {
   const manifest = {
     id: 'org.stremio.aiolists',
-    version: `1.0.0-${Date.now()}`,
+    version: `1.0.1-${Date.now()}`,
     name: 'AIOLists',
     description: 'Manage all your lists in one place.',
     resources: ['catalog', 'meta'],

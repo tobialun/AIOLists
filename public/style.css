@@ -522,3 +522,13 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 .list-item.mobile-list-item.requires-connection .sort-controls {
     display: none !important;
 }
+
+.label-link-icon {
+  margin-left: 5px;
+  text-decoration: none;
+  color: #8E5AF7;
+  font-size: 0.9em;
+}
+.label-link-icon:hover {
+  text-decoration: underline;
+}
