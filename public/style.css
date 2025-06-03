@@ -532,3 +532,64 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 .label-link-icon:hover {
   text-decoration: underline;
 }
+
+.edit-random-users-link {
+  font-size: 0.85em;
+  color: #8E5AF7;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.edit-random-users-link:hover {
+  text-decoration: underline;
+}
+
+.random-users-dropdown {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background-color: #f9f9f9;
+  max-width: 1000px;
+  display: block;
+}
+
+.random-users-tag-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.random-user-tag {
+  background-color: #e0e0e0;
+  color: #333;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 0.85em;
+  display: inline-flex;
+  align-items: center;
+}
+
+.remove-user-tag {
+  margin-left: 6px;
+  cursor: pointer;
+  font-weight: bold;
+  color: #777;
+}
+.remove-user-tag:hover {
+  color: #000;
+}
+
+.random-user-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.list-item[data-id="random_mdblist_catalog"] .sort-controls {
+  display: flex !important; /* Example override, might need refinement based on actual class conflicts */
+}

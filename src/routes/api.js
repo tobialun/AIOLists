@@ -79,7 +79,6 @@ function purgeListConfigs(userConfig, listIdPrefixOrExactId, isExactId = false) 
 module.exports = function(router) {
   router.param('configHash', async (req, res, next, configHash) => {
     try {
-      // decompressConfig merges with backend's defaultConfig, so req.userConfig will have sort options server-side
       req.userConfig = await decompressConfig(configHash);
       req.configHash = configHash;
       req.isPotentiallySharedConfig = (!req.userConfig.apiKey && Object.values(req.userConfig.importedAddons || {}).some(addon => addon.isMDBListUrlImport)) ||
@@ -124,7 +123,7 @@ module.exports = function(router) {
 
   router.post('/:configHash/config/random-list-feature', async (req, res) => {
     try {
-      const { enable } = req.body;
+      const { enable, randomMDBListUsernames } = req.body; // Added randomMDBListUsernames
       if (typeof enable !== 'boolean') {
         return res.status(400).json({ success: false, error: 'Invalid value for enable. Must be boolean.' });
       }
@@ -133,6 +132,21 @@ module.exports = function(router) {
       }
 
       req.userConfig.enableRandomListFeature = enable;
+      
+      // Update randomMDBListUsernames if provided and valid
+      if (randomMDBListUsernames !== undefined) {
+        if (Array.isArray(randomMDBListUsernames) && randomMDBListUsernames.every(u => typeof u === 'string')) {
+            req.userConfig.randomMDBListUsernames = randomMDBListUsernames.map(u => u.trim()).filter(u => u.length > 0);
+            if (req.userConfig.randomMDBListUsernames.length === 0 && defaultConfig.randomMDBListUsernames.length > 0) {
+                // If user clears all, revert to default non-empty list to prevent issues
+                req.userConfig.randomMDBListUsernames = [...defaultConfig.randomMDBListUsernames];
+                 console.warn("Random MDBList usernames cleared by user, reverting to internal default to ensure functionality.");
+            }
+        } else {
+            return res.status(400).json({ success: false, error: 'Invalid format for randomMDBListUsernames. Must be an array of strings.' });
+        }
+      }
+      
       req.userConfig.lastUpdated = new Date().toISOString();
       
       if (!enable) {
@@ -146,7 +160,8 @@ module.exports = function(router) {
 
       const newConfigHash = await compressConfig(req.userConfig);
       manifestCache.clear();
-      res.json({ success: true, configHash: newConfigHash });
+      // Send back the potentially updated list of usernames
+      res.json({ success: true, configHash: newConfigHash, randomMDBListUsernames: req.userConfig.randomMDBListUsernames });
     } catch (error)
     {
       console.error('Error updating random list feature setting:', error);
@@ -163,7 +178,6 @@ module.exports = function(router) {
       const cacheKey = `manifest_${req.configHash}`;
       let addonInterface = manifestCache.get(cacheKey);
       if (!addonInterface) {
-        // createAddon uses req.userConfig, which includes sort options from backend defaultConfig
         addonInterface = await createAddon(req.userConfig);
         manifestCache.set(cacheKey, addonInterface);
       }
@@ -218,7 +232,6 @@ module.exports = function(router) {
         setCacheHeaders(res, catalogId);
       }
 
-      // fetchListContent uses req.userConfig which has sort options from backend defaultConfig
       const itemsResult = await fetchListContent(catalogId, req.userConfig, skip, genre, catalogType);
       
       if (!itemsResult) {
@@ -232,8 +245,6 @@ module.exports = function(router) {
       } else if (catalogType !== 'all') { 
         const addonInfo = req.userConfig.importedAddons && req.userConfig.importedAddons[catalogId.split('_')[0]]; 
         if (!(addonInfo && addonInfo.types && addonInfo.types.includes(catalogType))) {
-          // If catalogType is not 'all', 'movie', or 'series', and not explicitly supported by imported addon,
-          // it might result in empty list if items don't match. This seems like existing logic.
         }
         metas = metas.filter(meta => meta.type === catalogType);
       }
@@ -252,13 +263,9 @@ module.exports = function(router) {
   });
 
   router.get('/:configHash/config', (req, res) => {
-    // req.userConfig has sort options from decompressConfig's merge with backend defaultConfig
     const configToSend = JSON.parse(JSON.stringify(req.userConfig));
-
-    // *** Modification: Remove sort options before sending to client ***
     delete configToSend.availableSortOptions;
     delete configToSend.traktSortOptions;
-
     configToSend.hiddenLists = Array.from(new Set(configToSend.hiddenLists || []));
     configToSend.removedLists = Array.from(new Set(configToSend.removedLists || []));
     res.json({ success: true, config: configToSend, isPotentiallySharedConfig: req.isPotentiallySharedConfig });
@@ -301,7 +308,7 @@ module.exports = function(router) {
       
       if (configChanged) {
         req.userConfig.lastUpdated = new Date().toISOString();
-        const newConfigHash = await compressConfig(req.userConfig); // compressConfig removes sort options from hash
+        const newConfigHash = await compressConfig(req.userConfig); 
         manifestCache.clear(); 
         return res.json({ success: true, configHash: newConfigHash });
       }
@@ -328,7 +335,7 @@ module.exports = function(router) {
         res.json({ 
             success: true, 
             configHash: newConfigHash, 
-            accessToken: traktTokens.accessToken, // Keep sending these for immediate UI update if needed
+            accessToken: traktTokens.accessToken, 
             refreshToken: traktTokens.refreshToken,
             expiresAt: traktTokens.expiresAt,
             message: 'Authenticated with Trakt' 
@@ -381,8 +388,8 @@ module.exports = function(router) {
                 hasShows: importedListDetails.hasShows,
                 isMDBListUrlImport: true,
                 mdblistId: importedListDetails.listId,
-                dynamic: importedListDetails.dynamic, // Store these for MDBList URL imports
-                mediatype: importedListDetails.mediatype, // Store these
+                dynamic: importedListDetails.dynamic, 
+                mediatype: importedListDetails.mediatype, 
                 types: [
                     ...(importedListDetails.hasMovies ? ['movie'] : []),
                     ...(importedListDetails.hasShows ? ['series'] : [])
@@ -390,7 +397,7 @@ module.exports = function(router) {
             };
         } else if (url.includes('trakt.tv/users/') && url.includes('/lists/')) {
             importedListDetails = await fetchPublicTraktListDetails(url);
-            addonId = importedListDetails.listId; // This is already like traktpublic_user_slug
+            addonId = importedListDetails.listId; 
             listNameForDisplay = importedListDetails.listName;
             sourceSystem = "Trakt Public";
             addonToStore = {
@@ -400,7 +407,7 @@ module.exports = function(router) {
                 hasShows: importedListDetails.hasShows,
                 isTraktPublicList: true,
                 traktUser: importedListDetails.traktUser,
-                traktListSlug: importedListDetails.originalTraktSlug, // Use original slug from Trakt
+                traktListSlug: importedListDetails.originalTraktSlug, 
                 types: [
                     ...(importedListDetails.hasMovies ? ['movie'] : []),
                     ...(importedListDetails.hasShows ? ['series'] : [])
@@ -657,7 +664,6 @@ module.exports = function(router) {
         }
         
         let canBeMerged = false;
-        // req.userConfig.listsMetadata is populated server-side and might come from fetchListContent via createAddon
         const listInfoFromMetadata = req.userConfig.listsMetadata?.[listId];
         const listInfoFromImported = req.userConfig.importedAddons?.[listId];
 
@@ -665,7 +671,7 @@ module.exports = function(router) {
             if (listInfoFromMetadata.hasMovies && listInfoFromMetadata.hasShows) {
                 canBeMerged = true;
             }
-        } else if (listInfoFromImported) { // Fallback to importedAddons if not in listsMetadata
+        } else if (listInfoFromImported) { 
             if (listInfoFromImported.hasMovies && listInfoFromImported.hasShows) {
                 canBeMerged = true;
             }
@@ -689,19 +695,17 @@ module.exports = function(router) {
 
   router.post('/config/create', async (req, res) => {
     try {
-      // Start with backend's defaultConfig (which includes sort options)
       let newConfig = { ...defaultConfig, listOrder: [], hiddenLists: [], removedLists: [], customListNames: {}, mergedLists: {}, sortPreferences: {}, importedAddons: {}, listsMetadata: {}, enableRandomListFeature: false, lastUpdated: new Date().toISOString() };
       
       if (req.body.sharedConfig) {
-        const sharedSettings = await decompressConfig(req.body.sharedConfig); // This will also merge with backend defaultConfig
+        const sharedSettings = await decompressConfig(req.body.sharedConfig); 
         const shareablePart = createShareableConfig(sharedSettings); 
-        newConfig = { ...newConfig, ...shareablePart }; // Merge shareable parts, non-shareable defaults remain
+        newConfig = { ...newConfig, ...shareablePart }; 
       }
       
       const { sharedConfig, ...otherBodyParams } = req.body;
       newConfig = { ...newConfig, ...otherBodyParams };
 
-      // compressConfig will remove default sort options from the hash
       const configHash = await compressConfig(newConfig);
       res.json({ success: true, configHash });
     } catch (error) { console.error('Error in /config/create:', error); res.status(500).json({ error: 'Failed to create configuration' }); }
@@ -736,19 +740,13 @@ module.exports = function(router) {
 
   router.get('/:configHash/lists', async (req, res) => {
     try {
-      // ... (existing logic to fetch and process allUserLists) ...
-      // This part of the code remains complex and fetches metadata, which populates req.userConfig.listsMetadata
-      // Ensure that any `fetchListContent` calls within this `/lists` endpoint or its sub-functions
-      // correctly use `req.userConfig` which contains the necessary sort options (from backend defaultConfig)
-      // if those sort options are needed for API calls (e.g. to Trakt).
-
       let allUserLists = [];
       if (req.userConfig.apiKey) {
           const mdbLists = await fetchAllMDBLists(req.userConfig.apiKey);
           allUserLists.push(...mdbLists.map(l => ({...l, source: 'mdblist'})));
       }
       if (req.userConfig.traktAccessToken) {
-          const traktLists = await fetchTraktUserLists(req.userConfig); // Uses req.userConfig
+          const traktLists = await fetchTraktUserLists(req.userConfig); 
           allUserLists.push(...traktLists.map(l => ({...l, source: 'trakt'})));
       }
 
@@ -761,13 +759,14 @@ module.exports = function(router) {
       if (req.userConfig.enableRandomListFeature && req.userConfig.apiKey) {
         const randomCatalogUIEntry = {
             id: 'random_mdblist_catalog',
-            originalId: 'random_mdblist_catalog',
+            originalId: 'random_mdblist_catalog', // Use this as the key for sortPreferences
             name: 'Random MDBList Catalog',
             customName: req.userConfig.customListNames?.['random_mdblist_catalog'] || null,
             isHidden: (req.userConfig.hiddenLists || []).includes('random_mdblist_catalog'),
             hasMovies: true, hasShows: true, canBeMerged: false, 
             isRandomCatalog: true, tag: '🎲', tagImage: null,
-            sortPreferences: {}, isMerged: false, source: 'random_mdblist'
+            sortPreferences: req.userConfig.sortPreferences?.['random_mdblist_catalog'] || { sort: 'default', order: 'desc' },
+            isMerged: false, source: 'random_mdblist'
         };
         if (randomCatalogUIEntry.customName) randomCatalogUIEntry.name = randomCatalogUIEntry.customName;
         processedLists.push(randomCatalogUIEntry);
@@ -827,7 +826,6 @@ module.exports = function(router) {
             const actualCanBeMerged = canBeMergedFromSource && hasMovies && hasShows;
             const isUserMerged = actualCanBeMerged ? (req.userConfig.mergedLists?.[manifestListId] !== false) : false;
             
-            // Determine default sort for this list type
             let defaultSort = { sort: (list.source === 'trakt') ? 'rank' : 'default', order: (list.source === 'trakt') ? 'asc' : 'desc' };
             if (list.source === 'trakt' && list.isTraktWatchlist) {
                 defaultSort = { sort: 'added', order: 'desc' };
@@ -855,8 +853,8 @@ module.exports = function(router) {
                 tagImage: list.source === 'trakt' ? 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico' : null,
                 sortPreferences: req.userConfig.sortPreferences?.[originalListIdStr] || defaultSort,
                 source: list.source,
-                dynamic: list.dynamic, // Keep sending these for UI logic
-                mediatype: list.mediatype // Keep sending these for UI logic
+                dynamic: list.dynamic, 
+                mediatype: list.mediatype 
             };
         });
         
@@ -915,8 +913,8 @@ module.exports = function(router) {
                           traktUser: addon.traktUser,
                           traktListSlug: addon.traktListSlug,
                           requiresApiKey: isMDBListUrlImport ? 'mdblist' : (isTraktPublicList ? null : null),
-                          dynamic: isMDBListUrlImport ? addon.dynamic : undefined, // Pass MDBList specific for UI
-                          mediatype: isMDBListUrlImport ? addon.mediatype : undefined // Pass MDBList specific for UI
+                          dynamic: isMDBListUrlImport ? addon.dynamic : undefined, 
+                          mediatype: isMDBListUrlImport ? addon.mediatype : undefined 
                       });
                   }
               }
@@ -979,7 +977,8 @@ module.exports = function(router) {
       lists: processedLists,
       importedAddons: req.userConfig.importedAddons || {},
       listsMetadata: req.userConfig.listsMetadata, 
-      isPotentiallySharedConfig: req.isPotentiallySharedConfig
+      isPotentiallySharedConfig: req.isPotentiallySharedConfig,
+      randomMDBListUsernames: req.userConfig.randomMDBListUsernames // Send current usernames
     };
 
     if (configChangedDueToMetadataFetch) { 
