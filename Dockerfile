@@ -1,17 +1,12 @@
-# Use an official Node.js runtime as a parent image
-FROM node:18-alpine As builder
-
-# Set the working directory in the container
+FROM node:18-alpine as builder
 WORKDIR /usr/src/app
 
-# Copy package.json and package-lock.json (or npm-shrinkwrap.json)
+RUN apk add --no-cache git
+RUN git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+
 COPY package*.json ./
+RUN npm ci --omit=dev # Changed to --omit=dev as per npm warning
 
-# Install app dependencies
-# Use 'npm ci' for faster, more reliable installs in CI/CD environments
-RUN npm ci --only=production
-
-# Copy app source code
 COPY . .
 
 # --- Release Stage ---

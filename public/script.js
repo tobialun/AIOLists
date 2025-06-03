@@ -172,13 +172,13 @@ document.addEventListener('DOMContentLoaded', function() {
   
     elements.copyConfigHashBtnInstance = document.createElement('button');
     elements.copyConfigHashBtnInstance.id = 'copyConfigHashBtn';
-    elements.copyConfigHashBtnInstance.textContent = 'Copy Config Hash'; 
-    elements.copyConfigHashBtnInstance.title = 'Copy a shareable config hash (API keys excluded)';
+    elements.copyConfigHashBtnInstance.textContent = 'Copy Setup Code'; 
+    elements.copyConfigHashBtnInstance.title = 'Copy a shareable config code (API keys excluded)';
     elements.copyConfigHashBtnInstance.className = 'action-btn';
     
     const descriptionText = document.createElement('span');
     descriptionText.className = 'setting-info-text';
-    descriptionText.textContent = 'Copy config to share with others (API Keys excluded).';
+    descriptionText.textContent = 'Copy setup code to share your setup with others (API Keys excluded).';
     descriptionText.style.marginLeft = '10px'; 
   
     if (elements.copyConfigHashContainer) {
@@ -199,8 +199,8 @@ document.addEventListener('DOMContentLoaded', function() {
         await navigator.clipboard.writeText(data.shareableHash);
   
         const buttonInstance = elements.copyConfigHashBtnInstance || document.getElementById('copyConfigHashBtn');
-        const originalText = 'Copy Config Hash';
-        buttonInstance.textContent = 'Shareable Hash Copied!';
+        const originalText = 'Copy Setup Code';
+        buttonInstance.textContent = 'Shareable Code Copied!';
         buttonInstance.disabled = true;
         setTimeout(() => {
             buttonInstance.textContent = originalText;
