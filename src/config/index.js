@@ -26,7 +26,7 @@ const defaultConfig = {
   mergedLists: {},
   importedAddons: {},
   sortPreferences: {},
-  disableGenreFilter: false,
+  disableGenreFilter: true,
   enableRandomListFeature: false,
   randomMDBListUsernames: ['showtime416', 'garycrawfordgc', 'linaspurinis', 'hdlists'], 
   availableSortOptions: [
