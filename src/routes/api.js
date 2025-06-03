@@ -433,21 +433,37 @@ module.exports = function(router) {
         const { manifestUrl } = req.body;
         if (!manifestUrl) return res.status(400).json({ error: 'Manifest URL required' });
 
-        const addonInfo = await importExtAddon(manifestUrl); 
-        if (!req.userConfig.importedAddons) req.userConfig.importedAddons = {};
+        const addonInfo = await importExtAddon(manifestUrl, req.userConfig); 
+        
+        if (!req.userConfig.importedAddons) {
+            req.userConfig.importedAddons = {};
+        }
 
         if (req.userConfig.importedAddons[addonInfo.id]) {
-            return res.status(400).json({ error: `Addon with ID ${addonInfo.id} (${addonInfo.name}) is already imported.`});
+            console.warn(`Re-importing addon with manifest ID: ${addonInfo.id}. Overwriting with new import.`);
+            req.userConfig.importedAddons[addonInfo.id] = addonInfo; 
+        } else {
+            req.userConfig.importedAddons[addonInfo.id] = addonInfo;
         }
         
-        addonInfo.hasMovies = addonInfo.types.includes('movie');
-        addonInfo.hasShows = addonInfo.types.includes('series') || addonInfo.types.includes('tv');
+        const finalAddonEntry = req.userConfig.importedAddons[addonInfo.id];
+        if (finalAddonEntry && finalAddonEntry.catalogs) {
+            finalAddonEntry.hasMovies = finalAddonEntry.catalogs.some(c => {
+                const typeFromCatalog = c.type;
+                const sourceManifestTypes = addonInfo.types || [];
+                return typeFromCatalog === 'movie' || (typeFromCatalog === 'all' && sourceManifestTypes.includes('movie'));
+            });
+            finalAddonEntry.hasShows = finalAddonEntry.catalogs.some(c => {
+                const typeFromCatalog = c.type;
+                const sourceManifestTypes = addonInfo.types || [];
+                return typeFromCatalog === 'series' || typeFromCatalog === 'tv' || (typeFromCatalog === 'all' && (sourceManifestTypes.includes('series') || sourceManifestTypes.includes('tv')));
+            });
+        }
 
-        req.userConfig.importedAddons[addonInfo.id] = addonInfo;
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
         manifestCache.clear();
-        res.json({ success: true, configHash: newConfigHash, addon: addonInfo, message: `Imported ${addonInfo.name}` });
+        res.json({ success: true, configHash: newConfigHash, addon: req.userConfig.importedAddons[addonInfo.id], message: `Imported ${addonInfo.name}` });
     } catch (error) {
         console.error('Error in /import-addon:', error);
         res.status(500).json({ error: 'Failed to import addon by manifest', details: error.message });

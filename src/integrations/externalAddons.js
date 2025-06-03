@@ -1,17 +1,15 @@
-// src/integrations/externalAddons.js
 const axios = require('axios');
-const { enrichItemsWithCinemeta } = require('../utils/metadataFetcher'); // Ensure this path is correct
+const { enrichItemsWithCinemeta } = require('../utils/metadataFetcher');
 
 class ExternalAddon {
   constructor(manifestUrl) {
     this.originalManifestUrl = this.normalizeUrl(manifestUrl);
     this.manifest = null;
-    this.apiBaseUrl = ''; // Base URL for API calls, derived from manifest URL
+    this.apiBaseUrl = '';
   }
 
   normalizeUrl(url) {
     if (url.startsWith('stremio://')) {
-      // Convert stremio:// protocol to https:// for direct fetching
       return 'https://' + url.substring(10);
     }
     return url;
@@ -22,15 +20,13 @@ class ExternalAddon {
     const manifestPathSegment = "/manifest.json";
 
     if (fullUrl.endsWith(manifestPathSegment)) {
-      // If URL ends with /manifest.json, remove it to get the base
-      this.apiBaseUrl = fullUrl.substring(0, fullUrl.length - manifestPathSegment.length + 1); // Keep trailing slash
+      this.apiBaseUrl = fullUrl.substring(0, fullUrl.length - manifestPathSegment.length + 1);
     } else {
-      // If it doesn't end with /manifest.json, assume it's already a base or needs a slash
       this.apiBaseUrl = fullUrl.endsWith('/') ? fullUrl : fullUrl + '/';
     }
   }
 
-  async import() {
+  async import(userConfig) {
     try {
       const response = await axios.get(this.originalManifestUrl);
       this.manifest = response.data;
@@ -39,16 +35,28 @@ class ExternalAddon {
         throw new Error('Invalid external manifest format: missing id or catalogs');
       }
       
-      this.setApiBaseUrlFromManifestUrl(); // Set the API base URL
+      this.setApiBaseUrlFromManifestUrl();
 
-      const idUsageMap = new Map(); // Tracks usage of originalId|originalType to ensure unique AIOLists IDs
+      const letterboxdStaticPrefix = "github.megadrive.stremio.letterboxd";
+      let isSourceManifestALetterboxdList = false; // Default to false
+
+      if (typeof this.manifest.id === 'string') {
+          // Trim the manifest ID before checking its prefix
+          isSourceManifestALetterboxdList = this.manifest.id.trim().startsWith(letterboxdStaticPrefix + ":");
+      }
+
+      if (isSourceManifestALetterboxdList && userConfig && typeof userConfig.letterboxdImportCounter === 'undefined') {
+          userConfig.letterboxdImportCounter = 0;
+      }
+
+      const idUsageMap = new Map();
 
       const processedCatalogs = this.manifest.catalogs.map(catalog => {
         if (!catalog.id || !catalog.type) {
-            return null; // Skip invalid catalog entries
+            return null;
         }
 
-        const originalCatalogId = catalog.id;
+        const originalCatalogIdFromSource = catalog.id;
         const originalCatalogType = catalog.type;
         let stremioFinalCatalogType = originalCatalogType;
 
@@ -56,26 +64,31 @@ class ExternalAddon {
         if (originalCatalogType !== 'movie' && originalCatalogType !== 'series' && originalCatalogType !== 'all') {
             stremioFinalCatalogType = 'all';
         }
-
-        const uniquenessTrackingKey = `${originalCatalogId}|${originalCatalogType}`;
-        const instanceCount = (idUsageMap.get(uniquenessTrackingKey) || 0) + 1;
-        idUsageMap.set(uniquenessTrackingKey, instanceCount);
-
-        let aiolistsUniqueCatalogId = `${this.manifest.id}_${originalCatalogId}_${originalCatalogType}`;
-        if (instanceCount > 1) {
-          aiolistsUniqueCatalogId += `_${instanceCount}`;
-        }
         
         const hasSearchRequirement = (catalog.extra || []).some(e => e.name === 'search' && e.isRequired);
         if (hasSearchRequirement) {
             return null;
         }
 
+        let aiolistsUniqueCatalogId;
+        if (isSourceManifestALetterboxdList && userConfig) {
+            userConfig.letterboxdImportCounter++;
+            aiolistsUniqueCatalogId = `${letterboxdStaticPrefix}:${userConfig.letterboxdImportCounter}`;
+        } else {
+            const uniquenessTrackingKey = `${originalCatalogIdFromSource}|${originalCatalogType}`;
+            const instanceCount = (idUsageMap.get(uniquenessTrackingKey) || 0) + 1;
+            idUsageMap.set(uniquenessTrackingKey, instanceCount);
+            aiolistsUniqueCatalogId = `${this.manifest.id.trim()}_${originalCatalogIdFromSource}_${originalCatalogType}`; // Also trim this.manifest.id here for consistency
+            if (instanceCount > 1) {
+              aiolistsUniqueCatalogId += `_${instanceCount}`;
+            }
+        }
+        
         let processedExtraSupported = [];
         const originalExtra = catalog.extraSupported || catalog.extra || [];
         originalExtra.forEach(extraItem => {
             if (extraItem.name === "genre") {
-                processedExtraSupported.push({ name: "genre" }); // No options stored
+                processedExtraSupported.push({ name: "genre" });
             } else {
                 processedExtraSupported.push(extraItem);
             }
@@ -83,7 +96,8 @@ class ExternalAddon {
 
         return {
           id: aiolistsUniqueCatalogId,
-          originalId: originalCatalogId,
+          originalId: originalCatalogIdFromSource,
+          originalManifestId: this.manifest.id.trim(), // Store the trimmed original manifest ID
           originalType: originalCatalogType,
           name: catalog.name || 'Unnamed Catalog',
           type: stremioFinalCatalogType,
@@ -98,7 +112,7 @@ class ExternalAddon {
       }
 
       return {
-        id: this.manifest.id,
+        id: this.manifest.id.trim(), // Return the trimmed manifest ID
         name: this.manifest.name || 'Unknown Addon',
         version: this.manifest.version || '0.0.0',
         logo: resolvedLogo,
@@ -142,9 +156,9 @@ class ExternalAddon {
   }
 }
 
-async function importExternalAddon(manifestUrl) {
+async function importExternalAddon(manifestUrl, userConfig) {
   const addon = new ExternalAddon(manifestUrl);
-  return await addon.import();
+  return await addon.import(userConfig);
 }
 
 async function fetchExternalAddonItems(targetOriginalId, targetOriginalType, sourceAddonConfig, skip = 0, rpdbApiKey = null, genre = null) {
@@ -160,7 +174,11 @@ async function fetchExternalAddonItems(targetOriginalId, targetOriginalType, sou
     );
 
     if (!catalogEntry) {
-      return { metas: [], hasMovies: false, hasShows: false };
+      const fallbackCatalogEntry = sourceAddonConfig.catalogs.find(c => c.id === targetOriginalId && c.originalType === targetOriginalType);
+      if (!fallbackCatalogEntry) {
+        console.warn(`[AIOLists ExternalAddon] Catalog not found for originalId: ${targetOriginalId}, type: ${targetOriginalType} in addon ${sourceAddonConfig.name}`);
+        return { metas: [], hasMovies: false, hasShows: false };
+      }
     }
     
     const tempExternalAddon = new ExternalAddon(sourceAddonConfig.apiBaseUrl); 
@@ -177,28 +195,23 @@ async function fetchExternalAddonItems(targetOriginalId, targetOriginalType, sou
 
     let metasFromExternal = response.data.metas;
 
-    // MODIFICATION: Apply correction if the source addon's name includes "Trakt up next" (case-insensitive)
     if (sourceAddonConfig && typeof sourceAddonConfig.name === 'string' && sourceAddonConfig.name.toLowerCase().includes('trakt up next')) {
         metasFromExternal = metasFromExternal.map(meta => {
             if (meta && typeof meta.id === 'string' && meta.id.startsWith('tun_')) {
                 const correctedId = meta.id.substring(4);
-                // Ensure the corrected ID looks like an IMDb ID (e.g., tt1234567)
                 if (/^tt\d+$/.test(correctedId)) {
-                    // Return a new object with the corrected ID, spreading other properties
                     return { ...meta, id: correctedId };
                 }
             }
-            return meta; // Return original meta if no correction needed or applicable
+            return meta;
         });
     }
     
-    // Enrich items with Cinemeta data (using potentially corrected IDs)
     let enrichedMetas = [];
     if (metasFromExternal.length > 0) {
         enrichedMetas = await enrichItemsWithCinemeta(metasFromExternal);
     }
     
-    // Apply genre filtering if a genre is specified, to the enriched metas
     let finalMetas = enrichedMetas;
     if (genre && finalMetas.length > 0) {
         finalMetas = finalMetas.filter(meta => 
