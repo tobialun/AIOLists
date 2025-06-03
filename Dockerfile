@@ -2,7 +2,7 @@ FROM node:18-alpine as builder
 WORKDIR /usr/src/app
 
 RUN apk add --no-cache git
-RUN git config --global url."https://github.com/".insteadOf ssh://git@github.com/ # <--- ADD THIS LINE
+RUN git config --global url."https://github.com/".insteadOf ssh://git@github.com/
 
 COPY package*.json ./
 RUN npm ci --omit=dev # Changed to --omit=dev as per npm warning
