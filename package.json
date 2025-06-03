@@ -21,7 +21,7 @@
         "axios": "^1.6.2",
         "cors": "^2.8.5",
         "express": "^4.18.2",
-        "stremio-addon-sdk": "^1.6.10"
+        "stremio-addon-sdk": "github:SebastianMorel/stremio-addon-sdk:master"
     },
     "devDependencies": {
         "cross-env": "^7.0.3",
