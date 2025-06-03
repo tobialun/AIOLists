@@ -1,10 +1,9 @@
 # Use an official Node.js runtime as a parent image
 FROM node:18-alpine As builder
-
-# Set the working directory in the container
 WORKDIR /usr/src/app
 
-# Copy package.json and package-lock.json (or npm-shrinkwrap.json)
+RUN apk add --no-cache git
+
 COPY package*.json ./
 
 # Install app dependencies
