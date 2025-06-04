@@ -712,7 +712,7 @@ module.exports = function(router) {
         let canBeMerged = false;
         const listInfoFromMetadata = req.userConfig.listsMetadata?.[listId];
         const listInfoFromImported = req.userConfig.importedAddons?.[listId];
-
+        
         if (listInfoFromMetadata) {
             if (listInfoFromMetadata.hasMovies && listInfoFromMetadata.hasShows) {
                 canBeMerged = true;
@@ -722,11 +722,11 @@ module.exports = function(router) {
                 canBeMerged = true;
             }
         }
-
-        if (!canBeMerged && merged === true) {
-            return res.status(400).json({ error: 'This list does not contain both movies and series, cannot be merged.' });
+        
+        if (!canBeMerged && merged === true) { // If trying to set to merged, but source doesn't have both
+          return res.status(400).json({ error: 'This list does not contain both movies and series, so it cannot be merged into a single "All" type view.' });
         }
-
+        
         if (!req.userConfig.mergedLists) req.userConfig.mergedLists = {};
         req.userConfig.mergedLists[String(listId)] = merged;
         req.userConfig.lastUpdated = new Date().toISOString();

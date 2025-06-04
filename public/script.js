@@ -869,7 +869,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     nameSpan.textContent = displayName;
 
-    const isRandomCatalog = list.id === 'random_mdblist_catalog';
+    const isRandomCatalog = list.id === 'random_mdblist_catalog'; 
 
     const removeBtn = createButton('❌', 'remove-list-button action-icon', (e) => { e.stopPropagation(); removeListItem(li, String(list.id)); }, 'Remove List Permanently');
     if ((apiKeyMissing && state.isPotentiallySharedConfig) && !isRandomCatalog) {
@@ -896,23 +896,27 @@ document.addEventListener('DOMContentLoaded', function() {
      if (isRandomCatalog && list.id === 'random_mdblist_catalog') editBtn.style.display = 'none'; // No editing name for random catalog
 
     let mergeToggle = null;
-    const canMerge = list.hasMovies && list.hasShows && !isRandomCatalog; // Random catalog is 'all' type, no merge UI
+    const canMerge = list.hasMovies && list.hasShows && !isRandomCatalog;
     if (canMerge) {
       const isListMerged = state.userConfig.mergedLists?.[String(list.id)] !== false;
-      mergeToggle = createButton(isListMerged ? 'Merged' : 'Split', `merge-toggle ${isListMerged ? 'merged' : 'split'}`,
+      mergeToggle = createButton(
+          isListMerged ? 'Merged' : 'Split',
+          `merge-toggle ${isListMerged ? 'merged' : 'split'}`,
           async (e) => {
               e.stopPropagation();
               const currentIsMerged = state.userConfig.mergedLists?.[String(list.id)] !== false;
               const newMergedState = !currentIsMerged;
-              mergeToggle.textContent = newMergedState ? 'Merged' : 'Split';
+                  mergeToggle.textContent = newMergedState ? 'Merged' : 'Split';
               mergeToggle.className = `merge-toggle ${newMergedState ? 'merged' : 'split'}`;
               if (!state.userConfig.mergedLists) state.userConfig.mergedLists = {};
               state.userConfig.mergedLists[String(list.id)] = newMergedState;
               await updateListPreference(String(list.id), 'merge', { merged: newMergedState });
-          }, isListMerged ? 'Click to split into Movies/Series lists' : 'Click to merge into one list');
-       if (apiKeyMissing && state.isPotentiallySharedConfig) mergeToggle.style.display = 'none';
-    }
-
+            },
+            isListMerged ? 'Click to split into separate Movies/Series lists' : 'Click to merge into one list'
+        );
+        if (apiKeyMissing && state.isPotentiallySharedConfig) mergeToggle.style.display = 'none';
+      }
+      
     let sortControlsContainer = null;
     const isSpecialTraktNonSortable = list.isTraktTrending || list.isTraktPopular || list.isTraktRecommendations;
     // Random catalog is now sortable
