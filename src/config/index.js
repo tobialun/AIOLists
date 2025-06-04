@@ -24,6 +24,7 @@ const defaultConfig = {
   removedLists: [],
   customListNames: {},
   mergedLists: {},
+  customMediaTypeNames: {},
   importedAddons: {},
   sortPreferences: {},
   disableGenreFilter: false,

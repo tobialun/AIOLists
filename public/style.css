@@ -593,3 +593,132 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 .list-item[data-id="random_mdblist_catalog"] .sort-controls {
   display: flex !important; /* Example override, might need refinement based on actual class conflicts */
 }
+
+.media-type-display {
+  font-size: 0.9em;
+  color: #555;
+  margin-right: 8px; /* Space between media type and list name */
+  padding: 2px 5px;
+  border-radius: 3px;
+  /* background-color: #f0f0f0; */ /* Optional background */
+  cursor: default; /* Default cursor, changed if clickable */
+  white-space: nowrap;
+}
+
+.clickable-media-type {
+  cursor: pointer;
+  text-decoration: underline dashed;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  color: #8E5AF7; /* Make it look interactive */
+}
+.clickable-media-type:hover {
+  background-color: #f0f0f0;
+  color: #7B4DE0;
+}
+
+.edit-mediatype-container {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 8px; /* Keep similar spacing to display element */
+}
+
+.edit-mediatype-input {
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.9em;
+  line-height: 1.2;
+  width: 100px; /* Adjust as needed */
+}
+
+.save-mediatype-btn,
+.cancel-mediatype-btn {
+  padding: 6px 10px;
+  font-size: 0.85em;
+}
+.save-mediatype-btn { background-color: #4CAF50; }
+.save-mediatype-btn:hover { background-color: #45a049; }
+.cancel-mediatype-btn { background-color: #f44336; }
+.cancel-mediatype-btn:hover { background-color: #d32f2f; }
+
+
+/* Adjustments for mobile if needed */
+@media (max-width: 600px) {
+  .mobile-top-row .name-container .media-type-display {
+    margin-right: 5px; /* Slightly less margin on mobile */
+    font-size: 0.85em;
+  }
+  .edit-mediatype-input {
+    width: 80px;
+  }
+  .list-item-row-desktop .name-container { /* Ensure items align well with new element */
+    display: flex;
+    align-items: center;
+    flex-grow: 1;
+    min-width: 0;
+  }
+   .list-item-row-desktop .name-container .media-type-display {
+    flex-shrink: 0; /* Prevent shrinking */
+  }
+  .list-item-row-desktop .name-container .list-name {
+    flex-grow: 1; /* Allow list name to take remaining space */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+/* Ensure .name-container in desktop properly aligns items when media type is present */
+.list-item-row-desktop .name-container {
+    display: flex;
+    align-items: center; /* Vertically align tag, media type, and name */
+    gap: 8px; /* Consistent gap */
+}
+.list-item-row-desktop .tag {
+    flex-shrink: 0;
+}
+.list-item-row-desktop .media-type-display {
+    flex-shrink: 0;
+}
+.list-item-row-desktop .list-name {
+    flex-grow: 1;
+    min-width: 0; /* Important for ellipsis to work */
+}
+.list-item-row-desktop .edit-mediatype-container {
+    flex-shrink: 0;
+}
+.list-item-row-desktop .edit-name-input {
+    flex-grow: 1;
+    min-width: 50px; /* Prevent input from becoming too small */
+}
+
+
+/* For mobile, ensure the media type is inside the name-container */
+.mobile-top-row .name-container {
+    display: flex;
+    align-items: center;
+    gap: 6px; /* Adjust gap as needed */
+    flex-grow: 1;
+    min-width: 0;
+}
+.mobile-top-row .tag {
+    flex-shrink: 0;
+}
+.mobile-top-row .media-type-display {
+    flex-shrink: 0;
+    font-size: 0.85em;
+}
+.mobile-top-row .edit-mediatype-container {
+    flex-shrink: 0;
+}
+.mobile-top-row .list-name {
+    flex-grow: 1;
+    min-width: 0;
+    font-size: 14px;
+}
+.mobile-top-row .edit-name-input {
+    flex-grow: 1;
+    min-width: 0;
+}

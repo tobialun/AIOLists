@@ -1,7 +1,7 @@
 // src/routes/api.js
 const path = require('path');
 const { defaultConfig } = require('../config');
-const { compressConfig, decompressConfig, compressShareableConfig, createShareableConfig } = require('../utils/urlConfig'); 
+const { compressConfig, decompressConfig, compressShareableConfig, createShareableConfig } = require('../utils/urlConfig');
 const { createAddon, fetchListContent } = require('../addon/addonBuilder');
 const { convertToStremioFormat } = require('../addon/converters');
 const { setCacheHeaders, isWatchlist: commonIsWatchlist } = require('../utils/common');
@@ -11,7 +11,7 @@ const { authenticateTrakt, getTraktAuthUrl, fetchTraktLists: fetchTraktUserLists
 const { fetchAllLists: fetchAllMDBLists, fetchListItems: fetchMDBListItemsDirect, validateMDBListKey, extractListFromUrl: extractMDBListFromUrl } = require('../integrations/mdblist');
 const { importExternalAddon: importExtAddon } = require('../integrations/externalAddons');
 
-const manifestCache = new Cache({ defaultTTL: 1 * 60 * 1000 }); 
+const manifestCache = new Cache({ defaultTTL: 1 * 60 * 1000 });
 
 function purgeListConfigs(userConfig, listIdPrefixOrExactId, isExactId = false) {
   const idsToRemove = new Set();
@@ -28,6 +28,16 @@ function purgeListConfigs(userConfig, listIdPrefixOrExactId, isExactId = false) 
           }
       }
   }
+  // Also purge customMediaTypeNames
+  if (userConfig.customMediaTypeNames) {
+    for (const key in userConfig.customMediaTypeNames) {
+        if ((isExactId && key === listIdPrefixOrExactId) || (!isExactId && key.startsWith(listIdPrefixOrExactId) && !key.startsWith('traktpublic_'))) {
+            idsToRemove.add(key);
+            delete userConfig.customMediaTypeNames[key];
+        }
+    }
+  }
+
 
   if (userConfig.sortPreferences) {
       for (const key in userConfig.sortPreferences) {
@@ -82,12 +92,12 @@ module.exports = function(router) {
       req.userConfig = await decompressConfig(configHash);
       req.configHash = configHash;
       req.isPotentiallySharedConfig = (!req.userConfig.apiKey && Object.values(req.userConfig.importedAddons || {}).some(addon => addon.isMDBListUrlImport)) ||
-                                     (!req.userConfig.traktAccessToken && Object.values(req.userConfig.importedAddons || {}).some(addon => addon.isTraktPublicList)) || 
+                                     (!req.userConfig.traktAccessToken && Object.values(req.userConfig.importedAddons || {}).some(addon => addon.isTraktPublicList)) ||
                                      (!req.userConfig.traktAccessToken && (req.userConfig.listOrder || []).some(id => id.startsWith('trakt_') && !id.startsWith('traktpublic_')));
       next();
     } catch (error) {
       console.error('Error decompressing configHash:', configHash, error);
-      if (!res.headersSent) { return res.redirect('/configure'); } 
+      if (!res.headersSent) { return res.redirect('/configure'); }
       next(error);
     }
   });
@@ -132,7 +142,7 @@ module.exports = function(router) {
       }
 
       req.userConfig.enableRandomListFeature = enable;
-      
+
       // Update randomMDBListUsernames if provided and valid
       if (randomMDBListUsernames !== undefined) {
         if (Array.isArray(randomMDBListUsernames) && randomMDBListUsernames.every(u => typeof u === 'string')) {
@@ -146,9 +156,9 @@ module.exports = function(router) {
             return res.status(400).json({ success: false, error: 'Invalid format for randomMDBListUsernames. Must be an array of strings.' });
         }
       }
-      
+
       req.userConfig.lastUpdated = new Date().toISOString();
-      
+
       if (!enable) {
         if (req.userConfig.listOrder) {
             req.userConfig.listOrder = req.userConfig.listOrder.filter(id => id !== 'random_mdblist_catalog');
@@ -181,7 +191,7 @@ module.exports = function(router) {
         addonInterface = await createAddon(req.userConfig);
         manifestCache.set(cacheKey, addonInterface);
       }
-      setCacheHeaders(res, null); 
+      setCacheHeaders(res, null);
       res.json(addonInterface.manifest);
     } catch (error) {
       console.error('Error serving manifest:', error);
@@ -204,7 +214,7 @@ module.exports = function(router) {
         const genreMatch = extraParamsString.match(/genre=([^&]+)/);
         if (genreMatch) genre = decodeURIComponent(genreMatch[1]);
       }
-      
+
       skip = isNaN(skip) ? 0 : skip;
       genre = genre || null;
 
@@ -223,7 +233,7 @@ module.exports = function(router) {
           console.log(`[Shared Config] Trakt Access Token missing for ${catalogId}. Returning empty.`);
           return res.json({ metas: [] });
       }
-      
+
       if (catalogId === 'random_mdblist_catalog' || commonIsWatchlist(catalogId)) {
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.setHeader('Pragma', 'no-cache');
@@ -233,22 +243,29 @@ module.exports = function(router) {
       }
 
       const itemsResult = await fetchListContent(catalogId, req.userConfig, skip, genre, catalogType);
-      
+
       if (!itemsResult) {
         return res.json({ metas: [] });
       }
 
       let metas = await convertToStremioFormat(itemsResult, req.userConfig.rpdbApiKey);
-
-      if (catalogType !== 'all' && (catalogType === 'movie' || catalogType === 'series')) {
-        metas = metas.filter(meta => meta.type === catalogType);
-      } else if (catalogType !== 'all') { 
-        const addonInfo = req.userConfig.importedAddons && req.userConfig.importedAddons[catalogId.split('_')[0]]; 
-        if (!(addonInfo && addonInfo.types && addonInfo.types.includes(catalogType))) {
-        }
-        metas = metas.filter(meta => meta.type === catalogType);
-      }
       
+      // If a custom media type is set, the manifest type is 'all'.
+      // The catalogType in the request might still be 'movie' or 'series' if the user clicks on a specific type from Stremio's UI.
+      // We should honor Stremio's request type if a custom media type implies 'all'.
+      const customMediaType = req.userConfig.customMediaTypeNames?.[catalogId];
+      if (!customMediaType) { // Only filter by Stremio's requested catalogType if NO custom media type is set
+        if (catalogType !== 'all' && (catalogType === 'movie' || catalogType === 'series')) {
+            metas = metas.filter(meta => meta.type === catalogType);
+        } else if (catalogType !== 'all') {
+            const addonInfo = req.userConfig.importedAddons && req.userConfig.importedAddons[catalogId.split('_')[0]];
+            if (!(addonInfo && addonInfo.types && addonInfo.types.includes(catalogType))) {
+            }
+            metas = metas.filter(meta => meta.type === catalogType);
+        }
+      }
+
+
       if (genre && metas.length > 0) {
         const needsFiltering = metas.some(meta => !(meta.genres && meta.genres.map(g => String(g).toLowerCase()).includes(String(genre).toLowerCase())));
         if (needsFiltering) {
@@ -268,9 +285,11 @@ module.exports = function(router) {
     delete configToSend.traktSortOptions;
     configToSend.hiddenLists = Array.from(new Set(configToSend.hiddenLists || []));
     configToSend.removedLists = Array.from(new Set(configToSend.removedLists || []));
+    // Ensure customMediaTypeNames is an object
+    configToSend.customMediaTypeNames = configToSend.customMediaTypeNames || {};
     res.json({ success: true, config: configToSend, isPotentiallySharedConfig: req.isPotentiallySharedConfig });
   });
-  
+
   router.post('/:configHash/apikey', async (req, res) => {
     try {
       const { apiKey, rpdbApiKey } = req.body;
@@ -290,12 +309,12 @@ module.exports = function(router) {
             console.log('MDBList API key cleared. Purging aiolists- and mdblisturl_ entries. Disabling random list feature.');
             req.userConfig.apiKey = '';
             if (req.userConfig.mdblistUsername) delete req.userConfig.mdblistUsername;
-            req.userConfig.enableRandomListFeature = false; 
+            req.userConfig.enableRandomListFeature = false;
             purgeListConfigs(req.userConfig, 'aiolists-');
             purgeListConfigs(req.userConfig, 'random_mdblist_catalog', true);
             if (req.userConfig.importedAddons) {
                 for (const addonKey in req.userConfig.importedAddons) {
-                    if (req.userConfig.importedAddons[addonKey]?.isMDBListUrlImport) { 
+                    if (req.userConfig.importedAddons[addonKey]?.isMDBListUrlImport) {
                         purgeListConfigs(req.userConfig, addonKey, true);
                         delete req.userConfig.importedAddons[addonKey];
                     }
@@ -305,11 +324,11 @@ module.exports = function(router) {
             req.userConfig.apiKey = newApiKey;
         }
       }
-      
+
       if (configChanged) {
         req.userConfig.lastUpdated = new Date().toISOString();
-        const newConfigHash = await compressConfig(req.userConfig); 
-        manifestCache.clear(); 
+        const newConfigHash = await compressConfig(req.userConfig);
+        manifestCache.clear();
         return res.json({ success: true, configHash: newConfigHash });
       }
       return res.json({ success: true, configHash: req.configHash, message: "API keys processed" });
@@ -332,13 +351,13 @@ module.exports = function(router) {
 
         const newConfigHash = await compressConfig(req.userConfig);
         manifestCache.clear();
-        res.json({ 
-            success: true, 
-            configHash: newConfigHash, 
-            accessToken: traktTokens.accessToken, 
+        res.json({
+            success: true,
+            configHash: newConfigHash,
+            accessToken: traktTokens.accessToken,
             refreshToken: traktTokens.refreshToken,
             expiresAt: traktTokens.expiresAt,
-            message: 'Authenticated with Trakt' 
+            message: 'Authenticated with Trakt'
         });
     } catch (error) {
         console.error('Error in /trakt/auth:', error);
@@ -353,7 +372,7 @@ module.exports = function(router) {
         req.userConfig.traktRefreshToken = null;
         req.userConfig.traktExpiresAt = null;
 
-        purgeListConfigs(req.userConfig, 'trakt_'); 
+        purgeListConfigs(req.userConfig, 'trakt_');
 
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
@@ -364,7 +383,7 @@ module.exports = function(router) {
         res.status(500).json({ error: 'Failed to disconnect from Trakt', details: error.message });
     }
   });
-  
+
   router.post('/:configHash/import-list-url', async (req, res) => {
     try {
         const { url } = req.body;
@@ -388,8 +407,8 @@ module.exports = function(router) {
                 hasShows: importedListDetails.hasShows,
                 isMDBListUrlImport: true,
                 mdblistId: importedListDetails.listId,
-                dynamic: importedListDetails.dynamic, 
-                mediatype: importedListDetails.mediatype, 
+                dynamic: importedListDetails.dynamic,
+                mediatype: importedListDetails.mediatype,
                 types: [
                     ...(importedListDetails.hasMovies ? ['movie'] : []),
                     ...(importedListDetails.hasShows ? ['series'] : [])
@@ -397,7 +416,7 @@ module.exports = function(router) {
             };
         } else if (url.includes('trakt.tv/users/') && url.includes('/lists/')) {
             importedListDetails = await fetchPublicTraktListDetails(url);
-            addonId = importedListDetails.listId; 
+            addonId = importedListDetails.listId;
             listNameForDisplay = importedListDetails.listName;
             sourceSystem = "Trakt Public";
             addonToStore = {
@@ -407,7 +426,7 @@ module.exports = function(router) {
                 hasShows: importedListDetails.hasShows,
                 isTraktPublicList: true,
                 traktUser: importedListDetails.traktUser,
-                traktListSlug: importedListDetails.originalTraktSlug, 
+                traktListSlug: importedListDetails.originalTraktSlug,
                 types: [
                     ...(importedListDetails.hasMovies ? ['movie'] : []),
                     ...(importedListDetails.hasShows ? ['series'] : [])
@@ -440,19 +459,19 @@ module.exports = function(router) {
         const { manifestUrl } = req.body;
         if (!manifestUrl) return res.status(400).json({ error: 'Manifest URL required' });
 
-        const addonInfo = await importExtAddon(manifestUrl, req.userConfig); 
-        
+        const addonInfo = await importExtAddon(manifestUrl, req.userConfig);
+
         if (!req.userConfig.importedAddons) {
             req.userConfig.importedAddons = {};
         }
 
         if (req.userConfig.importedAddons[addonInfo.id]) {
             console.warn(`Re-importing addon with manifest ID: ${addonInfo.id}. Overwriting with new import.`);
-            req.userConfig.importedAddons[addonInfo.id] = addonInfo; 
+            req.userConfig.importedAddons[addonInfo.id] = addonInfo;
         } else {
             req.userConfig.importedAddons[addonInfo.id] = addonInfo;
         }
-        
+
         const finalAddonEntry = req.userConfig.importedAddons[addonInfo.id];
         if (finalAddonEntry && finalAddonEntry.catalogs) {
             finalAddonEntry.hasMovies = finalAddonEntry.catalogs.some(c => {
@@ -476,10 +495,10 @@ module.exports = function(router) {
         res.status(500).json({ error: 'Failed to import addon by manifest', details: error.message });
     }
   });
-  
+
   router.post('/:configHash/remove-addon', async (req, res) => {
     try {
-        const { addonId } = req.body; 
+        const { addonId } = req.body;
         if (!addonId || !req.userConfig.importedAddons || !req.userConfig.importedAddons[addonId]) {
             return res.status(400).json({ error: 'Invalid addon ID or addon not found in imports.' });
         }
@@ -492,7 +511,7 @@ module.exports = function(router) {
         if (addonToRemove && addonToRemove.catalogs && Array.isArray(addonToRemove.catalogs)) {
             for (const subCatalog of addonToRemove.catalogs) {
                 const subCatalogIdStr = String(subCatalog.id);
-                purgeListConfigs(req.userConfig, subCatalogIdStr, true); 
+                purgeListConfigs(req.userConfig, subCatalogIdStr, true);
                 const subCatalogOriginalId = String(subCatalog.originalId);
                 if (subCatalogOriginalId && subCatalogOriginalId !== subCatalogIdStr && req.userConfig.sortPreferences?.[subCatalogOriginalId]) {
                      delete req.userConfig.sortPreferences[subCatalogOriginalId];
@@ -512,57 +531,84 @@ module.exports = function(router) {
 
   router.post('/:configHash/lists/order', async (req, res) => {
     try {
-        const { order } = req.body; 
+        const { order } = req.body;
         if (!Array.isArray(order)) return res.status(400).json({ error: 'Order must be an array of strings.' });
-        req.userConfig.listOrder = order.map(String); 
+        req.userConfig.listOrder = order.map(String);
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
-        manifestCache.clear(); 
+        manifestCache.clear();
         res.json({ success: true, configHash: newConfigHash, message: 'List order updated' });
-    } catch (error) { 
+    } catch (error) {
         console.error('Failed to update list order:', error);
-        res.status(500).json({ error: 'Failed to update list order' }); 
+        res.status(500).json({ error: 'Failed to update list order' });
     }
   });
-  
+
   router.post('/:configHash/lists/names', async (req, res) => {
     try {
-      const { listId, customName } = req.body; 
+      const { listId, customName } = req.body;
       if (!listId) return res.status(400).json({ error: 'List ID required' });
       if (!req.userConfig.customListNames) req.userConfig.customListNames = {};
       if (customName && customName.trim()) {
         req.userConfig.customListNames[String(listId)] = customName.trim();
       } else {
-        delete req.userConfig.customListNames[String(listId)]; 
+        delete req.userConfig.customListNames[String(listId)];
       }
       req.userConfig.lastUpdated = new Date().toISOString();
       const newConfigHash = await compressConfig(req.userConfig);
       manifestCache.clear();
       res.json({ success: true, configHash: newConfigHash, message: 'List name updated' });
-    } catch (error) { 
+    } catch (error) {
         console.error('Failed to update list name:', error);
-        res.status(500).json({ error: 'Failed to update list name' }); 
+        res.status(500).json({ error: 'Failed to update list name' });
+    }
+  });
+
+  // New endpoint to save custom media type names
+  router.post('/:configHash/lists/mediatype', async (req, res) => {
+    try {
+      const { listId, customMediaType } = req.body;
+      if (!listId) return res.status(400).json({ error: 'List ID required for custom media type.' });
+
+      if (!req.userConfig.customMediaTypeNames) {
+        req.userConfig.customMediaTypeNames = {};
+      }
+
+      if (customMediaType && customMediaType.trim()) {
+        req.userConfig.customMediaTypeNames[String(listId)] = customMediaType.trim();
+      } else {
+        // If customMediaType is empty or null, remove the custom setting
+        delete req.userConfig.customMediaTypeNames[String(listId)];
+      }
+
+      req.userConfig.lastUpdated = new Date().toISOString();
+      const newConfigHash = await compressConfig(req.userConfig);
+      manifestCache.clear();
+      res.json({ success: true, configHash: newConfigHash, message: 'Custom media type display name updated' });
+    } catch (error) {
+      console.error('Failed to update custom media type name:', error);
+      res.status(500).json({ error: 'Failed to update custom media type name' });
     }
   });
 
   router.post('/:configHash/lists/visibility', async (req, res) => {
     try {
-      const { hiddenLists } = req.body; 
+      const { hiddenLists } = req.body;
       if (!Array.isArray(hiddenLists)) return res.status(400).json({ error: 'Hidden lists must be an array of strings.' });
-      req.userConfig.hiddenLists = hiddenLists.map(String); 
+      req.userConfig.hiddenLists = hiddenLists.map(String);
       req.userConfig.lastUpdated = new Date().toISOString();
       const newConfigHash = await compressConfig(req.userConfig);
       manifestCache.clear();
       res.json({ success: true, configHash: newConfigHash, message: 'List visibility updated' });
-    } catch (error) { 
+    } catch (error) {
         console.error('Failed to update list visibility:', error);
-        res.status(500).json({ error: 'Failed to update list visibility' }); 
+        res.status(500).json({ error: 'Failed to update list visibility' });
     }
   });
 
   router.post('/:configHash/lists/remove', async (req, res) => {
     try {
-      const { listIds } = req.body; 
+      const { listIds } = req.body;
       if (!Array.isArray(listIds)) return res.status(400).json({ error: 'List IDs must be an array of strings.' });
 
       const currentRemoved = new Set(req.userConfig.removedLists || []);
@@ -572,16 +618,16 @@ module.exports = function(router) {
 
         const addonDetails = req.userConfig.importedAddons?.[idStr];
         const isUrlImport = addonDetails && (addonDetails.isMDBListUrlImport || addonDetails.isTraktPublicList);
-        
+
         const isNativeMDBList = idStr.startsWith('aiolists-');
         const isNativeTrakt = idStr.startsWith('trakt_') && !idStr.startsWith('traktpublic_');
         const isRandomCatalog = idStr === 'random_mdblist_catalog';
-        
+
         let isSubCatalog = false;
         let parentAddonIdForSubCatalog = null;
         let subCatalogOriginalId = null;
 
-        if (!isNativeMDBList && !isNativeTrakt && !isUrlImport && !isRandomCatalog) { 
+        if (!isNativeMDBList && !isNativeTrakt && !isUrlImport && !isRandomCatalog) {
             for (const importedAddonId in req.userConfig.importedAddons) {
                 const parentAddon = req.userConfig.importedAddons[importedAddonId];
                 if (parentAddon && !(parentAddon.isMDBListUrlImport || parentAddon.isTraktPublicList) && parentAddon.catalogs) {
@@ -595,28 +641,28 @@ module.exports = function(router) {
                 }
             }
         }
-        
+
         if (isRandomCatalog) {
             console.log(`Disabling Random MDBList Catalog feature due to removal from UI.`);
             req.userConfig.enableRandomListFeature = false;
         } else if (isUrlImport) {
           console.log(`Purging URL import: ${idStr}`);
           if (req.userConfig.importedAddons) delete req.userConfig.importedAddons[idStr];
-          purgeListConfigs(req.userConfig, idStr, true); 
+          purgeListConfigs(req.userConfig, idStr, true);
         } else if (isSubCatalog && parentAddonIdForSubCatalog) {
           console.log(`Purging sub-catalog: ${idStr} from parent ${parentAddonIdForSubCatalog}`);
-          purgeListConfigs(req.userConfig, idStr, true); 
+          purgeListConfigs(req.userConfig, idStr, true);
           if (subCatalogOriginalId && subCatalogOriginalId !== idStr && req.userConfig.sortPreferences?.[subCatalogOriginalId]) {
             delete req.userConfig.sortPreferences[subCatalogOriginalId];
           }
           if (req.userConfig.importedAddons[parentAddonIdForSubCatalog]?.catalogs) {
-            req.userConfig.importedAddons[parentAddonIdForSubCatalog].catalogs = 
+            req.userConfig.importedAddons[parentAddonIdForSubCatalog].catalogs =
               req.userConfig.importedAddons[parentAddonIdForSubCatalog].catalogs.filter(cat => String(cat.id) !== idStr);
           }
         } else if (isNativeMDBList || isNativeTrakt) {
           console.log(`Soft deleting native list: ${idStr}`);
           currentRemoved.add(idStr);
-          if (req.userConfig.hiddenLists) { 
+          if (req.userConfig.hiddenLists) {
             req.userConfig.hiddenLists = req.userConfig.hiddenLists.filter(id => String(id) !== idStr);
           }
         } else {
@@ -634,7 +680,7 @@ module.exports = function(router) {
       const newConfigHash = await compressConfig(req.userConfig);
       manifestCache.clear();
       res.json({ success: true, configHash: newConfigHash, message: 'Lists processed for removal' });
-    } catch (error) { 
+    } catch (error) {
         console.error('Failed to remove lists:', error);
         res.status(500).json({ error: 'Failed to remove lists', details: error.message });
     }
@@ -642,42 +688,42 @@ module.exports = function(router) {
 
   router.post('/:configHash/lists/sort', async (req, res) => {
     try {
-      const { listId, sort, order } = req.body; 
+      const { listId, sort, order } = req.body;
       if (!listId || !sort) return res.status(400).json({ error: 'List ID (originalId) and sort field required' });
       if (!req.userConfig.sortPreferences) req.userConfig.sortPreferences = {};
-      req.userConfig.sortPreferences[String(listId)] = { sort, order: order || 'desc' }; 
+      req.userConfig.sortPreferences[String(listId)] = { sort, order: order || 'desc' };
       req.userConfig.lastUpdated = new Date().toISOString();
       const newConfigHash = await compressConfig(req.userConfig);
-      manifestCache.clear(); 
+      manifestCache.clear();
       res.json({ success: true, configHash: newConfigHash, message: 'Sort preferences updated' });
-    } catch (error) { 
+    } catch (error) {
         console.error('Failed to update sort preferences:', error);
         res.status(500).json({ error: 'Failed to update sort preferences' });
     }
   });
-  
+
   router.post('/:configHash/lists/merge', async (req, res) => {
     try {
-        const { listId, merged } = req.body; 
+        const { listId, merged } = req.body;
         if (!listId || typeof merged !== 'boolean') {
             return res.status(400).json({ error: 'List ID (manifestId) and merge preference (boolean) required' });
         }
-        
+
         let canBeMerged = false;
         const listInfoFromMetadata = req.userConfig.listsMetadata?.[listId];
         const listInfoFromImported = req.userConfig.importedAddons?.[listId];
 
-        if (listInfoFromMetadata) { 
+        if (listInfoFromMetadata) {
             if (listInfoFromMetadata.hasMovies && listInfoFromMetadata.hasShows) {
                 canBeMerged = true;
             }
-        } else if (listInfoFromImported) { 
+        } else if (listInfoFromImported) {
             if (listInfoFromImported.hasMovies && listInfoFromImported.hasShows) {
                 canBeMerged = true;
             }
         }
 
-        if (!canBeMerged && merged === true) { 
+        if (!canBeMerged && merged === true) {
             return res.status(400).json({ error: 'This list does not contain both movies and series, cannot be merged.' });
         }
 
@@ -687,7 +733,7 @@ module.exports = function(router) {
         const newConfigHash = await compressConfig(req.userConfig);
         manifestCache.clear();
         res.json({ success: true, configHash: newConfigHash, message: `List ${merged ? 'merged' : 'split'}` });
-    } catch (error) { 
+    } catch (error) {
         console.error('Failed to update list merge preference:', error);
         res.status(500).json({ error: 'Failed to update list merge preference' });
     }
@@ -695,14 +741,14 @@ module.exports = function(router) {
 
   router.post('/config/create', async (req, res) => {
     try {
-      let newConfig = { ...defaultConfig, listOrder: [], hiddenLists: [], removedLists: [], customListNames: {}, mergedLists: {}, sortPreferences: {}, importedAddons: {}, listsMetadata: {}, enableRandomListFeature: false, lastUpdated: new Date().toISOString() };
-      
+      let newConfig = { ...defaultConfig, listOrder: [], hiddenLists: [], removedLists: [], customListNames: {}, customMediaTypeNames: {}, mergedLists: {}, sortPreferences: {}, importedAddons: {}, listsMetadata: {}, enableRandomListFeature: false, lastUpdated: new Date().toISOString() };
+
       if (req.body.sharedConfig) {
-        const sharedSettings = await decompressConfig(req.body.sharedConfig); 
-        const shareablePart = createShareableConfig(sharedSettings); 
-        newConfig = { ...newConfig, ...shareablePart }; 
+        const sharedSettings = await decompressConfig(req.body.sharedConfig);
+        const shareablePart = createShareableConfig(sharedSettings);
+        newConfig = { ...newConfig, ...shareablePart };
       }
-      
+
       const { sharedConfig, ...otherBodyParams } = req.body;
       newConfig = { ...newConfig, ...otherBodyParams };
 
@@ -710,7 +756,7 @@ module.exports = function(router) {
       res.json({ success: true, configHash });
     } catch (error) { console.error('Error in /config/create:', error); res.status(500).json({ error: 'Failed to create configuration' }); }
   });
-  
+
   router.post('/validate-keys', async (req, res) => {
     try {
       const { apiKey, rpdbApiKey } = req.body;
@@ -724,15 +770,15 @@ module.exports = function(router) {
         results.rpdb = { valid: await validateRPDBKey(rpdbApiKey) };
       }
       res.json(results);
-    } catch (error) { 
+    } catch (error) {
         console.error('Error in /validate-keys:', error);
         res.status(500).json({ error: 'Failed to validate keys' });
     }
   });
-  
+
   router.get('/trakt/login', (req, res) => {
     try { res.redirect(getTraktAuthUrl()); }
-    catch (error) { 
+    catch (error) {
         console.error('Error in /trakt/login redirect:', error);
         res.status(500).json({ error: 'Internal server error for Trakt login' });
     }
@@ -746,26 +792,34 @@ module.exports = function(router) {
           allUserLists.push(...mdbLists.map(l => ({...l, source: 'mdblist'})));
       }
       if (req.userConfig.traktAccessToken) {
-          const traktLists = await fetchTraktUserLists(req.userConfig); 
+          const traktLists = await fetchTraktUserLists(req.userConfig);
           allUserLists.push(...traktLists.map(l => ({...l, source: 'trakt'})));
       }
 
       const removedListsSet = new Set(req.userConfig.removedLists || []);
-      let configChangedDueToMetadataFetch = false; 
+      let configChangedDueToMetadataFetch = false;
       if (!req.userConfig.listsMetadata) req.userConfig.listsMetadata = {};
+      if (!req.userConfig.customMediaTypeNames) req.userConfig.customMediaTypeNames = {};
+
 
       let processedLists = [];
 
       if (req.userConfig.enableRandomListFeature && req.userConfig.apiKey) {
+        const manifestListId = 'random_mdblist_catalog';
+        const customTypeName = req.userConfig.customMediaTypeNames?.[manifestListId];
+        let effectiveMediaTypeDisplay = customTypeName || 'All';
+
+
         const randomCatalogUIEntry = {
-            id: 'random_mdblist_catalog',
-            originalId: 'random_mdblist_catalog', // Use this as the key for sortPreferences
+            id: manifestListId,
+            originalId: manifestListId,
             name: 'Random MDBList Catalog',
-            customName: req.userConfig.customListNames?.['random_mdblist_catalog'] || null,
-            isHidden: (req.userConfig.hiddenLists || []).includes('random_mdblist_catalog'),
-            hasMovies: true, hasShows: true, canBeMerged: false, 
+            customName: req.userConfig.customListNames?.[manifestListId] || null,
+            effectiveMediaTypeDisplay: effectiveMediaTypeDisplay,
+            isHidden: (req.userConfig.hiddenLists || []).includes(manifestListId),
+            hasMovies: true, hasShows: true, canBeMerged: false,
             isRandomCatalog: true, tag: '🎲', tagImage: null,
-            sortPreferences: req.userConfig.sortPreferences?.['random_mdblist_catalog'] || { sort: 'default', order: 'desc' },
+            sortPreferences: req.userConfig.sortPreferences?.[manifestListId] || { sort: 'default', order: 'desc' },
             isMerged: false, source: 'random_mdblist'
         };
         if (randomCatalogUIEntry.customName) randomCatalogUIEntry.name = randomCatalogUIEntry.customName;
@@ -801,7 +855,7 @@ module.exports = function(router) {
                 let metadata = req.userConfig.listsMetadata[manifestListId] || req.userConfig.listsMetadata[originalListIdStr] || {};
                 hasMovies = metadata.hasMovies === true;
                 hasShows = metadata.hasShows === true;
-                canBeMergedFromSource = true; 
+                canBeMergedFromSource = true;
 
                 if (typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean') {
                     if (req.userConfig.traktAccessToken) {
@@ -810,13 +864,13 @@ module.exports = function(router) {
                         hasShows = tempContent?.hasShows || false;
                         req.userConfig.listsMetadata[manifestListId] = { ...metadata, hasMovies, hasShows, canBeMerged: true, lastChecked: new Date().toISOString() };
                         configChangedDueToMetadataFetch = true;
-                    } else { 
+                    } else {
                         hasMovies = metadata.hasMovies || false;
                         hasShows = metadata.hasShows || false;
                         req.userConfig.listsMetadata[manifestListId] = { ...metadata, hasMovies, hasShows, canBeMerged: true, lastChecked: new Date().toISOString() };
                     }
                 }
-            } else { 
+            } else {
                 hasMovies = false; hasShows = false; canBeMergedFromSource = false;
             }
 
@@ -825,10 +879,21 @@ module.exports = function(router) {
 
             const actualCanBeMerged = canBeMergedFromSource && hasMovies && hasShows;
             const isUserMerged = actualCanBeMerged ? (req.userConfig.mergedLists?.[manifestListId] !== false) : false;
-            
+
             let defaultSort = { sort: (list.source === 'trakt') ? 'rank' : 'default', order: (list.source === 'trakt') ? 'asc' : 'desc' };
             if (list.source === 'trakt' && list.isTraktWatchlist) {
                 defaultSort = { sort: 'added', order: 'desc' };
+            }
+
+            const customTypeName = req.userConfig.customMediaTypeNames?.[manifestListId];
+            let effectiveMediaTypeDisplay;
+            if (customTypeName) {
+                effectiveMediaTypeDisplay = customTypeName;
+            } else {
+                if (hasMovies && hasShows) effectiveMediaTypeDisplay = 'All';
+                else if (hasMovies) effectiveMediaTypeDisplay = 'Movie';
+                else if (hasShows) effectiveMediaTypeDisplay = 'Series';
+                else effectiveMediaTypeDisplay = 'N/A';
             }
 
 
@@ -837,11 +902,12 @@ module.exports = function(router) {
                 originalId: originalListIdStr,
                 name: list.name,
                 customName: req.userConfig.customListNames?.[manifestListId] || null,
+                effectiveMediaTypeDisplay: effectiveMediaTypeDisplay,
                 isHidden: (req.userConfig.hiddenLists || []).includes(manifestListId),
                 hasMovies: hasMovies,
                 hasShows: hasShows,
                 canBeMerged: actualCanBeMerged,
-                isMerged: isUserMerged,        
+                isMerged: isUserMerged,
                 isTraktList: list.source === 'trakt' && list.isTraktList,
                 isTraktWatchlist: list.source === 'trakt' && list.isTraktWatchlist,
                 isTraktRecommendations: list.isTraktRecommendations,
@@ -853,14 +919,14 @@ module.exports = function(router) {
                 tagImage: list.source === 'trakt' ? 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico' : null,
                 sortPreferences: req.userConfig.sortPreferences?.[originalListIdStr] || defaultSort,
                 source: list.source,
-                dynamic: list.dynamic, 
-                mediatype: list.mediatype 
+                dynamic: list.dynamic,
+                mediatype: list.mediatype
             };
         });
-        
+
         const activeListsResults = (await Promise.all(activeListsProcessingPromises)).filter(p => p !== null);
         processedLists.push(...activeListsResults);
-      
+
         if (req.userConfig.importedAddons) {
           for (const addonKey in req.userConfig.importedAddons) {
               const addon = req.userConfig.importedAddons[addonKey];
@@ -874,7 +940,7 @@ module.exports = function(router) {
               if (isMDBListUrlImport || isTraktPublicList) {
                    let urlImportHasMovies = addon.hasMovies;
                    let urlImportHasShows = addon.hasShows;
-                   let urlImportCanBeMerged = true; 
+                   let urlImportCanBeMerged = true;
                     if (isMDBListUrlImport && typeof addon.dynamic === 'boolean' && typeof addon.mediatype !== 'undefined') {
                         urlImportCanBeMerged = (addon.dynamic === false || !addon.mediatype || addon.mediatype === '');
                     }
@@ -889,11 +955,23 @@ module.exports = function(router) {
                       const actualCanBeMergedForUrl = urlImportCanBeMerged && urlImportHasMovies && urlImportHasShows;
                       const isUserMergedForUrl = actualCanBeMergedForUrl ? (req.userConfig.mergedLists?.[addonGroupId] !== false) : false;
 
+                      const customTypeName = req.userConfig.customMediaTypeNames?.[addonGroupId];
+                      let effectiveMediaTypeDisplay;
+                      if (customTypeName) {
+                          effectiveMediaTypeDisplay = customTypeName;
+                      } else {
+                          if (urlImportHasMovies && urlImportHasShows) effectiveMediaTypeDisplay = 'All';
+                          else if (urlImportHasMovies) effectiveMediaTypeDisplay = 'Movie';
+                          else if (urlImportHasShows) effectiveMediaTypeDisplay = 'Series';
+                          else effectiveMediaTypeDisplay = 'N/A';
+                      }
+
                       processedLists.push({
                           id: addonGroupId,
                           originalId: sortOriginalId,
                           name: addon.name,
                           customName: req.userConfig.customListNames?.[addonGroupId] || null,
+                          effectiveMediaTypeDisplay: effectiveMediaTypeDisplay,
                           isHidden: (req.userConfig.hiddenLists || []).includes(addonGroupId),
                           hasMovies: urlImportHasMovies,
                           hasShows: urlImportHasShows,
@@ -913,12 +991,12 @@ module.exports = function(router) {
                           traktUser: addon.traktUser,
                           traktListSlug: addon.traktListSlug,
                           requiresApiKey: isMDBListUrlImport ? 'mdblist' : (isTraktPublicList ? null : null),
-                          dynamic: isMDBListUrlImport ? addon.dynamic : undefined, 
-                          mediatype: isMDBListUrlImport ? addon.mediatype : undefined 
+                          dynamic: isMDBListUrlImport ? addon.dynamic : undefined,
+                          mediatype: isMDBListUrlImport ? addon.mediatype : undefined
                       });
                   }
               }
-              else if (addon.catalogs && addon.catalogs.length > 0) { 
+              else if (addon.catalogs && addon.catalogs.length > 0) {
                    (addon.catalogs || []).forEach(catalog => {
                       const catalogIdStr = String(catalog.id);
                       if (removedListsSet.has(catalogIdStr) || (req.userConfig.hiddenLists || []).includes(catalogIdStr)) return;
@@ -931,11 +1009,23 @@ module.exports = function(router) {
                       const subCatalogCanBeMerged = catalogHasMovies && catalogHasShows;
                       const subCatalogIsUserMerged = subCatalogCanBeMerged ? (req.userConfig.mergedLists?.[catalogIdStr] !== false) : false;
 
+                      const customTypeName = req.userConfig.customMediaTypeNames?.[catalogIdStr];
+                      let effectiveMediaTypeDisplay;
+                      if (customTypeName) {
+                          effectiveMediaTypeDisplay = customTypeName;
+                      } else {
+                          if (catalogHasMovies && catalogHasShows) effectiveMediaTypeDisplay = 'All';
+                          else if (catalogHasMovies) effectiveMediaTypeDisplay = 'Movie';
+                          else if (catalogHasShows) effectiveMediaTypeDisplay = 'Series';
+                          else effectiveMediaTypeDisplay = 'N/A'; // Or based on catalog.type
+                      }
+
                       processedLists.push({
                           id: catalogIdStr,
                           originalId: catalog.originalId || catalogIdStr,
                           name: catalog.name,
                           customName: req.userConfig.customListNames?.[catalogIdStr] || null,
+                          effectiveMediaTypeDisplay: effectiveMediaTypeDisplay,
                           isHidden: (req.userConfig.hiddenLists || []).includes(catalogIdStr),
                           hasMovies: catalogHasMovies,
                           hasShows: catalogHasShows,
@@ -973,15 +1063,15 @@ module.exports = function(router) {
     }
 
     let responsePayload = {
-      success: true, 
+      success: true,
       lists: processedLists,
       importedAddons: req.userConfig.importedAddons || {},
-      listsMetadata: req.userConfig.listsMetadata, 
+      listsMetadata: req.userConfig.listsMetadata,
       isPotentiallySharedConfig: req.isPotentiallySharedConfig,
       randomMDBListUsernames: req.userConfig.randomMDBListUsernames // Send current usernames
     };
 
-    if (configChangedDueToMetadataFetch) { 
+    if (configChangedDueToMetadataFetch) {
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
         responsePayload.newConfigHash = newConfigHash;
