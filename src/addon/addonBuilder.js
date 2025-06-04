@@ -34,7 +34,7 @@ async function getRandomMDBListDetailsForManifest(apiKey, randomMDBListUsernames
 
 async function fetchListContent(listId, userConfig, skip = 0, genre = null, stremioCatalogType = 'all') {
   const { apiKey, traktAccessToken, listsMetadata = {}, sortPreferences = {}, importedAddons = {}, rpdbApiKey, randomMDBListUsernames, enableRandomListFeature } = userConfig;
-  const catalogIdFromRequest = listId;
+  const catalogIdFromRequest = String(listId);
   const itemTypeHintForFetching = (stremioCatalogType === 'all') ? null : stremioCatalogType;
 
   let originalListIdForSortLookup = catalogIdFromRequest;
@@ -113,7 +113,7 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
     } else if (addonConfig.isMDBListUrlImport && apiKey) {
       itemsResult = await fetchMDBListItems( 
         addonConfig.mdblistId, apiKey, listsMetadata, skip, sortPrefsForImportedOrRandom.sort, sortPrefsForImportedOrRandom.order,
-        true, genre
+        true, genre, null, userConfig.mergedLists?.[catalogIdFromRequest] !== false
       );
     }
   }
@@ -166,9 +166,11 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
         sortForMdbList = 'added'; 
     }
 
+    const isListUserMerged = userConfig.mergedLists?.[catalogIdFromRequest] !== false;
+
     itemsResult = await fetchMDBListItems( 
       mdbListOriginalIdFromCatalog, apiKey, listsMetadata, skip, sortForMdbList, mdbListSortPrefs.order,
-      false, genre
+      false, genre, null, isListUserMerged
     );
   }
   return itemsResult || null;

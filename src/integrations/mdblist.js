@@ -146,7 +146,8 @@ async function fetchListItems(
     order = 'desc',
     isUrlImported = false, // Not directly relevant here, but part of original signature
     genre = null,
-    usernameForRandomList = null // The username whose list we are fetching
+    usernameForRandomList = null, // The username whose list we are fetching
+    isMergedByUser = false
 ) {
   if (!apiKey) return null;
 
@@ -175,6 +176,10 @@ async function fetchListItems(
         limit: MDBLIST_PAGE_LIMIT,
         offset: mdbListOffset
       });
+
+      if (isMergedByUser && effectiveMdbListId !== 'watchlist' && effectiveMdbListId !== 'watchlist-W' && !listOwnerUsername) {
+          params.append('unified', 'true');
+        }
 
       if (listOwnerUsername) { // Fetching specific user's list (e.g., random catalog's chosen list)
         apiUrl = `https://api.mdblist.com/lists/${listOwnerUsername}/${effectiveMdbListId}/items?${params.toString()}`;
@@ -253,6 +258,10 @@ async function fetchListItems(
         limit: ITEMS_PER_PAGE, // Use ITEMS_PER_PAGE from config
         offset: mdbListOffset
       });
+
+    if (isMergedByUser && effectiveMdbListId !== 'watchlist' && effectiveMdbListId !== 'watchlist-W' && !listOwnerUsername) {
+        params.append('unified', 'true');
+      }
 
     if (listOwnerUsername) { // Fetching specific user's list (e.g., random catalog's chosen list)
         apiUrl = `https://api.mdblist.com/lists/${listOwnerUsername}/${effectiveMdbListId}/items?${params.toString()}`;
