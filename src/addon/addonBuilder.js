@@ -124,7 +124,7 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
 async function createAddon(userConfig) {
   const manifest = {
     id: 'org.stremio.aiolists',
-    version: `1.0.3-${Date.now()}`,
+    version: `1.1.0-${Date.now()}`,
     name: 'AIOLists',
     description: 'Manage all your lists in one place.',
     resources: ['catalog', 'meta'],
@@ -432,7 +432,7 @@ async function createAddon(userConfig) {
           name: addon.name,
           hasMovies: addon.hasMovies, // From initial import scan
           hasShows: addon.hasShows,   // From initial import scan
-          source: isMDBListUrlImport ? 'mdblist_url' : 'trakt_public_url' // Corrected source
+          source: isMDBListUrlImport ? 'mdblist_url' : 'trakt_public' // Corrected source
       };
       await processListForManifest(listDataForUrlImport, addonGroupId, false, null);
 

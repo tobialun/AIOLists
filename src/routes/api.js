@@ -222,7 +222,7 @@ module.exports = function(router) {
                          catalogId.startsWith('aiolists-') ? 'mdblist_native' :
                          catalogId.startsWith('trakt_') && !catalogId.startsWith('traktpublic_') ? 'trakt_native' :
                          catalogId.startsWith('mdblisturl_') ? 'mdblist_url' :
-                         catalogId.startsWith('traktpublic_') ? 'trakt_public_url' :
+                         catalogId.startsWith('traktpublic_') ? 'trakt_public' :
                          'external_addon';
   
       if ((listSource === 'mdblist_native' || listSource === 'mdblist_url' || listSource === 'random_mdblist') && !req.userConfig.apiKey) {
@@ -1024,7 +1024,7 @@ processedLists.push(...activeListsResults);
                     sortPreferences: req.userConfig.sortPreferences?.[sortOriginalIdForUrl] ||
                                      { sort: (isTraktPublicList ? 'rank' : 'default'),
                                        order: (isTraktPublicList ? 'asc' : 'desc') },
-                    source: isMDBListUrlImport ? 'mdblist_url' : (isTraktPublicList ? 'trakt_public_url' : 'addon_url_import'),
+                    source: isMDBListUrlImport ? 'mdblist_url' : (isTraktPublicList ? 'trakt_public' : 'addon_url_import'),
                     isUrlImportedType: true,
                     dynamic: isMDBListUrlImport ? addon.dynamic : undefined,
                     mediatype: isMDBListUrlImport ? addon.mediatype : undefined,

@@ -215,6 +215,10 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 }
 .tag.l { background-color: #9C27B0; } .tag.e { background-color: #4CAF50; }
 .tag.w { background-color: #FF9800; } .tag.t { background-color: #c50000; }
+.tag.tag-with-image,
+.tag.t.tag-with-image {
+  background-color: transparent !important;
+}
 .tag.a { background-color: #607d8b; }
 .tag img { width: 18px; height: 18px; object-fit: contain; border-radius: 0; }
 

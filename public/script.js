@@ -984,12 +984,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
         let currentSortOptions;
         if (list.source === 'trakt' || list.source === 'trakt_public') {
-            currentSortOptions = state.userConfig.traktSortOptions || [];
-        } else { // Includes 'mdblist', 'mdblist_url', and 'random_mdblist_catalog'
+          currentSortOptions = state.userConfig.traktSortOptions || [];
+      } else {
             currentSortOptions = state.userConfig.availableSortOptions || [];
         }
 
-        // For random_mdblist_catalog, originalId will be 'random_mdblist_catalog'
         const sortPrefKey = String(list.originalId || list.id);
         let currentSortPref = state.userConfig.sortPreferences?.[sortPrefKey] || list.sortPreferences;
         if (!currentSortPref || typeof currentSortPref.sort === 'undefined' || typeof currentSortPref.order === 'undefined') {
@@ -1058,7 +1057,13 @@ document.addEventListener('DOMContentLoaded', function() {
         if ((list.source === 'trakt' || list.source === 'trakt_public') && !tagImageSrc) tagImageSrc = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico';
         else if (list.source === 'addon_manifest' && list.tagImage) tagImageSrc = list.tagImage;
         tag.classList.add(tagTypeChar.toLowerCase());
-        if (tagImageSrc) { const img = document.createElement('img'); img.src = tagImageSrc; img.alt = list.source || 'icon'; tag.appendChild(img); if (list.source === 'trakt' || list.source === 'trakt_public' || list.source === 'addon_manifest') tag.style.backgroundColor = 'transparent'; }
+        if (tagImageSrc) {
+            const img = document.createElement('img'); img.src = tagImageSrc; img.alt = list.source || 'icon'; tag.appendChild(img);
+            tag.classList.add('tag-with-image');
+            if (list.source === 'trakt' || list.source === 'trakt_public' || list.source === 'addon_manifest') {
+                 tag.style.backgroundColor = 'transparent';
+            }
+        }
         else { tag.textContent = tagTypeChar; }
         if (tagTypeChar === '🎲') { tag.style.backgroundColor = '#FFC107'; tag.style.color = '#000';}
 
