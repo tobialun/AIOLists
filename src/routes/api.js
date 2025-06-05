@@ -148,8 +148,9 @@ module.exports = function(router) {
   router.post('/:configHash/simkl/disconnect', async (req, res) => {
     try {
       console.log('Simkl disconnect requested. Purging simkl_ entries.');
-      req.userConfig.simklAccessToken = null;
-    
+      req.userConfig.simklAccessToken = '';
+      req.userConfig.simklLists = {};
+          
       purgeListConfigs(req.userConfig, 'simkl_');
     
       req.userConfig.lastUpdated = new Date().toISOString();
@@ -161,6 +162,21 @@ module.exports = function(router) {
       res.status(500).json({ error: 'Failed to disconnect from Simkl', details: error.message });
     }
   });
+
+  router.post('/:configHash/simkl/settings', async (req, res) => {
+      try {
+        const { simklLists } = req.body;
+        req.userConfig.simklLists = simklLists || {};
+        req.userConfig.lastUpdated = new Date().toISOString();
+        const newConfigHash = await compressConfig(req.userConfig);
+        manifestCache.clear();
+        res.json({ success: true, configHash: newConfigHash, message: 'Simkl settings saved.' });
+      } catch (error) {
+        console.error('Error saving Simkl settings:', error);
+        res.status(500).json({ success: false, error: 'Failed to save Simkl settings.' });
+      }
+  });
+    
     
 
   router.get('/:configHash/shareable-hash', async (req, res) => {

@@ -25,6 +25,63 @@ async function getSimklAuthPin() {
 }
 
 /**
+ * Polls the Simkl API to check if the user has authorized the app.
+ * @param {string} userCode The code displayed to the user.
+ * @returns {Promise<Object>} An object containing the access_token.
+ */
+async function pollForSimklToken(userCode) {
+  const url = `${SIMKL_API_URL}/oauth/pin/${userCode}?client_id=${SIMKL_CLIENT_ID}`;
+  try {
+    const response = await axios.get(url);
+    return response.data; // This will contain result, message, or access_token
+  } catch (error) {
+    console.error(`[SimklIntegration] Error polling for PIN status for code ${userCode}:`, error.response ? error.response.data : error.message);
+    return {
+        result: 'KO',
+        message: 'An error occurred while checking authorization status.'
+    };
+  }
+}
+
+/**
+ * Generates Simkl list definitions based on user's selections.
+ * @param {Object} userConfig The user's configuration containing the access token and list selections.
+ * @returns {Promise<Array>} A promise that resolves to an array of list objects for the manifest.
+ */
+async function fetchSimklLists(userConfig) {
+  if (!userConfig.simklAccessToken || !userConfig.simklLists) {
+    console.log('[SimklIntegration] No Simkl Access Token or selections, skipping list fetch.');
+    return [];
+  }
+
+  const selectedLists = userConfig.simklLists;
+  const statusMap = {
+    'watching': 'Watching',
+    'plantowatch': 'Plan to Watch',
+    'hold': 'On Hold',
+    'completed': 'Completed',
+    'dropped': 'Dropped'
+  };
+  let allSimklLists = [];
+
+  // **FIX**: Correctly iterate using `mediaType` variable
+  for (const mediaType of Object.keys(selectedLists)) { // e.g., 'shows', 'movies'
+    for (const status of selectedLists[mediaType]) { // e.g., 'watching', 'completed'
+      const apiMediaType = mediaType === 'shows' ? 'tv' : mediaType;
+      allSimklLists.push({
+        id: `simkl_${apiMediaType}_${status}`,
+        name: `Simkl ${mediaType.charAt(0).toUpperCase() + mediaType.slice(1)}: ${statusMap[status] || status}`,
+        source: 'simkl',
+        mediaType: apiMediaType,
+        listStatus: status
+      });
+    }
+  }
+
+  return allSimklLists;
+}
+
+/**
  * Fetches items for a specific Simkl list.
  * @param {string} listId The ID of the list (e.g., "simkl_tv_watching").
  * @param {Object} userConfig The user's configuration.
@@ -45,7 +102,6 @@ async function fetchSimklListItems(listId, userConfig, skip = 0) {
   const mediaType = parts[1]; // 'tv', 'movies', 'anime'
   const status = parts[2];
 
-  // Simkl uses different paths for different media types.
   const apiMediaType = mediaType === 'tv' ? 'shows' : mediaType;
 
   const url = `${SIMKL_API_URL}/sync/all-items/${apiMediaType}/${status}`;
@@ -77,7 +133,6 @@ async function fetchSimklListItems(listId, userConfig, skip = 0) {
       };
     }).filter(item => item !== null);
 
-    // Simkl API doesn't support pagination for these endpoints, so we slice manually.
     const paginatedItems = items.slice(skip, skip + ITEMS_PER_PAGE);
     const enrichedAllItems = await enrichItemsWithCinemeta(paginatedItems);
 
@@ -87,73 +142,10 @@ async function fetchSimklListItems(listId, userConfig, skip = 0) {
     return null;
   }
 }
-    
-
-/**
- * Polls the Simkl API to check if the user has authorized the app.
- * @param {string} userCode The code displayed to the user.
- * @returns {Promise<Object>} An object containing the access_token.
- */
-async function pollForSimklToken(userCode) {
-  const url = `${SIMKL_API_URL}/oauth/pin/${userCode}?client_id=${SIMKL_CLIENT_ID}`;
-  try {
-    const response = await axios.get(url);
-    return response.data; // This will contain result, message, or access_token
-  } catch (error) {
-    console.error(`[SimklIntegration] Error polling for PIN status for code ${userCode}:`, error.response ? error.response.data : error.message);
-    // Return a structured error so the frontend can react
-    return {
-        result: 'KO',
-        message: 'An error occurred while checking authorization status.'
-    };
-  }
-}
-
-/**
- * Fetches the user's primary lists from the Simkl API.
- * @param {Object} userConfig The user's configuration containing the access token.
- * @returns {Promise<Array>} A promise that resolves to an array of list objects.
- */
-async function fetchSimklLists(userConfig) {
-  if (!userConfig.simklAccessToken) {
-    console.log('[SimklIntegration] No Simkl Access Token, skipping list fetch.');
-    return [];
-  }
-
-  const listTypes = {
-    'watching': 'Watching',
-    'plantowatch': 'Plan to Watch',
-    'hold': 'On Hold',
-    'completed': 'Completed',
-    'dropped': 'Dropped'
-  };
-  
-  const mediaTypes = ['movies', 'tv', 'anime'];
-  let allSimklLists = [];
-  
-  for (const media of mediaTypes) {
-    for (const [status, statusName] of Object.entries(listTypes)) {
-      allSimklLists.push({
-        id: `simkl_${media}_${status}`,
-        name: `Simkl ${media.charAt(0).toUpperCase() + media.slice(1)}: ${statusName}`,
-        source: 'simkl',
-        mediaType: media,
-        listStatus: status
-      });
-    }
-  }
-  try {
-    return allSimklLists;
-    } catch (error) {
-        console.error('[SimklIntegration] Error constructing Simkl lists:', error);
-        return [];
-    }
-}
-
 
 module.exports = {
   getSimklAuthPin,
   pollForSimklToken,
   fetchSimklLists,
-  fetchSimklListItems
+  fetchSimklListItems,
 };

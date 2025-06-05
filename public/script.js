@@ -39,6 +39,7 @@ document.addEventListener('DOMContentLoaded', function() {
         apiKey: '',
         rpdbApiKey: '',
         traktAccessToken: null,
+        simklLists: {},
         simklAccessToken: null,
         enableRandomListFeature: defaultConfig.enableRandomListFeature,
         randomMDBListUsernames: [...defaultConfig.randomMDBListUsernames],
@@ -80,6 +81,9 @@ document.addEventListener('DOMContentLoaded', function() {
     simklPinContainer: document.getElementById('simklPinContainer'),
     simklVerificationUrl: document.getElementById('simklVerificationUrl'),
     simklUserCode: document.getElementById('simklUserCode'),
+    simklSelectionContainer: document.getElementById('simklSelectionContainer'),
+    simklSelectionGrid: document.getElementById('simklSelectionGrid'),
+    importSimklBtn: document.getElementById('importSimklBtn'),
     universalImportInput: document.getElementById('universalImportInput'),
     importedAddonsContainer: document.getElementById('importedAddons'),
     addonsList: document.getElementById('addonsList'),
@@ -318,7 +322,8 @@ document.addEventListener('DOMContentLoaded', function() {
     elements.rpdbApiKeyInput.addEventListener('input', () => handleApiKeyInput(elements.rpdbApiKeyInput, 'rpdb'));
     elements.traktLoginBtn?.addEventListener('click', () => { elements.traktPinContainer.style.display = 'flex'; });
     elements.submitTraktPin?.addEventListener('click', handleTraktPinSubmit);
-    elements.simklLoginBtn?.addEventListener('click', handleSimklAuthClick);
+    elements.simklLoginBtn?.addEventListener('click', showSimklSelectionUI);
+    elements.importSimklBtn?.addEventListener('click', handleImportSimklClick);
     elements.universalImportInput.addEventListener('paste', handleUniversalPaste);
     elements.universalImportInput.addEventListener('input', handleUniversalInputChange);
     elements.copyManifestBtn?.addEventListener('click', copyManifestUrlToClipboard);
@@ -643,6 +648,77 @@ document.addEventListener('DOMContentLoaded', function() {
     } catch (error) { console.error('Load Config Error:', error); showNotification('apiKeys', `Load Config Error: ${error.message}`, 'error', true); }
   }
 
+  function showSimklSelectionUI() {
+    elements.simklSelectionContainer.style.display = 'block';
+    renderSimklSelectionGrid();
+    elements.cancelSimklBtn.onclick = () => {
+        elements.simklSelectionContainer.style.display = 'none';
+    };
+  }
+
+  function renderSimklSelectionGrid() {
+    const grid = elements.simklSelectionGrid;
+    grid.innerHTML = '';
+
+    const mediaTypes = { shows: 'Shows', movies: 'Movies', anime: 'Anime' };
+    const statuses = { watching: 'Watching', plantowatch: 'Plan to Watch', hold: 'On Hold', completed: 'Completed', dropped: 'Dropped' };
+
+    // Create header row
+    grid.appendChild(document.createElement('div')); // Empty corner cell
+    Object.values(statuses).forEach(statusName => {
+        const headerCell = document.createElement('div');
+        headerCell.className = 'grid-header';
+        headerCell.textContent = statusName;
+        grid.appendChild(headerCell);
+    });
+
+    // Create media type rows
+    for (const [mediaType, mediaName] of Object.entries(mediaTypes)) {
+        const rowHeader = document.createElement('div');
+        rowHeader.className = 'grid-row-header';
+        rowHeader.textContent = mediaName;
+        grid.appendChild(rowHeader);
+
+        for (const status of Object.keys(statuses)) {
+            const cell = document.createElement('div');
+            cell.className = 'grid-cell';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.dataset.mediaType = mediaType;
+            checkbox.dataset.status = status;
+            // Check the box if it's in the current config
+            if (state.userConfig.simklLists?.[mediaType]?.includes(status)) {
+                checkbox.checked = true;
+            }
+            cell.appendChild(checkbox);
+            grid.appendChild(cell);
+        }
+    }
+  }
+  
+  async function handleImportSimklClick() {
+    // 1. Read selections from the grid
+    const selectedLists = {};
+    const checkboxes = elements.simklSelectionGrid.querySelectorAll('input[type="checkbox"]:checked');
+    checkboxes.forEach(cb => {
+        const mediaType = cb.dataset.mediaType;
+        const status = cb.dataset.status;
+        if (!selectedLists[mediaType]) {
+            selectedLists[mediaType] = [];
+        }
+        selectedLists[mediaType].push(status);
+    });
+  
+    state.userConfig.simklLists = selectedLists;
+  
+    // 2. Hide the selection UI
+    elements.simklSelectionContainer.style.display = 'none';
+  
+    // 3. Start the PIN auth flow
+    await startSimklAuthFlow();
+  }
+    
+
   function handleApiKeyInput(inputElement, keyType) {
     const apiKey = inputElement.value.trim();
     inputElement.classList.remove('valid', 'invalid');
@@ -784,7 +860,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         elements.simklLoginBtn.style.display = 'none';
-        elements.simklPinContainer.style.display = 'block';
+        elements.simklPinContainer.style.display = 'flex';
         elements.simklVerificationUrl.href = data.verification_url;
         elements.simklUserCode.textContent = data.user_code;
 
@@ -813,6 +889,7 @@ document.addEventListener('DOMContentLoaded', function() {
         updateStremioButtonHref();
         updateSimklUI(true);
         showNotification('connections', 'Successfully connected to Simkl!', 'success');
+        await updateListPreference(null, 'simkl_settings', { simklLists: state.userConfig.simklLists });
         await loadUserListsAndAddons();
 
     } catch (error) {
@@ -821,6 +898,28 @@ document.addEventListener('DOMContentLoaded', function() {
         updateSimklUI(false); // Revert UI on error
     }
   }
+
+  async function startSimklAuthFlow() {
+    showNotification('connections', 'Saving selections and starting connection...', 'info', true);
+    try {
+        const response = await fetch(`/${state.configHash}/simkl/settings`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ simklLists: state.userConfig.simklLists })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'Failed to save Simkl selections');
+        }
+        if (data.configHash) state.configHash = data.configHash;
+
+        await handleSimklAuthClick(); // Now start the actual PIN flow
+    } catch(error) {
+        console.error('Simkl Flow Error:', error);
+        showNotification('connections', `Error: ${error.message}`, 'error', true);
+    }
+  }
+    
     
 
   async function handleListUrlImport(mockListUrlInput) {
@@ -1399,7 +1498,8 @@ document.addEventListener('DOMContentLoaded', function() {
         order: `/${state.configHash}/lists/order`,
         sort: `/${state.configHash}/lists/sort`,
         merge: `/${state.configHash}/lists/merge`,
-        random_feature_disable: `/${state.configHash}/config/random-list-feature`
+        random_feature_disable: `/${state.configHash}/config/random-list-feature`,
+        simkl_settings: `/${state.configHash}/simkl/settings`
     };
     const endpoint = endpointMap[type];
     if (!endpoint) {
@@ -1407,7 +1507,7 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
     }
 
-    let body = { ...payload };
+    let body = payload;
     if (listIdForPref && ['name', 'sort', 'merge', 'mediatype'].includes(type)) {
         body.listId = listIdForPref;
     }
@@ -1590,6 +1690,7 @@ document.addEventListener('DOMContentLoaded', function() {
   
         state.configHash = data.configHash;
         state.userConfig.simklAccessToken = null;
+        state.userConfig.simklLists = {};
   
         updateURL();
         updateStremioButtonHref();

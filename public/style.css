@@ -103,10 +103,24 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
   transform: translateY(1px);
 }
 
-.trakt-login-btn { background-color: #4CAF50; gap: 8px; }
-.trakt-login-btn:hover { background-color: #45a049; }
-.trakt-login-btn img { width: 16px; height: 16px; object-fit: contain; }
+.simkl-login-btn {
+    background-color: #fff;
+    color: #333;
+    border: 1px solid #ddd;
+    gap: 8px;
+}
+.simkl-login-btn:hover {
+    background-color: #f5f5f5;
+}
+.simkl-login-btn img, .simkl-login-btn svg { width: 18px; height: 18px; }
 
+.trakt-login-btn { background-color: #ed1c24; gap: 8px; }
+.trakt-login-btn:hover { background-color: #c71219; }
+.trakt-login-btn svg {
+    width: 20px;
+    height: 20px;
+}
+  
 .disconnect-btn { background-color: #f44336; font-size: 12px; padding: 6px 10px; margin-left: 10px; }
 .disconnect-btn:hover { background-color: #d32f2f; }
 
@@ -769,3 +783,67 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
     flex-grow: 1;
     min-width: 0;
 }
+
+.simkl-selection-container {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 15px;
+  margin-top: 15px;
+  background-color: #fcfcfc;
+}
+.simkl-selection-container h4 {
+  margin-top: 0;
+  margin-bottom: 15px;
+  font-weight: 600;
+}
+.simkl-selection-grid {
+  display: grid;
+  grid-template-columns: 100px repeat(5, 1fr);
+  gap: 10px 15px;
+  align-items: center;
+  font-size: 14px;
+}
+.simkl-selection-grid .grid-header {
+  font-weight: 500;
+  text-align: center;
+  font-size: 13px;
+  color: #555;
+}
+.simkl-selection-grid .grid-row-header {
+  font-weight: 500;
+}
+.simkl-selection-grid .grid-cell {
+  text-align: center;
+}
+.simkl-selection-actions {
+  margin-top: 20px;
+  display: flex;
+  gap: 10px;
+}
+.cancel-btn {
+    background-color: #757575;
+}
+.cancel-btn:hover {
+    background-color: #616161;
+}
+.simkl-pin-container {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    font-size: 1.1em;
+    margin-top: 10px;
+    padding: 10px;
+    background: #f1f1f1;
+    border-radius: 6px;
+}
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #e0e0e0;
+  border-top-color: #333;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+  
