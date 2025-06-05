@@ -1384,13 +1384,23 @@ document.addEventListener('DOMContentLoaded', function() {
     addonGroups.forEach(addon => {
       const item = document.createElement('div'); item.className = 'addon-item-group';
       const logoSrc = addon.logo || '/assets/logo.ico';
+      const urlObject = new URL(addon.apiBaseUrl);
+      const configureUrl = `${urlObject.origin}/configure`;
       item.innerHTML = `
         <img src="${logoSrc}" alt="${addon.name} logo" class="addon-group-logo">
         <div class="addon-group-details">
           <span class="addon-group-name">${addon.name}</span>
           <span class="addon-group-info">v${addon.version || 'N/A'} • ${addon.catalogs?.length || 0} list${addon.catalogs?.length !== 1 ? 's' : ''}</span>
         </div>
-        <button class="remove-addon-group action-icon" data-addon-id="${addon.id}" title="Remove Addon Group">❌</button>
+        <div class="addon-group-actions">
+          <a href="${configureUrl}" target="_blank" rel="noopener noreferrer" class="configure-addon-group action-icon" title="Configure Addon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+              <path fill-rule="evenodd" d="M8.636 3.5a.5.5 0 0 0-.5-.5H1.5A1.5 1.5 0 0 0 0 4.5v10A1.5 1.5 0 0 0 1.5 16h10a1.5 1.5 0 0 0 1.5-1.5V7.864a.5.5 0 0 0-1 0V14.5a.5.5 0 0 1-.5.5h-10a.5.5 0 0 1-.5-.5v-10a.5.5 0 0 1 .5-.5h6.636a.5.5 0 0 0 .5-.5z"/>
+              <path fill-rule="evenodd" d="M16 .5a.5.5 0 0 0-.5-.5h-5a.5.5 0 0 0 0 1h3.793L6.146 9.146a.5.5 0 1 0 .708.708L15 1.707V5.5a.5.5 0 0 0 1 0v-5z"/>
+            </svg>
+          </a>
+          <button class="remove-addon-group action-icon" data-addon-id="${addon.id}" title="Remove Addon Group">❌</button>
+        </div>
       `;
       item.querySelector('.remove-addon-group').addEventListener('click', (e) => { e.stopPropagation(); removeImportedAddonGroup(addon.id);});
       elements.addonsList.appendChild(item);

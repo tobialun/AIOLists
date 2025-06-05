@@ -305,6 +305,16 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 .addon-group-details { flex-grow: 1; display: flex; flex-direction: column; justify-content: center; min-width: 0;}
 .addon-group-name { font-weight: 500; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px;}
 .addon-group-info { font-size: 12px; color: #777; }
+.addon-group-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+  .configure-addon-group svg {
+  width: 18px;
+  height: 18px;
+}
 .remove-addon-group {
     margin-left: auto;
     color: #e53935;
