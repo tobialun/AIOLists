@@ -1058,7 +1058,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if ((list.source === 'trakt' || list.source === 'trakt_public') && !tagImageSrc) tagImageSrc = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico';
         else if (list.source === 'addon_manifest' && list.tagImage) tagImageSrc = list.tagImage;
         tag.classList.add(tagTypeChar.toLowerCase());
-        if (tagImageSrc) { const img = document.createElement('img'); img.src = tagImageSrc; img.alt = list.source || 'icon'; tag.appendChild(img); if (list.source === 'trakt' || list.source === 'trakt_public_url' || list.source === 'addon_manifest') tag.style.backgroundColor = 'transparent'; }
+        if (tagImageSrc) { const img = document.createElement('img'); img.src = tagImageSrc; img.alt = list.source || 'icon'; tag.appendChild(img); if (list.source === 'trakt' || list.source === 'trakt_public' || list.source === 'addon_manifest') tag.style.backgroundColor = 'transparent'; }
         else { tag.textContent = tagTypeChar; }
         if (tagTypeChar === '🎲') { tag.style.backgroundColor = '#FFC107'; tag.style.color = '#000';}
 
@@ -1109,7 +1109,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if ((list.source === 'trakt' || list.source === 'trakt_public') && !tagImageSrc) tagImageSrc = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico';
         else if (list.source === 'addon_manifest' && list.tagImage) tagImageSrc = list.tagImage;
         tag.classList.add(tagTypeChar.toLowerCase());
-        if (tagImageSrc) { const img = document.createElement('img'); img.src = tagImageSrc; img.alt = list.source || 'icon'; tag.appendChild(img); if (list.source === 'trakt' || list.source === 'trakt_public_url' || list.source === 'addon_manifest') tag.style.backgroundColor = 'transparent'; }
+        if (tagImageSrc) { const img = document.createElement('img'); img.src = tagImageSrc; img.alt = list.source || 'icon'; tag.appendChild(img); if (list.source === 'trakt' || list.source === 'trakt_public' || list.source === 'addon_manifest') tag.style.backgroundColor = 'transparent'; }
         else { tag.textContent = tagTypeChar; }
         if (tagTypeChar === '🎲') { tag.style.backgroundColor = '#FFC107'; tag.style.color = '#000';}
 
