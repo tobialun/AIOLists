@@ -1017,68 +1017,83 @@ processedLists.push(...activeListsResults);
                     hasShows: urlImportHasShows,
                     canBeMerged: actualCanBeMergedForUrl,
                     isMerged: isUserMergedForUrl,
-                    addonId: addonGroupId, // Redundant but for consistency
-                    addonName: addon.name, // Redundant
+                    addonId: addonGroupId,
+                    addonName: addon.name,
                     tag: tagType,
                     tagImage: tagImage,
                     sortPreferences: req.userConfig.sortPreferences?.[sortOriginalIdForUrl] ||
                                      { sort: (isTraktPublicList ? 'rank' : 'default'),
                                        order: (isTraktPublicList ? 'asc' : 'desc') },
                     source: isMDBListUrlImport ? 'mdblist_url' : (isTraktPublicList ? 'trakt_public_url' : 'addon_url_import'),
-                    isUrlImportedType: true, // Flag that this is a direct URL import
-                    // Include MDBList specific fields if present, for consistency
+                    isUrlImportedType: true,
                     dynamic: isMDBListUrlImport ? addon.dynamic : undefined,
                     mediatype: isMDBListUrlImport ? addon.mediatype : undefined,
-                    // Trakt specific for public list context
                     traktUser: isTraktPublicList ? addon.traktUser : undefined,
                     traktListSlug: isTraktPublicList ? addon.traktListSlug : undefined,
                 });
 
-            } else if (addon.catalogs && addon.catalogs.length > 0) { 
-                // This is a manifest import with multiple sub-catalogs
+            } else if (addon.catalogs && addon.catalogs.length > 0) {
                 (addon.catalogs || []).forEach(catalog => {
-                  const catalogIdStr = String(catalog.id); // This is the aiolistsUniqueCatalogId
+                  const catalogIdStr = String(catalog.id);
                   if (removedListsSet.has(catalogIdStr) || (req.userConfig.hiddenLists || []).includes(catalogIdStr)) return;
 
-                  let catalogHasMovies = catalog.type === 'movie';
-                  let catalogHasShows = catalog.type === 'series' || catalog.type === 'tv';
-                  if (catalog.type === 'all' || catalog.type === 'other' || !['movie', 'series', 'tv'].includes(catalog.type)) { // Treat unknown types from manifest as 'all' for content capability
-                      catalogHasMovies = (addon.types || []).includes('movie');
-                      catalogHasShows = (addon.types || []).includes('series') || (addon.types || []).includes('tv');
-                  }
-                  const subCatalogCanBeMerged = catalogHasMovies && catalogHasShows;
-                  const subCatalogIsUserMerged = subCatalogCanBeMerged ? (req.userConfig.mergedLists?.[catalogIdStr] !== false) : false;
-                  
-                  const customTypeName = req.userConfig.customMediaTypeNames?.[catalogIdStr];
-                  let effectiveMediaTypeDisplay;
-                  if (customTypeName) {
-                      effectiveMediaTypeDisplay = customTypeName;
-                  } else {
-                      if (catalogHasMovies && catalogHasShows) effectiveMediaTypeDisplay = 'All';
-                      else if (catalogHasMovies) effectiveMediaTypeDisplay = 'Movie';
-                      else if (catalogHasShows) effectiveMediaTypeDisplay = 'Series';
-                      else effectiveMediaTypeDisplay = catalog.type; // Fallback to original type if not movie/series/all
-                  }
+                  let catalogHasMovies = false;
+                  let catalogHasShows = false;
+                  const catTypeLower = catalog.type ? String(catalog.type).toLowerCase() : 'unknown';
+                  if (catTypeLower === 'movie') {
+                    catalogHasMovies = true;
+                } else if (catTypeLower === 'series' || catTypeLower === 'tv') {
+                    catalogHasShows = true;
+                } else { 
+                    const parentAddonTypes = (addon.types || []).map(t => String(t).toLowerCase());
+                    if (parentAddonTypes.includes('movie')) {
+                        catalogHasMovies = true;
+                    }
+                    if (parentAddonTypes.includes('series') || parentAddonTypes.includes('tv')) {
+                        catalogHasShows = true;
+                    }
+                }
+                const subCatalogCanBeMerged = catalogHasMovies && catalogHasShows; // Merging based on inferred movie/series content
+                const subCatalogIsUserMerged = subCatalogCanBeMerged ? (req.userConfig.mergedLists?.[catalogIdStr] !== false) : false;
+                
+                const customTypeName = req.userConfig.customMediaTypeNames?.[catalogIdStr];
+                let effectiveMediaTypeDisplay;
 
-                  processedLists.push({
-                      id: catalogIdStr,
-                      originalId: catalog.originalId || catalogIdStr, // Use originalId from manifest catalog for sorting if available
-                      name: catalog.name,
-                      customName: req.userConfig.customListNames?.[catalogIdStr] || null,
-                      effectiveMediaTypeDisplay: effectiveMediaTypeDisplay,
-                      isHidden: (req.userConfig.hiddenLists || []).includes(catalogIdStr),
-                      hasMovies: catalogHasMovies,
-                      hasShows: catalogHasShows,
-                      canBeMerged: subCatalogCanBeMerged,
-                      isMerged: subCatalogIsUserMerged,
-                      addonId: addon.id, // Parent manifest ID
-                      addonName: addon.name, // Parent manifest name
-                      tag: 'A', // General Addon tag
-                      tagImage: addon.logo, // Use parent addon's logo
-                      sortPreferences: req.userConfig.sortPreferences?.[catalog.originalId || catalogIdStr] || { sort: 'default', order: 'desc' },
-                      source: 'addon_manifest', // Indicates this is a sub-catalog from an imported manifest
-                      isUrlImportedType: false,
-                  });
+                if (customTypeName) {
+                    effectiveMediaTypeDisplay = customTypeName;
+                } else {
+                    if (catTypeLower && !['movie', 'series', 'tv', 'all'].includes(catTypeLower)) {
+                         effectiveMediaTypeDisplay = catTypeLower.charAt(0).toUpperCase() + catTypeLower.slice(1);
+                    } else if (catalogHasMovies && catalogHasShows) {
+                        effectiveMediaTypeDisplay = 'All';
+                    } else if (catalogHasMovies) {
+                        effectiveMediaTypeDisplay = 'Movie';
+                    } else if (catalogHasShows) {
+                        effectiveMediaTypeDisplay = 'Series';
+                    } else {
+                         effectiveMediaTypeDisplay = catTypeLower.charAt(0).toUpperCase() + catTypeLower.slice(1);
+                    }
+                }
+
+                processedLists.push({
+                    id: catalogIdStr,
+                    originalId: catalog.originalId || catalogIdStr, 
+                    name: catalog.name,
+                    customName: req.userConfig.customListNames?.[catalogIdStr] || null,
+                    effectiveMediaTypeDisplay: effectiveMediaTypeDisplay,
+                    isHidden: (req.userConfig.hiddenLists || []).includes(catalogIdStr),
+                    hasMovies: catalogHasMovies,
+                    hasShows: catalogHasShows,
+                    canBeMerged: subCatalogCanBeMerged,
+                    isMerged: subCatalogIsUserMerged,
+                    addonId: addon.id, 
+                    addonName: addon.name, 
+                    tag: 'A', 
+                    tagImage: addon.logo, 
+                    sortPreferences: req.userConfig.sortPreferences?.[catalog.originalId || catalogIdStr] || { sort: 'default', order: 'desc' },
+                    source: 'addon_manifest', 
+                    isUrlImportedType: false,
+                });
               });
             }
         }

@@ -56,11 +56,13 @@ class ExternalAddon {
         }
         const originalCatalogIdFromSource = catalog.id;
         const originalCatalogType = catalog.type;
+        
         let stremioFinalCatalogType = originalCatalogType;
-        if (originalCatalogType === 'tv') stremioFinalCatalogType = 'series';
-        if (originalCatalogType !== 'movie' && originalCatalogType !== 'series' && originalCatalogType !== 'all') {
-            stremioFinalCatalogType = 'all';
+
+        if (originalCatalogType === 'tv') {
+            stremioFinalCatalogType = 'series';
         }
+
         const hasSearchRequirement = (catalog.extra || []).some(e => e.name === 'search' && e.isRequired);
         if (hasSearchRequirement) {
             return null;

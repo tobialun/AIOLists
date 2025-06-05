@@ -89,22 +89,21 @@ document.addEventListener('DOMContentLoaded', function() {
     genreFilterStatusInfo: document.getElementById('genreFilterStatusInfo'),
     toggleRandomListBtn: document.getElementById('toggleRandomListBtn'),
     randomListFeatureInfo: document.getElementById('randomListFeatureInfo'),
-    randomListFeatureContainer: document.getElementById('randomListFeatureContainer'), // Added
+    randomListFeatureContainer: document.getElementById('randomListFeatureContainer'),
     listsNotification: document.getElementById('listsNotification'),
     copyConfigHashBtn: null,
+    copyBlankCharBtn: null,
+    copyBlankCharContainer: null,
     copyConfigHashContainer: document.getElementById('copyConfigHashContainer'),
     settingsSection: document.querySelector('.settings-section'),
     settingsHeader: document.getElementById('settingsHeader'),
     settingsContent: document.getElementById('settingsContent'),
     settingsArrow: document.querySelector('.settings-section .collapsible-arrow'),
-    // For random user editing
     editRandomUsersLink: null,
     randomUsersDropdown: null,
     randomUsersTagContainer: null,
     randomUserInput: null
   };
-
-  let loadingAnimationIntervalId = null;
 
   async function init() {
     setupEventListeners();
@@ -150,13 +149,67 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     await fetchAppVersionAndApplyStyles();
-    createRandomUsersEditor(); // Create the UI elements for random users
+    createRandomUsersEditor();
     updateURLAndLoadData();
     createCopyConfigHashButton();
+    createCopyBlankCharButton();
     if(elements.settingsContent) elements.settingsContent.style.display = 'none';
     if(elements.settingsArrow) elements.settingsArrow.textContent = '▶';
     if(elements.settingsSection) elements.settingsSection.classList.remove('open');
   }
+
+  function createCopyBlankCharButton() {
+    if (elements.copyBlankCharBtn) return; // Already created
+
+    elements.copyBlankCharContainer = document.createElement('div');
+    elements.copyBlankCharContainer.className = 'setting-item'; // Reuse existing class
+
+    elements.copyBlankCharBtn = document.createElement('button');
+    elements.copyBlankCharBtn.id = 'copyBlankCharBtn';
+    elements.copyBlankCharBtn.textContent = 'Copy Blank';
+    elements.copyBlankCharBtn.title = 'Copy invisible character';
+    elements.copyBlankCharBtn.className = 'action-btn';
+
+    const descriptionText = document.createElement('span');
+    descriptionText.className = 'setting-info-text';
+    descriptionText.textContent = 'Copy invisible character, paste it in name field to have nothing as your media type or movie name.';
+    descriptionText.style.marginLeft = '10px';
+
+    elements.copyBlankCharContainer.appendChild(elements.copyBlankCharBtn);
+    elements.copyBlankCharContainer.appendChild(descriptionText);
+
+    if (elements.settingsContent) {
+        const copyHashContainer = document.getElementById('copyConfigHashContainer');
+        if (copyHashContainer && copyHashContainer.parentNode === elements.settingsContent) {
+            // Insert the new button container after the "Copy Setup Code" container
+            elements.settingsContent.insertBefore(elements.copyBlankCharContainer, copyHashContainer.nextSibling);
+        } else {
+            // Fallback: append if the reference container is not found
+            elements.settingsContent.appendChild(elements.copyBlankCharContainer);
+        }
+    }
+    elements.copyBlankCharBtn.addEventListener('click', handleCopyBlankChar);
+  }
+
+  async function handleCopyBlankChar() {
+    try {
+        await navigator.clipboard.writeText("‎ "); // Copies U+200E (Left-to-Right Mark) followed by a space
+
+        const buttonInstance = elements.copyBlankCharBtn;
+        const originalText = 'Copy Blank';
+        buttonInstance.textContent = 'Blank Copied!';
+        buttonInstance.disabled = true;
+        setTimeout(() => {
+            buttonInstance.textContent = originalText;
+            buttonInstance.disabled = false;
+        }, 2000);
+        showNotification('settings', 'Blank character copied to clipboard!', 'success');
+    } catch (err) {
+        console.error('Copy blank char error:', err);
+        showNotification('settings', 'Failed to copy blank character.', 'error', true);
+    }
+  }
+
 
   async function createNewEmptyConfig() {
     try {
@@ -869,7 +922,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     nameSpan.textContent = displayName;
 
-    const isRandomCatalog = list.id === 'random_mdblist_catalog'; 
+    const isRandomCatalog = list.id === 'random_mdblist_catalog';
+    const isExternalAddonList = list.source === 'addon_manifest';
 
     const removeBtn = createButton('❌', 'remove-list-button action-icon', (e) => { e.stopPropagation(); removeListItem(li, String(list.id)); }, 'Remove List Permanently');
     if ((apiKeyMissing && state.isPotentiallySharedConfig) && !isRandomCatalog) {
@@ -896,7 +950,7 @@ document.addEventListener('DOMContentLoaded', function() {
      if (isRandomCatalog && list.id === 'random_mdblist_catalog') editBtn.style.display = 'none'; // No editing name for random catalog
 
     let mergeToggle = null;
-    const canMerge = list.hasMovies && list.hasShows && !isRandomCatalog;
+    const canMerge = list.hasMovies && list.hasShows && !isRandomCatalog && !isExternalAddonList;
     if (canMerge) {
       const isListMerged = state.userConfig.mergedLists?.[String(list.id)] !== false;
       mergeToggle = createButton(
@@ -919,10 +973,9 @@ document.addEventListener('DOMContentLoaded', function() {
       
     let sortControlsContainer = null;
     const isSpecialTraktNonSortable = list.isTraktTrending || list.isTraktPopular || list.isTraktRecommendations;
-    // Random catalog is now sortable
     const isSortableList = (list.source === 'mdblist' || list.source === 'mdblist_url' ||
                            (list.source === 'trakt' && (list.isTraktList || list.isTraktWatchlist)) ||
-                           list.source === 'trakt_public' || list.id === 'random_mdblist_catalog') // Added random catalog
+                           list.source === 'trakt_public' || list.id === 'random_mdblist_catalog')
                            && !isSpecialTraktNonSortable;
 
     if (isSortableList) {
