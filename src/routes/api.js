@@ -7,6 +7,7 @@ const { convertToStremioFormat } = require('../addon/converters');
 const { setCacheHeaders, isWatchlist: commonIsWatchlist } = require('../utils/common');
 const Cache = require('../utils/cache');
 const { validateRPDBKey } = require('../utils/posters');
+const { getSimklAuthPin, pollForSimklToken, fetchSimklLists } = require('../integrations/simkl');
 const { authenticateTrakt, getTraktAuthUrl, fetchTraktLists: fetchTraktUserLists, fetchPublicTraktListDetails } = require('../integrations/trakt');
 const { fetchAllLists: fetchAllMDBLists, fetchListItems: fetchMDBListItemsDirect, validateMDBListKey, extractListFromUrl: extractMDBListFromUrl } = require('../integrations/mdblist');
 const { importExternalAddon: importExtAddon } = require('../integrations/externalAddons');
@@ -31,7 +32,7 @@ function purgeListConfigs(userConfig, listIdPrefixOrExactId, isExactId = false) 
   // Also purge customMediaTypeNames
   if (userConfig.customMediaTypeNames) {
     for (const key in userConfig.customMediaTypeNames) {
-        if ((isExactId && key === listIdPrefixOrExactId) || (!isExactId && key.startsWith(listIdPrefixOrExactId) && !key.startsWith('traktpublic_'))) {
+        if ((isExactId && key === listIdPrefixOrExactId) || (!isExactId && key.startsWith(listIdPrefixOrExactId) && !key.startsWith('traktpublic_') && !key.startsWith('simkl_'))) {
             idsToRemove.add(key);
             delete userConfig.customMediaTypeNames[key];
         }
@@ -41,7 +42,7 @@ function purgeListConfigs(userConfig, listIdPrefixOrExactId, isExactId = false) 
 
   if (userConfig.sortPreferences) {
       for (const key in userConfig.sortPreferences) {
-          if ((isExactId && key === listIdPrefixOrExactId) || (!isExactId && key.startsWith(listIdPrefixOrExactId) && !key.startsWith('traktpublic_'))) {
+        if ((isExactId && key === listIdPrefixOrExactId) || (!isExactId && key.startsWith(listIdPrefixOrExactId) && !key.startsWith('traktpublic_') && !key.startsWith('simkl_'))) {
               idsToRemove.add(key);
               delete userConfig.sortPreferences[key];
           }
@@ -49,7 +50,7 @@ function purgeListConfigs(userConfig, listIdPrefixOrExactId, isExactId = false) 
   }
   if (userConfig.mergedLists) {
       for (const key in userConfig.mergedLists) {
-          if ((isExactId && key === listIdPrefixOrExactId) || (!isExactId && key.startsWith(listIdPrefixOrExactId) && !key.startsWith('traktpublic_'))) {
+        if ((isExactId && key === listIdPrefixOrExactId) || (!isExactId && key.startsWith(listIdPrefixOrExactId) && !key.startsWith('traktpublic_') && !key.startsWith('simkl_'))) {
               idsToRemove.add(key);
               delete userConfig.mergedLists[key];
           }
@@ -59,6 +60,7 @@ function purgeListConfigs(userConfig, listIdPrefixOrExactId, isExactId = false) 
   const filterCondition = (id) => {
       const idStr = String(id);
       if (isExactId) return idStr === listIdPrefixOrExactId;
+      if (listIdPrefixOrExactId === 'simkl_') return idStr.startsWith('simkl_');
       if (listIdPrefixOrExactId === 'trakt_') return idStr.startsWith('trakt_') && !idStr.startsWith('traktpublic_');
       if (listIdPrefixOrExactId === 'random_mdblist_catalog' && idStr === 'random_mdblist_catalog') return true;
       return idStr.startsWith(listIdPrefixOrExactId);
@@ -101,6 +103,65 @@ module.exports = function(router) {
       next(error);
     }
   });
+
+  router.get('/api/simkl/auth/pin', async (req, res) => {
+      try {
+        const pinData = await getSimklAuthPin();
+        res.json({ success: true, ...pinData });
+      } catch (error) {
+        console.error('Error getting Simkl PIN:', error);
+        res.status(500).json({ success: false, error: 'Failed to initiate Simkl authentication.' });
+      }
+    });
+  
+    router.post('/:configHash/simkl/auth/poll', async (req, res) => {
+      const { userCode, interval, expires_in } = req.body;
+      if (!userCode || !interval || !expires_in) {
+        return res.status(400).json({ error: 'Missing required parameters for polling.' });
+      }
+  
+      const pollEndTime = Date.now() + expires_in * 1000;
+  
+      const doPoll = async () => {
+        if (Date.now() > pollEndTime) {
+          return res.status(408).json({ success: false, error: 'PIN expired. Please try again.' });
+        }
+  
+        const pollResult = await pollForSimklToken(userCode);
+  
+        if (pollResult.result === 'OK' && pollResult.access_token) {
+          req.userConfig.simklAccessToken = pollResult.access_token;
+          req.userConfig.lastUpdated = new Date().toISOString();
+          const newConfigHash = await compressConfig(req.userConfig);
+          manifestCache.clear();
+          return res.json({ success: true, status: 'authorized', configHash: newConfigHash, accessToken: pollResult.access_token });
+        } else if (pollResult.message === 'Authorization pending') {
+          setTimeout(doPoll, interval * 1000);
+        } else {
+          return res.status(400).json({ success: false, error: pollResult.message || 'Authorization failed or was denied.' });
+        }
+      };
+  
+      doPoll();
+    });
+  
+  router.post('/:configHash/simkl/disconnect', async (req, res) => {
+    try {
+      console.log('Simkl disconnect requested. Purging simkl_ entries.');
+      req.userConfig.simklAccessToken = null;
+    
+      purgeListConfigs(req.userConfig, 'simkl_');
+    
+      req.userConfig.lastUpdated = new Date().toISOString();
+      const newConfigHash = await compressConfig(req.userConfig);
+      manifestCache.clear();
+      res.json({ success: true, configHash: newConfigHash, message: 'Disconnected from Simkl.' });
+    } catch (error) {
+      console.error('Error in /simkl/disconnect:', error);
+      res.status(500).json({ error: 'Failed to disconnect from Simkl', details: error.message });
+    }
+  });
+    
 
   router.get('/:configHash/shareable-hash', async (req, res) => {
     try {
@@ -810,6 +871,10 @@ module.exports = function(router) {
               console.log("[AIOLists] Trakt token details updated during /lists processing.");
               configChangedByThisRequest = true;
           }
+        }
+       if (req.userConfig.simklAccessToken) {
+           const simklLists = await fetchSimklLists(req.userConfig);
+           allUserLists.push(...simklLists.map(l => ({...l, source: 'simkl'})));      
       }
     
       const removedListsSet = new Set(req.userConfig.removedLists || []);
@@ -935,13 +1000,28 @@ module.exports = function(router) {
                       lastChecked: new Date().toISOString() 
                   };
               }
-          } else { // Metadata for Trakt list already exists and is valid
+            
+          } else {
                req.userConfig.listsMetadata[manifestListId] = { 
                   ...metadata, 
                   canBeMerged: determinedCanBeMergedFromSource && determinedHasMovies && determinedHasShows,
                   lastChecked: new Date().toISOString()
               };
           }
+          } else if (list.source === 'simkl') {
+             manifestListId = list.id;
+             tagType = 'S';
+             determinedHasMovies = list.mediaType === 'movies';
+             determinedHasShows = list.mediaType === 'tv' || list.mediaType === 'anime';
+             determinedCanBeMergedFromSource = false; // Cannot be merged
+             req.userConfig.listsMetadata[manifestListId] = {
+               ...(req.userConfig.listsMetadata[manifestListId] || {}),
+               hasMovies: determinedHasMovies,
+               hasShows: determinedHasShows,
+               canBeMerged: false,
+               lastChecked: new Date().toISOString()
+             };
+            
       } else { 
           determinedHasMovies = false; determinedHasShows = false; determinedCanBeMergedFromSource = false;
       }
@@ -950,15 +1030,16 @@ module.exports = function(router) {
       if (list.isTraktWatchlist) tagType = 'W';
       if (removedListsSet.has(manifestListId)) return null;
       const actualCanBeMerged = determinedCanBeMergedFromSource && determinedHasMovies && determinedHasShows;
-      const isUserMerged = actualCanBeMerged ? (req.userConfig.mergedLists?.[manifestListId] !== false) : false;
+      const isUserMerged = actualCanBeMerged ? (req.userConfig.mergedLists?.[manifestListId] !== false) : false;      
       let defaultSort = { sort: (list.source === 'trakt') ? 'rank' : 'default', order: (list.source === 'trakt') ? 'asc' : 'desc' };
       if (list.source === 'trakt' && list.isTraktWatchlist) { defaultSort = { sort: 'added', order: 'desc' }; }
+      if (list.source === 'simkl') { defaultSort = { sort: 'rank', order: 'asc' }; } 
       const customTypeName = req.userConfig.customMediaTypeNames?.[manifestListId];
       let effectiveMediaTypeDisplay;
       if (customTypeName) { effectiveMediaTypeDisplay = customTypeName; }
       else { if (determinedHasMovies && determinedHasShows) effectiveMediaTypeDisplay = 'All'; else if (determinedHasMovies) effectiveMediaTypeDisplay = 'Movie'; else if (determinedHasShows) effectiveMediaTypeDisplay = 'Series'; else effectiveMediaTypeDisplay = 'N/A';}
-      return { id: manifestListId, originalId: originalListIdStr, name: list.name, customName: req.userConfig.customListNames?.[manifestListId] || null, effectiveMediaTypeDisplay: effectiveMediaTypeDisplay, isHidden: (req.userConfig.hiddenLists || []).includes(manifestListId), hasMovies: determinedHasMovies, hasShows: determinedHasShows, canBeMerged: actualCanBeMerged, isMerged: isUserMerged, isTraktList: list.source === 'trakt' && list.isTraktList, isTraktWatchlist: list.source === 'trakt' && list.isTraktWatchlist, isTraktRecommendations: list.isTraktRecommendations, isTraktTrending: list.isTraktTrending, isTraktPopular: list.isTraktPopular, isWatchlist: !!list.isWatchlist || !!list.isTraktWatchlist, tag: tagType, listType: list.listType, tagImage: list.source === 'trakt' ? 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico' : null, sortPreferences: req.userConfig.sortPreferences?.[originalListIdStr] || defaultSort, source: list.source, dynamic: list.dynamic, mediatype: list.mediatype };
-});
+      return { id: manifestListId, originalId: originalListIdStr, name: list.name, customName: req.userConfig.customListNames?.[manifestListId] || null, effectiveMediaTypeDisplay: effectiveMediaTypeDisplay, isHidden: (req.userConfig.hiddenLists || []).includes(manifestListId), hasMovies: determinedHasMovies, hasShows: determinedHasShows, canBeMerged: actualCanBeMerged, isMerged: isUserMerged, isTraktList: list.source === 'trakt' && list.isTraktList, isTraktWatchlist: list.source === 'trakt' && list.isTraktWatchlist, isTraktRecommendations: list.isTraktRecommendations, isTraktTrending: list.isTraktTrending, isTraktPopular: list.isTraktPopular, isWatchlist: !!list.isWatchlist || !!list.isTraktWatchlist, tag: tagType, listType: list.listType, tagImage: list.source === 'trakt' ? 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico' : list.source === 'simkl' ? 'https://simkl.com/favicon.ico' : null, sortPreferences: req.userConfig.sortPreferences?.[originalListIdStr] || defaultSort, source: list.source, dynamic: list.dynamic, mediatype: list.mediatype };
+    });
 const activeListsResults = (await Promise.all(activeListsProcessingPromises)).filter(p => p !== null);
 processedLists.push(...activeListsResults);
 

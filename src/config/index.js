@@ -2,6 +2,7 @@
 const ITEMS_PER_PAGE = 100;
 const PORT = process.env.PORT || 7000;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const SIMKL_CLIENT_ID = '11f925f671c0541ddc547717523f9a180cd6af992f9169e7b6b091d0912a856d';
 const TRAKT_CLIENT_ID = '490414ec03fe9a33b2d0c16d58261ebbbd9cf0eee23f213fa0e3eb1d6126d05c';
 
 const staticGenres = [
@@ -16,6 +17,7 @@ const defaultConfig = {
   rpdbApiKey: '',
   traktAccessToken: '',
   traktRefreshToken: '',
+  simklAccessToken: '',
   traktExpiresAt: null,
   listOrder: [],
   lastUpdated: null,
@@ -74,6 +76,7 @@ module.exports = {
   defaultConfig,
   ITEMS_PER_PAGE,
   TRAKT_CLIENT_ID,
+  SIMKL_CLIENT_ID,
   PORT,
   IS_PRODUCTION,
   staticGenres

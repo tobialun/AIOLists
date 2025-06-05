@@ -39,6 +39,7 @@ document.addEventListener('DOMContentLoaded', function() {
         apiKey: '',
         rpdbApiKey: '',
         traktAccessToken: null,
+        simklAccessToken: null,
         enableRandomListFeature: defaultConfig.enableRandomListFeature,
         randomMDBListUsernames: [...defaultConfig.randomMDBListUsernames],
         availableSortOptions: [...defaultConfig.availableSortOptions],
@@ -74,6 +75,11 @@ document.addEventListener('DOMContentLoaded', function() {
     traktPinContainer: document.getElementById('traktPinContainer'),
     traktPin: document.getElementById('traktPin'),
     submitTraktPin: document.getElementById('submitTraktPin'),
+    simklLoginBtn: document.getElementById('simklLoginBtn'),
+    simklConnectedState: document.getElementById('simklConnectedState'),
+    simklPinContainer: document.getElementById('simklPinContainer'),
+    simklVerificationUrl: document.getElementById('simklVerificationUrl'),
+    simklUserCode: document.getElementById('simklUserCode'),
     universalImportInput: document.getElementById('universalImportInput'),
     importedAddonsContainer: document.getElementById('importedAddons'),
     addonsList: document.getElementById('addonsList'),
@@ -312,6 +318,7 @@ document.addEventListener('DOMContentLoaded', function() {
     elements.rpdbApiKeyInput.addEventListener('input', () => handleApiKeyInput(elements.rpdbApiKeyInput, 'rpdb'));
     elements.traktLoginBtn?.addEventListener('click', () => { elements.traktPinContainer.style.display = 'flex'; });
     elements.submitTraktPin?.addEventListener('click', handleTraktPinSubmit);
+    elements.simklLoginBtn?.addEventListener('click', handleSimklAuthClick);
     elements.universalImportInput.addEventListener('paste', handleUniversalPaste);
     elements.universalImportInput.addEventListener('input', handleUniversalInputChange);
     elements.copyManifestBtn?.addEventListener('click', copyManifestUrlToClipboard);
@@ -631,6 +638,7 @@ document.addEventListener('DOMContentLoaded', function() {
         await validateAndSaveApiKeys(mdblistApiKey, rpdbApiKey, true);
       }
       updateTraktUI(!!state.userConfig.traktAccessToken);
+      updateSimklUI(!!state.userConfig.simklAccessToken);
       await loadUserListsAndAddons();
     } catch (error) { console.error('Load Config Error:', error); showNotification('apiKeys', `Load Config Error: ${error.message}`, 'error', true); }
   }
@@ -739,6 +747,13 @@ document.addEventListener('DOMContentLoaded', function() {
     if (!isConnected) elements.traktPin.value = '';
   }
 
+  function updateSimklUI(isConnected) {
+      if (!elements.simklLoginBtn) return;
+      elements.simklLoginBtn.style.display = isConnected ? 'none' : 'block';
+      elements.simklConnectedState.style.display = isConnected ? 'flex' : 'none';
+      elements.simklPinContainer.style.display = 'none'; // Always hide PIN container on state change
+    }
+
   async function handleTraktPinSubmit() {
     const pin = elements.traktPin.value.trim();
     if (!pin) return showNotification('connections', 'Please enter your Trakt PIN', 'error');
@@ -758,6 +773,55 @@ document.addEventListener('DOMContentLoaded', function() {
       await loadUserListsAndAddons();
     } catch (error) { console.error('Trakt Error:', error); showNotification('connections', `Trakt Error: ${error.message}`, 'error', true); }
   }
+
+  async function handleSimklAuthClick() {
+    showNotification('connections', 'Requesting PIN from Simkl...', 'info', true);
+    try {
+        const response = await fetch(`/api/simkl/auth/pin`);
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'Failed to get PIN from Simkl.');
+        }
+
+        elements.simklLoginBtn.style.display = 'none';
+        elements.simklPinContainer.style.display = 'block';
+        elements.simklVerificationUrl.href = data.verification_url;
+        elements.simklUserCode.textContent = data.user_code;
+
+        showNotification('connections', 'Please authorize on Simkl, we are waiting for confirmation...', 'info', true);
+
+        // Start polling on the server
+        const pollResponse = await fetch(`/${state.configHash}/simkl/auth/poll`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userCode: data.user_code,
+            interval: data.interval,
+            expires_in: data.expires_in,
+          })
+        });
+
+        const pollData = await pollResponse.json();
+
+        if (!pollResponse.ok || !pollData.success) {
+            throw new Error(pollData.error || 'Simkl authorization failed or timed out.');
+        }
+
+        state.configHash = pollData.configHash;
+        state.userConfig.simklAccessToken = pollData.accessToken;
+        updateURL();
+        updateStremioButtonHref();
+        updateSimklUI(true);
+        showNotification('connections', 'Successfully connected to Simkl!', 'success');
+        await loadUserListsAndAddons();
+
+    } catch (error) {
+        console.error('Simkl Auth Error:', error);
+        showNotification('connections', `Simkl Auth Error: ${error.message}`, 'error', true);
+        updateSimklUI(false); // Revert UI on error
+    }
+  }
+    
 
   async function handleListUrlImport(mockListUrlInput) {
     const url = (mockListUrlInput || elements.listUrlInput).value.trim();
@@ -1030,10 +1094,13 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!tagTypeChar) {
             if (list.source === 'mdblist' || list.source === 'mdblist_url') { tagTypeChar = list.isWatchlist ? 'W' : (list.listType || 'L');}
             else if (list.source === 'trakt' || list.source === 'trakt_public') { tagTypeChar = 'T'; }
+            else if (list.source === 'simkl') { tagTypeChar = 'S'; }
+            else if (list.source === 'simkl') { tagTypeChar = 'S'; }
             else if (list.source === 'random_mdblist') { tagTypeChar = '🎲'; }
             else { tagTypeChar = 'A'; }
         }
         if ((list.source === 'trakt' || list.source === 'trakt_public') && !tagImageSrc) tagImageSrc = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico';
+        else if (list.source === 'simkl' && !tagImageSrc) tagImageSrc = 'https://simkl.com/favicon.ico';
         else if (list.source === 'addon_manifest' && list.tagImage) tagImageSrc = list.tagImage;
         tag.classList.add(tagTypeChar.toLowerCase());
         if (tagImageSrc) {
@@ -1041,7 +1108,7 @@ document.addEventListener('DOMContentLoaded', function() {
             tag.classList.add('tag-with-image');
             if (list.source === 'trakt' || list.source === 'trakt_public' || list.source === 'addon_manifest') {
                  tag.style.backgroundColor = 'transparent';
-            }
+            } else if (list.source === 'simkl') { tag.style.backgroundColor = '#000'; }
         }
         else { tag.textContent = tagTypeChar; }
         if (tagTypeChar === '🎲') { tag.style.backgroundColor = '#FFC107'; tag.style.color = '#000';}
@@ -1091,6 +1158,7 @@ document.addEventListener('DOMContentLoaded', function() {
             else { tagTypeChar = 'A'; }
         }
         if ((list.source === 'trakt' || list.source === 'trakt_public') && !tagImageSrc) tagImageSrc = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico';
+        else if (list.source === 'simkl' && !tagImageSrc) tagImageSrc = 'https://simkl.com/favicon.ico';
         else if (list.source === 'addon_manifest' && list.tagImage) tagImageSrc = list.tagImage;
         tag.classList.add(tagTypeChar.toLowerCase());
         if (tagImageSrc) { const img = document.createElement('img'); img.src = tagImageSrc; img.alt = list.source || 'icon'; tag.appendChild(img); if (list.source === 'trakt' || list.source === 'trakt_public' || list.source === 'addon_manifest') tag.style.backgroundColor = 'transparent'; }
@@ -1512,5 +1580,27 @@ document.addEventListener('DOMContentLoaded', function() {
     } catch (error) { console.error('Trakt Disconnect Error:', error); showNotification('connections', `Trakt Disconnect Error: ${error.message}`, 'error', true); }
   };
 
+  window.disconnectSimkl = async function() {
+      try {
+        const response = await fetch(`/${state.configHash}/simkl/disconnect`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Failed to disconnect Simkl');
+  
+        state.configHash = data.configHash;
+        state.userConfig.simklAccessToken = null;
+  
+        updateURL();
+        updateStremioButtonHref();
+        updateSimklUI(false);
+        showNotification('connections', 'Disconnected from Simkl.', 'success');
+        await loadUserListsAndAddons();
+      } catch(error) {
+        console.error('Simkl Disconnect Error:', error);
+        showNotification('connections', `Simkl Disconnect Error: ${error.message}`, 'error', true);
+      }
+    };
+    
   init();
 });
