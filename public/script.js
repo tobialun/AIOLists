@@ -84,6 +84,8 @@ document.addEventListener('DOMContentLoaded', function() {
     simklSelectionContainer: document.getElementById('simklSelectionContainer'),
     simklSelectionGrid: document.getElementById('simklSelectionGrid'),
     importSimklBtn: document.getElementById('importSimklBtn'),
+    cancelSimklBtn: document.getElementById('cancelSimklBtn'),
+    editSimklListsBtn: document.getElementById('editSimklListsBtn'),
     universalImportInput: document.getElementById('universalImportInput'),
     importedAddonsContainer: document.getElementById('importedAddons'),
     addonsList: document.getElementById('addonsList'),
@@ -322,8 +324,10 @@ document.addEventListener('DOMContentLoaded', function() {
     elements.rpdbApiKeyInput.addEventListener('input', () => handleApiKeyInput(elements.rpdbApiKeyInput, 'rpdb'));
     elements.traktLoginBtn?.addEventListener('click', () => { elements.traktPinContainer.style.display = 'flex'; });
     elements.submitTraktPin?.addEventListener('click', handleTraktPinSubmit);
-    elements.simklLoginBtn?.addEventListener('click', showSimklSelectionUI);
-    elements.importSimklBtn?.addEventListener('click', handleImportSimklClick);
+    elements.simklLoginBtn?.addEventListener('click', () => showSimklSelectionUI(false));
+    elements.importSimklBtn?.addEventListener('click', () => handleImportSimklClick());
+    elements.editSimklListsBtn?.addEventListener('click', (e) => { e.preventDefault(); showSimklSelectionUI(true); });
+    elements.cancelSimklBtn?.addEventListener('click', () => { elements.simklSelectionContainer.style.display = 'none'; });
     elements.universalImportInput.addEventListener('paste', handleUniversalPaste);
     elements.universalImportInput.addEventListener('input', handleUniversalInputChange);
     elements.copyManifestBtn?.addEventListener('click', copyManifestUrlToClipboard);
@@ -648,13 +652,22 @@ document.addEventListener('DOMContentLoaded', function() {
     } catch (error) { console.error('Load Config Error:', error); showNotification('apiKeys', `Load Config Error: ${error.message}`, 'error', true); }
   }
 
-  function showSimklSelectionUI() {
+  function showSimklSelectionUI(isEditing) {
     elements.simklSelectionContainer.style.display = 'block';
+    if(isEditing) {
+        elements.importSimklBtn.textContent = 'Update Selections';
+    } else {
+        elements.importSimklBtn.textContent = 'Import & Connect';
+    }
     renderSimklSelectionGrid();
-    elements.cancelSimklBtn.onclick = () => {
+    // Ensure cancel button is wired up
+    const cancelBtn = document.getElementById('cancelSimklBtn');
+    if (cancelBtn) {
+        cancelBtn.onclick = () => {
         elements.simklSelectionContainer.style.display = 'none';
     };
   }
+}
 
   function renderSimklSelectionGrid() {
     const grid = elements.simklSelectionGrid;
@@ -714,11 +727,16 @@ document.addEventListener('DOMContentLoaded', function() {
     // 2. Hide the selection UI
     elements.simklSelectionContainer.style.display = 'none';
   
-    // 3. Start the PIN auth flow
-    await startSimklAuthFlow();
+     // 3. If we are already connected (editing), just save and reload. Otherwise, start auth.
+     if (state.userConfig.simklAccessToken) {
+         showNotification('connections', 'Updating Simkl lists...', 'info', true);
+         await updateListPreference(null, 'simkl_settings', { simklLists: state.userConfig.simklLists });
+         await loadUserListsAndAddons();
+     } else {
+         await startSimklAuthFlow();
+     }
   }
     
-
   function handleApiKeyInput(inputElement, keyType) {
     const apiKey = inputElement.value.trim();
     inputElement.classList.remove('valid', 'invalid');
@@ -827,7 +845,11 @@ document.addEventListener('DOMContentLoaded', function() {
       if (!elements.simklLoginBtn) return;
       elements.simklLoginBtn.style.display = isConnected ? 'none' : 'block';
       elements.simklConnectedState.style.display = isConnected ? 'flex' : 'none';
+      elements.editSimklListsBtn.style.display = isConnected ? 'inline' : 'none';
       elements.simklPinContainer.style.display = 'none'; // Always hide PIN container on state change
+      if (!isConnected) {
+          elements.simklSelectionContainer.style.display = 'none'; // Hide selection on disconnect
+        }
     }
 
   async function handleTraktPinSubmit() {
@@ -901,19 +923,22 @@ document.addEventListener('DOMContentLoaded', function() {
 
   async function startSimklAuthFlow() {
     showNotification('connections', 'Saving selections and starting connection...', 'info', true);
+    let newConfigHash = state.configHash;
     try {
-        const response = await fetch(`/${state.configHash}/simkl/settings`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ simklLists: state.userConfig.simklLists })
-        });
-        const data = await response.json();
-        if (!response.ok || !data.success) {
-            throw new Error(data.error || 'Failed to save Simkl selections');
+        if (!state.userConfig.simklAccessToken) {
+            const response = await fetch(`/${state.configHash}/simkl/settings`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ simklLists: state.userConfig.simklLists })
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || 'Failed to save Simkl selections');
+            }
+            if (data.configHash) state.configHash = data.configHash;
         }
-        if (data.configHash) state.configHash = data.configHash;
 
-        await handleSimklAuthClick(); // Now start the actual PIN flow
+        await handleSimklAuthClick();
     } catch(error) {
         console.error('Simkl Flow Error:', error);
         showNotification('connections', `Error: ${error.message}`, 'error', true);
@@ -1194,7 +1219,6 @@ document.addEventListener('DOMContentLoaded', function() {
             if (list.source === 'mdblist' || list.source === 'mdblist_url') { tagTypeChar = list.isWatchlist ? 'W' : (list.listType || 'L');}
             else if (list.source === 'trakt' || list.source === 'trakt_public') { tagTypeChar = 'T'; }
             else if (list.source === 'simkl') { tagTypeChar = 'S'; }
-            else if (list.source === 'simkl') { tagTypeChar = 'S'; }
             else if (list.source === 'random_mdblist') { tagTypeChar = '🎲'; }
             else { tagTypeChar = 'A'; }
         }
@@ -1253,6 +1277,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!tagTypeChar) {
             if (list.source === 'mdblist' || list.source === 'mdblist_url') { tagTypeChar = list.isWatchlist ? 'W' : (list.listType || 'L');}
             else if (list.source === 'trakt' || list.source === 'trakt_public') { tagTypeChar = 'T'; }
+            else if (list.source === 'simkl') { tagTypeChar = 'S'; }
             else if (list.source === 'random_mdblist') { tagTypeChar = '🎲'; }
             else { tagTypeChar = 'A'; }
         }
@@ -1555,19 +1580,19 @@ document.addEventListener('DOMContentLoaded', function() {
       const urlObject = new URL(addon.apiBaseUrl);
       const configureUrl = `${urlObject.origin}/configure`;
       item.innerHTML = `
-        <img src="${logoSrc}" alt="${addon.name} logo" class="addon-group-logo">
+        <img src="<span class="math-inline">\{logoSrc\}" alt\="</span>{addon.name} logo" class="addon-group-logo">
         <div class="addon-group-details">
-          <span class="addon-group-name">${addon.name}</span>
-          <span class="addon-group-info">v${addon.version || 'N/A'} • ${addon.catalogs?.length || 0} list${addon.catalogs?.length !== 1 ? 's' : ''}</span>
+          <span class="addon-group-name"><span class="math-inline">\{addon\.name\}</span\>
+<span class\="addon\-group\-info"\>v</span>{addon.version || 'N/A'} • <span class="math-inline">\{addon\.catalogs?\.length \|\| 0\} list</span>{addon.catalogs?.length !== 1 ? 's' : ''}</span>
         </div>
         <div class="addon-group-actions">
-          <a href="${configureUrl}" target="_blank" rel="noopener noreferrer" class="configure-addon-group action-icon" title="Configure Addon">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
-              <path fill-rule="evenodd" d="M8.636 3.5a.5.5 0 0 0-.5-.5H1.5A1.5 1.5 0 0 0 0 4.5v10A1.5 1.5 0 0 0 1.5 16h10a1.5 1.5 0 0 0 1.5-1.5V7.864a.5.5 0 0 0-1 0V14.5a.5.5 0 0 1-.5.5h-10a.5.5 0 0 1-.5-.5v-10a.5.5 0 0 1 .5-.5h6.636a.5.5 0 0 0 .5-.5z"/>
-              <path fill-rule="evenodd" d="M16 .5a.5.5 0 0 0-.5-.5h-5a.5.5 0 0 0 0 1h3.793L6.146 9.146a.5.5 0 1 0 .708.708L15 1.707V5.5a.5.5 0 0 0 1 0v-5z"/>
-            </svg>
-          </a>
-          <button class="remove-addon-group action-icon" data-addon-id="${addon.id}" title="Remove Addon Group">❌</button>
+          <a href="<span class="math-inline">\{configureUrl\}" target\="\_blank" rel\="noopener noreferrer" class\="configure\-addon\-group action\-icon" title\="Configure Addon"\>
+<svg xmlns\="http\://www\.w3\.org/2000/svg" width\="20" height\="20" fill\="currentColor" viewBox\="0 0 16 16"\>
+<path fill\-rule\="evenodd" d\="M8\.636 3\.5a\.5\.5 0 0 0\-\.5\-\.5H1\.5A1\.5 1\.5 0 0 0 0 4\.5v10A1\.5 1\.5 0 0 0 1\.5 16h10a1\.5 1\.5 0 0 0 1\.5\-1\.5V7\.864a\.5\.5 0 0 0\-1 0V14\.5a\.5\.5 0 0 1\-\.5\.5h\-10a\.5\.5 0 0 1\-\.5\-\.5v\-10a\.5\.5 0 0 1 \.5\-\.5h6\.636a\.5\.5 0 0 0 \.5\-\.5z"/\>
+<path fill\-rule\="evenodd" d\="M16 \.5a\.5\.5 0 0 0\-\.5\-\.5h\-5a\.5\.5 0 0 0 0 1h3\.793L6\.146 9\.146a\.5\.5 0 1 0 \.708\.708L15 1\.707V5\.5a\.5\.5 0 0 0 1 0v\-5z"/\>
+</svg\>
+</a\>
+<button class\="remove\-addon\-group action\-icon" data\-addon\-id\="</span>{addon.id}" title="Remove Addon Group">❌</button>
         </div>
       `;
       item.querySelector('.remove-addon-group').addEventListener('click', (e) => { e.stopPropagation(); removeImportedAddonGroup(addon.id);});
@@ -1592,7 +1617,7 @@ document.addEventListener('DOMContentLoaded', function() {
   function updateStremioButtonHref() {
     if (state.configHash && elements.updateStremioBtn) {
       const baseUrl = `stremio://${window.location.host}`;
-      elements.updateStremioBtn.href = `${baseUrl}/${state.configHash}/manifest.json`;
+      elements.updateStremioBtn.href = `<span class="math-inline">\{baseUrl\}/</span>{state.configHash}/manifest.json`;
     }
   }
 

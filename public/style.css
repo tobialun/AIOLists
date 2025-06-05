@@ -114,10 +114,10 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 }
 .simkl-login-btn img, .simkl-login-btn svg { width: 18px; height: 18px; }
 
-.trakt-login-btn { background-color: #ed1c24; gap: 8px; }
-.trakt-login-btn:hover { background-color: #c71219; }
-.trakt-login-btn svg {
-    width: 20px;
+.trakt-login-btn { background-color: #ed1c24; gap: 8px; padding: 9px 12px; }
+.trakt-login-btn:hover { background-color: #d41920; }
+.trakt-login-btn img {
+    width: 20px; /* Adjust size as needed */
     height: 20px;
 }
   
@@ -844,6 +844,15 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
+
+.edit-lists-link {
+    font-size: 0.8em;
+    margin-left: 10px;
+    color: #388e3c;
+    text-decoration: none;
+}
+.edit-lists-link:hover { text-decoration: underline; }
+  
 @keyframes spin { to { transform: rotate(360deg); } }
 
   

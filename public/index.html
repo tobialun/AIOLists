@@ -70,13 +70,41 @@
       <div class="section-header">
         <h2>Connections</h2>
         <span id="connectionsNotification" class="section-notification"></span>
+      </div>      
+      <div class="connections-row">
+        <div id="simklConnection">
+          <button id="simklLoginBtn" class="action-btn simkl-login-btn">
+            <img src="https://simkl.com/favicon.ico" alt="Simkl">
+            <span>Connect to Simkl</span>
+          </button>
+          <div id="simklConnectedState" class="connected-state" style="display: none;">
+            <b>Connected to Simkl</b>
+            <a href="#" id="editSimklListsBtn" class="edit-lists-link">Add/Remove Lists</a>
+            <button onclick="window.disconnectSimkl()" class="disconnect-btn">Disconnect</button>
+          </div>
+        </div>
       </div>
+      <div id="simklSelectionContainer" class="simkl-selection-container" style="display: none;">
+        <h4>Select Simkl Libraries to Import</h4>
+        <div id="simklSelectionGrid" class="simkl-selection-grid"></div>
+        <div class="simkl-selection-actions">
+            <button id="importSimklBtn" class="action-btn">Import & Connect</button>
+            <button id="cancelSimklBtn" class="action-btn cancel-btn">Cancel</button>
+        </div>
+      </div>
+      <div class="simkl-pin-container" id="simklPinContainer" style="display: none;">
+        <p>Go to <a id="simklVerificationUrl" href="#" target="_blank">simkl.com/pin</a> and enter code: <strong id="simklUserCode"></strong></p>
+        <span class="spinner"></span>
+      </div>
+
+      <hr class="section-divider">
+      
       <p class="info-text">Trakt will break after 24 hours since I need to store keys on a server to refresh them. Import your recommended/trending and private lists from the <a href="https://trakt.dexter21767.com/configure/" target="_blank" rel="noopener noreferrer">Trakt addon</a> for now, if your lists are public you can still directly import them through the URL.</p>
       <div class="connections-row">
         <div id="traktConnection">
           <a href="/api/trakt/login" id="traktLoginBtn" class="trakt-login-btn" target="_blank">
-             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19.988 2.41L14.992.022V4.98l4.996-2.57zm-5.013 5.012L9.98 5.03v5.004l4.995-2.57zm-5.004 5.003l-4.99 2.572L.008 10.02l4.987 2.575zm10.012.012l4.995-2.57L14.98 12.5v5.003l5.003-2.585zM9.98 15.018l-4.987-2.57V17.45l4.987 2.57zm0-5.011L4.984 7.43v5.004l4.996-2.57z"></path></svg>
-             <span>Connect to Trakt</span>
+            <img src="https://trakt.tv/assets/logos/logomark.square.white-99d66400bfed2a52a1c0c33f319552ca738c4751359d372c6311ff8128d8f133.svg" alt="Trakt Logo">
+            <span>Connect to Trakt</span>
           </a>
           <div id="traktConnectedState" class="connected-state" style="display: none;">
             <b>Connected to Trakt.tv</b>
@@ -87,29 +115,7 @@
             <button id="submitTraktPin" class="trakt-login-btn action-btn">Submit PIN</button>
           </div>
         </div>
-        <div id="simklConnection">
-            <button id="simklLoginBtn" class="action-btn simkl-login-btn">
-                <img src="https://simkl.com/favicon.ico" alt="Simkl">
-                <span>Connect to Simkl</span>
-              </button>
-               <div id="simklConnectedState" class="connected-state" style="display: none;">
-              <b>Connected to Simkl</b>
-              <button onclick="window.disconnectSimkl()" class="disconnect-btn">Disconnect</button>
-            </div>
-               </div>
-             </div>
-             <div id="simklSelectionContainer" class="simkl-selection-container" style="display: none;">
-               <h4>Select Simkl Libraries to Import</h4>
-               <div id="simklSelectionGrid" class="simkl-selection-grid"></div>
-               <div class="simkl-selection-actions">
-                   <button id="importSimklBtn" class="action-btn">Import & Connect</button>
-                   <button id="cancelSimklBtn" class="action-btn cancel-btn">Cancel</button>
-               </div>
-             </div>
-             <div class="simkl-pin-container" id="simklPinContainer" style="display: none;">
-               <p>Go to <a id="simklVerificationUrl" href="#" target="_blank">simkl.com/pin</a> and enter code: <strong id="simklUserCode"></strong></p>
-               <span class="spinner"></span>
-            </div>
+      </div>
       <div id="traktStatus"></div>
     </div>
 
@@ -126,8 +132,8 @@
         </div>
       </div>
       <div id="importStatus" class="status-message" style="display:none;"></div>
-      <div id="importedAddons" class="imported-addons hidden">
-        <h3>Imported Addon from Manifest URLs</h3>
+      <div id="importedAddons" class="importedAddons hidden">
+        <h3>Imported Addon Groups (from Manifest URLs)</h3>
         <div id="addonsList" class="addons-list"></div>
       </div>
     </div>
