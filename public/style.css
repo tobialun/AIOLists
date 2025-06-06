@@ -129,12 +129,14 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 }
 .connected-text { font-weight: 500; }
 
-.import-section .info-text {
+.import-section .info-text,
+.api-section .info-text { /* Apply to Trakt info text as well */
     font-size: 0.85em;
     color: #555;
     margin-bottom: 10px;
     margin-top: -5px;
 }
+
 
 .settings-section .collapsible-header {
     padding-bottom: 15px;
@@ -215,6 +217,10 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 }
 .tag.l { background-color: #9C27B0; } .tag.e { background-color: #4CAF50; }
 .tag.w { background-color: #FF9800; } .tag.t { background-color: #c50000; }
+.tag.tag-with-image,
+.tag.t.tag-with-image {
+  background-color: transparent !important;
+}
 .tag.a { background-color: #607d8b; }
 .tag img { width: 18px; height: 18px; object-fit: contain; border-radius: 0; }
 
@@ -299,6 +305,16 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 .addon-group-details { flex-grow: 1; display: flex; flex-direction: column; justify-content: center; min-width: 0;}
 .addon-group-name { font-weight: 500; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px;}
 .addon-group-info { font-size: 12px; color: #777; }
+.addon-group-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+  .configure-addon-group svg {
+  width: 18px;
+  height: 18px;
+}
 .remove-addon-group {
     margin-left: auto;
     color: #e53935;
@@ -454,12 +470,29 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 .notice-text { margin: 20px 0 10px 0; color: #555; font-size: 0.9rem; text-align: center; }
 .stremio-buttons { display: flex; justify-content: center; align-items: center; margin: 25px 0; gap: 10px; }
 
+.release-link {
+    text-decoration: none;
+    color: inherit;
+    display: inline-flex;
+    align-items: center;
+}
+.release-link:hover {
+    color: #8E5AF7;
+}
 .app-version {
   font-size: 0.8em;
   color: #666;
   margin-left: -5px;
   margin-right: 10px;
 }
+.app-version svg {
+  width: 0.8em;
+  height: 0.8em;
+  fill: currentColor;
+  margin-left: 3px;
+  vertical-align: top;
+}
+
 .github-link {
   display: inline-flex;
   align-items: center;
@@ -474,6 +507,19 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 .github-link:hover {
   color: #8E5AF7;
 }
+
+.github-button-container {
+  vertical-align: middle;
+  display: inline-block;
+  height: 28px; /* Match large button height */
+  margin-left: 8px;
+}
+.github-button, .github-button:visited, .github-button:focus, .github-button:active {
+    text-decoration: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+}
+
 
 .action-btn.active-setting {
   background-color: #4CAF50;
@@ -531,4 +577,194 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 }
 .label-link-icon:hover {
   text-decoration: underline;
+}
+
+.edit-random-users-link {
+  font-size: 0.85em;
+  color: #8E5AF7;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.edit-random-users-link:hover {
+  text-decoration: underline;
+}
+
+.random-users-dropdown {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background-color: #f9f9f9;
+  max-width: 1000px;
+  display: block;
+}
+
+.random-users-tag-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.random-user-tag {
+  background-color: #e0e0e0;
+  color: #333;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 0.85em;
+  display: inline-flex;
+  align-items: center;
+}
+
+.remove-user-tag {
+  margin-left: 6px;
+  cursor: pointer;
+  font-weight: bold;
+  color: #777;
+}
+.remove-user-tag:hover {
+  color: #000;
+}
+
+.random-user-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.list-item[data-id="random_mdblist_catalog"] .sort-controls {
+  display: flex !important; /* Example override, might need refinement based on actual class conflicts */
+}
+
+.media-type-display {
+  font-size: 0.9em;
+  color: #555;
+  margin-right: 8px; /* Space between media type and list name */
+  padding: 2px 5px;
+  border-radius: 3px;
+  /* background-color: #f0f0f0; */ /* Optional background */
+  cursor: default; /* Default cursor, changed if clickable */
+  white-space: nowrap;
+}
+
+.clickable-media-type {
+  cursor: pointer;
+  text-decoration: underline dashed;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  color: #8E5AF7; /* Make it look interactive */
+}
+.clickable-media-type:hover {
+  background-color: #f0f0f0;
+  color: #7B4DE0;
+}
+
+.edit-mediatype-container {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 8px; /* Keep similar spacing to display element */
+}
+
+.edit-mediatype-input {
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.9em;
+  line-height: 1.2;
+  width: 100px; /* Adjust as needed */
+}
+
+.save-mediatype-btn,
+.cancel-mediatype-btn {
+  padding: 6px 10px;
+  font-size: 0.85em;
+}
+.save-mediatype-btn { background-color: #4CAF50; }
+.save-mediatype-btn:hover { background-color: #45a049; }
+.cancel-mediatype-btn { background-color: #f44336; }
+.cancel-mediatype-btn:hover { background-color: #d32f2f; }
+
+
+/* Adjustments for mobile if needed */
+@media (max-width: 600px) {
+  .mobile-top-row .name-container .media-type-display {
+    margin-right: 5px; /* Slightly less margin on mobile */
+    font-size: 0.85em;
+  }
+  .edit-mediatype-input {
+    width: 80px;
+  }
+  .list-item-row-desktop .name-container { /* Ensure items align well with new element */
+    display: flex;
+    align-items: center;
+    flex-grow: 1;
+    min-width: 0;
+  }
+   .list-item-row-desktop .name-container .media-type-display {
+    flex-shrink: 0; /* Prevent shrinking */
+  }
+  .list-item-row-desktop .name-container .list-name {
+    flex-grow: 1; /* Allow list name to take remaining space */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+/* Ensure .name-container in desktop properly aligns items when media type is present */
+.list-item-row-desktop .name-container {
+    display: flex;
+    align-items: center; /* Vertically align tag, media type, and name */
+    gap: 8px; /* Consistent gap */
+}
+.list-item-row-desktop .tag {
+    flex-shrink: 0;
+}
+.list-item-row-desktop .media-type-display {
+    flex-shrink: 0;
+}
+.list-item-row-desktop .list-name {
+    flex-grow: 1;
+    min-width: 0; /* Important for ellipsis to work */
+}
+.list-item-row-desktop .edit-mediatype-container {
+    flex-shrink: 0;
+}
+.list-item-row-desktop .edit-name-input {
+    flex-grow: 1;
+    min-width: 50px; /* Prevent input from becoming too small */
+}
+
+
+/* For mobile, ensure the media type is inside the name-container */
+.mobile-top-row .name-container {
+    display: flex;
+    align-items: center;
+    gap: 6px; /* Adjust gap as needed */
+    flex-grow: 1;
+    min-width: 0;
+}
+.mobile-top-row .tag {
+    flex-shrink: 0;
+}
+.mobile-top-row .media-type-display {
+    flex-shrink: 0;
+    font-size: 0.85em;
+}
+.mobile-top-row .edit-mediatype-container {
+    flex-shrink: 0;
+}
+.mobile-top-row .list-name {
+    flex-grow: 1;
+    min-width: 0;
+    font-size: 14px;
+}
+.mobile-top-row .edit-name-input {
+    flex-grow: 1;
+    min-width: 0;
 }
