@@ -851,7 +851,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (window.Sortable && elements.listItems.children.length > 0) {
       if (elements.listItems._sortable) elements.listItems._sortable.destroy();
       elements.listItems._sortable = Sortable.create(elements.listItems, {
-        animation: 150, handle: '.drag-handle', ghostClass: 'sortable-ghost', dragClass: 'sortable-drag', onEnd: handleListReorder });
+        animation: 150, handle: '.drag-handle, .mobile-drag-handle', ghostClass: 'sortable-ghost', dragClass: 'sortable-drag', onEnd: handleListReorder });
     }
   }
 
@@ -880,26 +880,30 @@ document.addEventListener('DOMContentLoaded', function() {
     // Media Type Display Element
     const mediaTypeDisplayElement = document.createElement('span');
     mediaTypeDisplayElement.className = 'media-type-display clickable-media-type';
-    mediaTypeDisplayElement.textContent = `[${list.effectiveMediaTypeDisplay || 'All'}]`; // list.effectiveMediaTypeDisplay comes from backend
+    mediaTypeDisplayElement.textContent = `[${list.effectiveMediaTypeDisplay || 'All'}]`;
     mediaTypeDisplayElement.title = 'Click to change media type display name';
     mediaTypeDisplayElement.addEventListener('click', (e) => {
         e.stopPropagation();
-        startMediaTypeEditing(li, list, mediaTypeDisplayElement);
+        startMediaTypeEditing(li, list);
     });
     if (apiKeyMissing && state.isPotentiallySharedConfig) mediaTypeDisplayElement.style.display = 'none';
-    if (list.id === 'random_mdblist_catalog' && apiKeyMissing && !state.userConfig.apiKey) { // Special handling for random catalog if API key is missing
+    if (list.id === 'random_mdblist_catalog' && apiKeyMissing && !state.userConfig.apiKey) {
         mediaTypeDisplayElement.style.display = 'none';
     }
 
 
     const nameSpan = document.createElement('span');
-    nameSpan.className = 'list-name';
+    nameSpan.className = 'list-name clickable-list-name';
     let displayName = list.customName || list.name;
     const isEffectivelyUrlImported = list.source === 'mdblist_url' || list.source === 'trakt_public';
     if (isEffectivelyUrlImported || list.source === 'addon_manifest') {
         displayName = displayName.replace(/\s*\((Movies|Series)\)$/i, '').trim();
     }
     nameSpan.textContent = displayName;
+    nameSpan.addEventListener('click', (e) => {
+        e.stopPropagation();
+        startNameEditing(li, list);
+    });
 
     const isRandomCatalog = list.id === 'random_mdblist_catalog';
     const isExternalAddonList = list.source === 'addon_manifest';
@@ -923,11 +927,7 @@ document.addEventListener('DOMContentLoaded', function() {
      } else if (apiKeyMissing && state.isPotentiallySharedConfig && !isRandomCatalog) {
         visibilityToggleBtn.style.display = 'none';
      }
-
-    const editBtn = createButton('✏️', 'edit-button action-icon', (e) => { e.stopPropagation(); startNameEditing(li, list); }, 'Edit List Name');
-     if (apiKeyMissing && state.isPotentiallySharedConfig) editBtn.style.display = 'none';
-     if (isRandomCatalog && list.id === 'random_mdblist_catalog') editBtn.style.display = 'none'; // No editing name for random catalog
-
+    
     let mergeToggle = null;
     const canMerge = list.hasMovies && list.hasShows && !isRandomCatalog && !isExternalAddonList;
     if (canMerge) {
@@ -1047,7 +1047,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (tagTypeChar === '🎲') { tag.style.backgroundColor = '#FFC107'; tag.style.color = '#000';}
 
         nameContainer.appendChild(tag);
-        nameContainer.appendChild(mediaTypeDisplayElement); // Added media type display
+        nameContainer.appendChild(mediaTypeDisplayElement);
         nameContainer.appendChild(nameSpan);
 
         if (apiKeyMissing && state.isPotentiallySharedConfig) {
@@ -1055,7 +1055,6 @@ document.addEventListener('DOMContentLoaded', function() {
             nameContainer.appendChild(infoIcon);
         }
         topRow.appendChild(nameContainer);
-        topRow.appendChild(editBtn);
 
         const bottomRow = document.createElement('div');
         bottomRow.className = 'mobile-bottom-row';
@@ -1098,7 +1097,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (tagTypeChar === '🎲') { tag.style.backgroundColor = '#FFC107'; tag.style.color = '#000';}
 
         const nameContainer = document.createElement('div'); nameContainer.className = 'name-container';
-        // For desktop, mediaTypeDisplayElement comes before nameSpan inside nameContainer
         nameContainer.appendChild(mediaTypeDisplayElement);
         nameContainer.appendChild(nameSpan);
 
@@ -1110,12 +1108,11 @@ document.addEventListener('DOMContentLoaded', function() {
         const actionsGroup = document.createElement('div'); actionsGroup.className = 'list-actions-group';
         if (mergeToggle) actionsGroup.appendChild(mergeToggle);
         if (sortControlsContainer) actionsGroup.appendChild(sortControlsContainer);
-        actionsGroup.appendChild(editBtn);
         actionsGroup.appendChild(visibilityToggleBtn);
         actionsGroup.appendChild(removeBtn);
 
         const desktopRow = document.createElement('div'); desktopRow.className = 'list-item-row list-item-row-desktop';
-        desktopRow.append(tag, nameContainer); desktopRow.appendChild(actionsGroup); // nameContainer now includes mediaTypeDisplay
+        desktopRow.append(tag, nameContainer); desktopRow.appendChild(actionsGroup);
         mainCol.appendChild(desktopRow);
         contentWrapper.appendChild(dragHandle);
         contentWrapper.appendChild(mainCol);
@@ -1141,10 +1138,13 @@ document.addEventListener('DOMContentLoaded', function() {
     debouncedSaveListOrder(newOrder);
   }
   
-  function startMediaTypeEditing(listItemElement, list, displayElement) {
+  function startMediaTypeEditing(listItemElement, list) {
+    if (listItemElement.querySelector('.edit-mediatype-input')) return;
     if (apiKeyMissingForList(list) && state.isPotentiallySharedConfig) return;
     if (list.id === 'random_mdblist_catalog' && apiKeyMissingForList(list)) return;
 
+    const displayElement = listItemElement.querySelector('.media-type-display');
+    if (!displayElement) return;
 
     const currentMediaType = list.effectiveMediaTypeDisplay || 'All';
     const input = document.createElement('input');
@@ -1152,129 +1152,93 @@ document.addEventListener('DOMContentLoaded', function() {
     input.className = 'edit-mediatype-input';
     input.value = currentMediaType;
 
-    const saveBtn = createButton('✓', 'save-mediatype-btn action-btn', null, 'Save Media Type Name');
-    const cancelBtn = createButton('✕', 'cancel-mediatype-btn action-btn', null, 'Cancel');
-    const editContainer = document.createElement('div');
-    editContainer.className = 'edit-mediatype-container';
-    editContainer.append(input, saveBtn, cancelBtn);
-
-    const originalParent = displayElement.parentNode;
-    const originalNextSibling = displayElement.nextSibling;
-
-    displayElement.replaceWith(editContainer);
+    displayElement.replaceWith(input);
     input.focus();
     input.select();
 
-    const finishEditing = (newName = null) => {
-        if (newName !== null) {
-            displayElement.textContent = `[${newName || 'All'}]`;
-            const listInState = state.currentLists.find(l => l.id === list.id);
-            if(listInState) listInState.effectiveMediaTypeDisplay = newName || 'All';
-        }
-        editContainer.replaceWith(displayElement);
-    };
+    const saveAndRerender = async () => {
+        if(input.disabled) return;
+        input.disabled = true;
 
-    saveBtn.onclick = async (e) => {
-        e.stopPropagation();
         const newMediaType = input.value.trim();
+        
+        const listInState = state.currentLists.find(l => l.id === list.id);
+        if (listInState) listInState.effectiveMediaTypeDisplay = newMediaType || 'All';
+        state.userConfig.customMediaTypeNames[list.id] = newMediaType;
+        
+        const newListItemElement = createListItemElement(listInState || list);
+        listItemElement.replaceWith(newListItemElement);
+
         await updateListPreference(list.id, 'mediatype', { customMediaType: newMediaType });
-        state.userConfig.customMediaTypeNames[list.id] = newMediaType || null; // Store null if empty to signify removal
-        finishEditing(newMediaType);
     };
 
-    cancelBtn.onclick = (e) => {
-        e.stopPropagation();
-        finishEditing();
+    const cancelEditing = () => {
+        const listInState = state.currentLists.find(l => l.id === list.id);
+        const newListItemElement = createListItemElement(listInState || list);
+        listItemElement.replaceWith(newListItemElement);
     };
 
     input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); saveBtn.click(); }
-        else if (e.key === 'Escape') { e.preventDefault(); cancelBtn.click(); }
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        else if (e.key === 'Escape') { e.preventDefault(); cancelEditing(); }
     });
-  }
+
+    input.addEventListener('blur', saveAndRerender);
+}
 
 
-  function startNameEditing(listItemElement, list) {
-    if (list.id === 'random_mdblist_catalog') return;
-    if (apiKeyMissingForList(list) && state.isPotentiallySharedConfig) return;
+function startNameEditing(listItemElement, list) {
+    if (listItemElement.querySelector('.edit-name-input')) return;
+    if (list.id === 'random_mdblist_catalog' || (apiKeyMissingForList(list) && state.isPotentiallySharedConfig)) return;
 
-    let nameSpanToReplace;
-    let actionsGroupToHide;
-    let nameContainerForInput;
-    let mediaTypeDisplaySibling; // To re-insert if necessary
+    const nameSpan = listItemElement.querySelector('.list-name');
+    if (!nameSpan) return;
 
-    if (state.isMobile) {
-        nameContainerForInput = listItemElement.querySelector('.mobile-top-row .name-container');
-        nameSpanToReplace = nameContainerForInput.querySelector('.list-name');
-        mediaTypeDisplaySibling = nameContainerForInput.querySelector('.media-type-display');
-        actionsGroupToHide = listItemElement.querySelector('.mobile-bottom-row .list-actions-group');
-    } else {
-        nameContainerForInput = listItemElement.querySelector('.list-item-row-desktop .name-container');
-        nameSpanToReplace = nameContainerForInput.querySelector('.list-name');
-        mediaTypeDisplaySibling = nameContainerForInput.querySelector('.media-type-display');
-        actionsGroupToHide = listItemElement.querySelector('.list-item-row-desktop .list-actions-group');
-    }
-    if (!nameSpanToReplace || !nameContainerForInput) return;
+    nameSpan.style.display = 'none';
 
     let currentDisplayName = list.customName || list.name;
     const isEffectivelyUrlImported = list.source === 'mdblist_url' || list.source === 'trakt_public';
-     if (isEffectivelyUrlImported || list.source === 'addon_manifest') {
+    if (isEffectivelyUrlImported || list.source === 'addon_manifest') {
         currentDisplayName = currentDisplayName.replace(/\s*\((Movies|Series)\)$/i, '').trim();
     }
 
-    const input = document.createElement('input'); input.type = 'text'; input.className = 'edit-name-input'; input.value = currentDisplayName;
-    const saveBtn = createButton('✓', 'save-name-btn action-btn', (e) => handleSave(e));
-    const cancelBtn = createButton('✕', 'cancel-name-btn action-btn', (e) => handleCancel(e));
-    const editActionsDiv = document.createElement('div'); editActionsDiv.className = 'actions edit-actions';
-    editActionsDiv.append(saveBtn, cancelBtn);
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'edit-name-input';
+    input.value = currentDisplayName;
+    
+    nameSpan.parentNode.insertBefore(input, nameSpan.nextSibling);
+    input.focus();
+    input.select();
 
-    const originalEditButton = listItemElement.querySelector('.edit-button');
-    if(originalEditButton) originalEditButton.style.display = 'none';
-    if(actionsGroupToHide && actionsGroupToHide !== originalEditButton?.parentElement) actionsGroupToHide.style.display = 'none';
-    if(mediaTypeDisplaySibling) mediaTypeDisplaySibling.style.display = 'none';
+    const saveAndRerender = async () => {
+        if (input.disabled) return;
+        input.disabled = true;
 
-
-    nameSpanToReplace.style.display = 'none';
-    if (state.isMobile) {
-      const tagElement = nameContainerForInput.querySelector('.tag');
-      nameContainerForInput.innerHTML = '';
-      if(tagElement) nameContainerForInput.appendChild(tagElement);
-      // No, mediaTypeDisplaySibling should not be here during name edit
-      nameContainerForInput.appendChild(input);
-      nameContainerForInput.appendChild(editActionsDiv);
-
-    } else {
-      // Insert input after mediaTypeDisplaySibling if it exists, otherwise at the start of nameContainer
-      if (mediaTypeDisplaySibling && mediaTypeDisplaySibling.parentNode === nameContainerForInput) {
-          nameContainerForInput.insertBefore(input, mediaTypeDisplaySibling.nextSibling);
-      } else {
-          nameContainerForInput.insertBefore(input, nameSpanToReplace);
-      }
-      nameContainerForInput.insertBefore(editActionsDiv, input.nextSibling);
-    }
-    input.focus(); input.select();
-
-    async function handleSave(e) {
-        if(e) e.stopPropagation();
         const newName = input.value.trim();
-        const listIdToUpdate = String(list.id);
-
-        await updateListPreference(listIdToUpdate, 'name', { customName: newName });
-        finishEditing();
-    }
-    function handleCancel(e) { if(e) e.stopPropagation(); finishEditing(); }
-
-    function finishEditing() {
-        // Find the list in state.currentLists to get the most up-to-date version after potential saves
-        const updatedList = state.currentLists.find(l => String(l.id) === String(list.id)) || list;
-        const newListItemElement = createListItemElement(updatedList);
+        
+        const listInState = state.currentLists.find(l => l.id === list.id);
+        if (listInState) listInState.customName = newName;
+        
+        const newListItemElement = createListItemElement(listInState || list);
         listItemElement.replaceWith(newListItemElement);
-    }
-    input.addEventListener('keydown', e => {
-        if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); handleSave(e); }
-        else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); handleCancel(e); }
+
+        await updateListPreference(String(list.id), 'name', { customName: newName });
+    };
+
+    const cancelEditing = () => {
+        const listInState = state.currentLists.find(l => l.id === list.id);
+        const newListItemElement = createListItemElement(listInState || list);
+        listItemElement.replaceWith(newListItemElement);
+    };
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        else if (e.key === 'Escape') { e.preventDefault(); cancelEditing(); }
     });
-  }
+
+    input.addEventListener('blur', saveAndRerender);
+}
   
   function apiKeyMissingForList(list) {
     if ((list.source === 'mdblist' || list.source === 'mdblist_url' || list.source === 'random_mdblist' || list.id === 'random_mdblist_catalog') && !state.userConfig.apiKey) {
@@ -1320,7 +1284,6 @@ document.addEventListener('DOMContentLoaded', function() {
     listItemElement.remove();
     await updateListPreference(null, 'remove', { listIds: [listToRemoveIdStr] });
   }
-  state.previousCurrentLists = [];
 
   async function updateListPreference(listIdForPref, type, payload) {
     const endpointMap = {
@@ -1331,7 +1294,6 @@ document.addEventListener('DOMContentLoaded', function() {
         order: `/${state.configHash}/lists/order`,
         sort: `/${state.configHash}/lists/sort`,
         merge: `/${state.configHash}/lists/merge`,
-        random_feature_disable: `/${state.configHash}/config/random-list-feature`
     };
     const endpoint = endpointMap[type];
     if (!endpoint) {
@@ -1357,19 +1319,25 @@ document.addEventListener('DOMContentLoaded', function() {
             throw new Error(data.error || `Server error for ${type}. Status: ${response.status}`);
         }
 
+        let needsManifestReload = false;
         if (data.configHash && data.configHash !== state.configHash) {
             state.configHash = data.configHash;
             updateURL();
             updateStremioButtonHref();
+            needsManifestReload = true;
         }
+        
         showNotification(notifSection, `${type.charAt(0).toUpperCase() + type.slice(1).replace('_', ' ')} updated.`, 'success', false);
         
-        await loadConfiguration(); 
+        const manifestAffectingChanges = ['visibility', 'remove', 'order', 'merge', 'mediatype'];
+        if (needsManifestReload || manifestAffectingChanges.includes(type)) {
+            await loadUserListsAndAddons();
+        }
 
     } catch (error) {
         console.error(`Update Error for ${type}:`, error);
         showNotification(notifSection, `Error updating ${type}: ${error.message}`, 'error', true);
-        await loadConfiguration(); 
+        await loadUserListsAndAddons();
     }
   }
 

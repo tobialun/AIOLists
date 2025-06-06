@@ -191,6 +191,7 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
   margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.06);
   gap: 10px;
 }
+
 .list-item.hidden { opacity: 0.65; background-color: #f5f5f5; }
 
 .drag-handle {
@@ -224,24 +225,41 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 .tag.a { background-color: #607d8b; }
 .tag img { width: 18px; height: 18px; object-fit: contain; border-radius: 0; }
 
-.name-container { flex-grow: 1; display: flex; align-items: center; min-width: 0; }
-.list-name { font-size: 15px; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.4; }
+.name-container { 
+  flex-grow: 1; 
+  display: flex; 
+  align-items: center; 
+  min-width: 0;
+  gap: 6px;
+}
+.list-name { 
+  font-size: 15px; 
+  color: #333; 
+  white-space: nowrap; 
+  overflow: hidden; 
+  text-overflow: ellipsis; 
+  line-height: 1.4;
+}
+
+.clickable-list-name {
+  cursor: pointer;
+}
+.clickable-list-name:hover {
+  color: #8E5AF7;
+}
+
 
 .edit-name-input {
   flex-grow: 1; padding: 8px 10px; border: 1px solid #ccc; border-radius: 4px;
   font-size: 14px; margin-right: 8px; line-height: 1.4;
 }
-.edit-actions { display: flex; gap: 6px; }
-.save-name-btn, .cancel-name-btn { padding: 7px 12px; font-size: 13px; }
-.save-name-btn { background-color: #4CAF50; } .save-name-btn:hover { background-color: #45a049; }
-.cancel-name-btn { background-color: #f44336; } .cancel-name-btn:hover { background-color: #d32f2f; }
 
 .list-actions-group { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-shrink: 0; }
 .action-icon {
   background: none; border: none; cursor: pointer; padding: 0;
   border-radius: 50%; width: 34px; height: 34px;
   display: inline-flex; align-items: center; justify-content: center;
-  transition: background-color 0.2s; color: #666;
+  transition: background-color 0.2s, color 0.2s; color: #666;
 }
 .action-icon:hover { background-color: #f0f0f0; color: #222; }
 .remove-list-button { color: #e53935; }
@@ -418,25 +436,11 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
       word-break: break-all;
       font-size: 14px;
   }
-  .mobile-top-row .edit-button.action-icon {
-      flex-shrink: 0;
-      margin-left: 8px;
-  }
    .mobile-top-row .edit-name-input {
     flex-grow:1 !important;
     width: auto !important;
     min-width: 50px;
   }
-   .mobile-top-row .edit-actions {
-    display: flex;
-    gap: 5px;
-    margin-left: 5px;
-  }
-  .mobile-top-row .edit-actions .action-btn {
-    padding: 6px 10px;
-    font-size: 12px;
-  }
-
 
   .mobile-bottom-row {
       display: flex;
@@ -550,7 +554,7 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 }
 
 .list-item.requires-connection .drag-handle,
-.list-item.requires-connection .edit-button,
+.list-item.requires-connection .clickable-list-name,
 .list-item.requires-connection .visibility-toggle,
 .list-item.requires-connection .merge-toggle,
 .list-item.requires-connection .sort-controls {
@@ -562,7 +566,7 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
   pointer-events: none;
 }
 .list-item.mobile-list-item.requires-connection .mobile-drag-handle,
-.list-item.mobile-list-item.requires-connection .edit-button,
+.list-item.mobile-list-item.requires-connection .clickable-list-name,
 .list-item.mobile-list-item.requires-connection .visibility-toggle,
 .list-item.mobile-list-item.requires-connection .merge-toggle,
 .list-item.mobile-list-item.requires-connection .sort-controls {
@@ -663,13 +667,6 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
   color: #7B4DE0;
 }
 
-.edit-mediatype-container {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-right: 8px; /* Keep similar spacing to display element */
-}
-
 .edit-mediatype-input {
   padding: 6px 8px;
   border: 1px solid #ccc;
@@ -678,17 +675,6 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
   line-height: 1.2;
   width: 100px; /* Adjust as needed */
 }
-
-.save-mediatype-btn,
-.cancel-mediatype-btn {
-  padding: 6px 10px;
-  font-size: 0.85em;
-}
-.save-mediatype-btn { background-color: #4CAF50; }
-.save-mediatype-btn:hover { background-color: #45a049; }
-.cancel-mediatype-btn { background-color: #f44336; }
-.cancel-mediatype-btn:hover { background-color: #d32f2f; }
-
 
 /* Adjustments for mobile if needed */
 @media (max-width: 600px) {
@@ -729,12 +715,9 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
     flex-shrink: 0;
 }
 .list-item-row-desktop .list-name {
-    flex-grow: 1;
     min-width: 0; /* Important for ellipsis to work */
 }
-.list-item-row-desktop .edit-mediatype-container {
-    flex-shrink: 0;
-}
+
 .list-item-row-desktop .edit-name-input {
     flex-grow: 1;
     min-width: 50px; /* Prevent input from becoming too small */
@@ -756,11 +739,7 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
     flex-shrink: 0;
     font-size: 0.85em;
 }
-.mobile-top-row .edit-mediatype-container {
-    flex-shrink: 0;
-}
 .mobile-top-row .list-name {
-    flex-grow: 1;
     min-width: 0;
     font-size: 14px;
 }
