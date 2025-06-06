@@ -256,16 +256,17 @@ async function createAddon(userConfig) {
         return; 
     }
 
-    // --- Logic for non-imported lists (MDBList, Trakt, URL imports) ---
     let sourceHasMovies, sourceHasShows;
-    // Determine sourceHasMovies and sourceHasShows based on listSourceInfo
     if (listSourceInfo.source === 'mdblist' || listSourceInfo.source === 'mdblist_url') {
-        sourceHasMovies = listSourceInfo.hasMovies; // Already determined correctly for MDBList
-        sourceHasShows = listSourceInfo.hasShows;
-    } else if (listSourceInfo.source === 'trakt' || listSourceInfo.source === 'trakt_public') {
-        let metadata = listsMetadata[currentListId] || listsMetadata[listSourceInfo.originalId] || {};
-        sourceHasMovies = metadata.hasMovies === true;
-        sourceHasShows = metadata.hasShows === true;
+      sourceHasMovies = listSourceInfo.hasMovies;
+      sourceHasShows = listSourceInfo.hasShows;
+  } else if (listSourceInfo.source === 'trakt_public') {
+      sourceHasMovies = listSourceInfo.hasMovies;
+      sourceHasShows = listSourceInfo.hasShows;
+  } else if (listSourceInfo.source === 'trakt') { // This now only handles private trakt
+      let metadata = listsMetadata[currentListId] || listsMetadata[listSourceInfo.originalId] || {};
+      sourceHasMovies = metadata.hasMovies === true;
+      sourceHasShows = metadata.hasShows === true;
 
         if (listSourceInfo.source === 'trakt' && (typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean' || metadata.errorFetching) && traktAccessToken) {
             let success = false; let fetchRetries = 0; if(metadata.errorFetching) delete metadata.errorFetching;
