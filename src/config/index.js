@@ -5,7 +5,7 @@ const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const TRAKT_CLIENT_ID = '490414ec03fe9a33b2d0c16d58261ebbbd9cf0eee23f213fa0e3eb1d6126d05c';
 
 const staticGenres = [
-  "Action", "Adventure", "Animation", "Anime", "Biography", "Comedy", "Crime",
+  "All","Action", "Adventure", "Animation", "Anime", "Biography", "Comedy", "Crime",
   "Documentary", "Drama", "Family", "Fantasy", "History", "Horror",
   "Music", "Musical", "Mystery", "Romance", "Sci-Fi", "Short", "Sport",
   "Thriller", "War", "Western", "Game-Show"

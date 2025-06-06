@@ -1,4 +1,5 @@
 // src/addon/addonBuilder.js
+
 const { addonBuilder } = require('stremio-addon-sdk');
 const { fetchTraktListItems, fetchTraktLists } = require('../integrations/trakt');
 const { fetchListItems: fetchMDBListItems, fetchAllLists: fetchAllMDBLists, fetchAllListsForUser } = require('../integrations/mdblist');
@@ -187,15 +188,14 @@ async function createAddon(userConfig) {
      }
     const randomCatalogExtra = [{ name: "skip" }];
     if (includeGenresInManifest) {
-        randomCatalogExtra.push({ name: "genre", options: staticGenres });
+        randomCatalogExtra.push({ name: "genre", options: staticGenres, isRequired: false });
     }
     tempGeneratedCatalogs.push({
         id: randomCatalogId,
         type: customMediaTypeNames?.[randomCatalogId]?.trim() || 'all',
         name: randomCatalogDisplayName,
         extra: randomCatalogExtra,
-        extraSupported: randomCatalogExtra.map(e => e.name),
-        extraRequired: []
+        extraSupported: randomCatalogExtra.map(e => e.name)
     });
   }
 
@@ -210,29 +210,33 @@ async function createAddon(userConfig) {
   }
   
   const processListForManifest = async (listSourceInfo, currentListId, isImportedSubCatalog = false, parentAddon = null) => {
-    if (removedListsSet.has(currentListId) || hiddenListsSet.has(currentListId)) {
+    if (removedListsSet.has(currentListId)) {
         return;
     }
 
+    const isHidden = hiddenListsSet.has(currentListId);
     let originalName = listSourceInfo.name;
     let displayName = getManifestCatalogName(currentListId, originalName, customListNames);
 
     const catalogExtraForThisList = [{ name: "skip" }];
     if (includeGenresInManifest) {
-        let genreOpts = staticGenres; // Default to staticGenres
+        let genreOpts = staticGenres;
         if (isImportedSubCatalog && listSourceInfo.extraSupported && Array.isArray(listSourceInfo.extraSupported)) {
             const genreExtraDef = listSourceInfo.extraSupported.find(e => typeof e === 'object' && e.name === 'genre');
             if (genreExtraDef && Array.isArray(genreExtraDef.options) && genreExtraDef.options.length > 0) {
                 genreOpts = genreExtraDef.options;
             }
         }
-        catalogExtraForThisList.push({ name: "genre", options: genreOpts });
+        catalogExtraForThisList.push({
+            name: "genre",
+            options: genreOpts,
+            isRequired: isHidden
+        });
     }
 
     const baseCatalogProps = {
         extra: catalogExtraForThisList,
         extraSupported: catalogExtraForThisList.map(e => e.name),
-        extraRequired: isImportedSubCatalog ? (listSourceInfo.extraRequired || []) : []
     };
 
     if (isImportedSubCatalog) {

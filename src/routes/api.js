@@ -214,6 +214,10 @@ module.exports = function(router) {
         const genreMatch = extraParamsString.match(/genre=([^&]+)/);
         if (genreMatch) genre = decodeURIComponent(genreMatch[1]);
       }
+
+      if (genre === 'All') {
+        genre = null;
+      }
   
       skip = isNaN(skip) ? 0 : skip;
       genre = genre || null;
