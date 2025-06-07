@@ -2,50 +2,74 @@
 const axios = require('axios');
 const { ITEMS_PER_PAGE, TRAKT_CLIENT_ID } = require('../config');
 const { enrichItemsWithCinemeta } = require('../utils/metadataFetcher');
+const { db } = require('../db');
 
 const TRAKT_API_URL = 'https://api.trakt.tv';
 
-async function initTraktApi(userConfig) {
-  if (userConfig.traktAccessToken && userConfig.traktExpiresAt) {
-    const now = new Date();
-    const expiresAt = new Date(userConfig.traktExpiresAt);
-    if (now < expiresAt) {
-      return true;
+async function getTraktUserUuid(accessToken) {
+  const response = await axios.get(`${TRAKT_API_URL}/users/settings`, {
+    headers: {
+      'Content-Type': 'application/json',
+      'trakt-api-version': '2',
+      'trakt-api-key': TRAKT_CLIENT_ID,
+      'Authorization': `Bearer ${accessToken}`
     }
-    if (userConfig.traktRefreshToken) {
-      const refreshed = await refreshTraktToken(userConfig);
-      return refreshed;
-    }
-  }
-  return false;
+  });
+  return response.data.user.ids.uuid;
 }
 
-async function refreshTraktToken(userConfig) {
+async function refreshTraktTokenFromDb(uuid) {
+  if (!db) return false;
+  const user = await db('users').where({ uuid }).first();
+  if (!user || !user.trakt_refresh_token) return false;
+
   try {
     const response = await axios.post(`${TRAKT_API_URL}/oauth/token`, {
-      refresh_token: userConfig.traktRefreshToken,
+      refresh_token: user.trakt_refresh_token,
       client_id: TRAKT_CLIENT_ID,
-      grant_type: 'refresh_token',
-      redirect_uri: 'urn:ietf:wg:oauth:2.0:oob'
-    }, { headers: { 'Content-Type': 'application/json' } });
+      redirect_uri: 'urn:ietf:wg:oauth:2.0:oob',
+      grant_type: 'refresh_token'
+    });
 
     if (response.status === 200 && response.data) {
-      userConfig.traktAccessToken = response.data.access_token;
-      userConfig.traktRefreshToken = response.data.refresh_token;
-      userConfig.traktExpiresAt = new Date(Date.now() + (response.data.expires_in * 1000)).toISOString();
+      await db('users').where({ uuid }).update({
+        trakt_access_token: response.data.access_token,
+        trakt_refresh_token: response.data.refresh_token,
+        trakt_expires_at: Date.now() + (response.data.expires_in * 1000)
+      });
       return true;
     }
-    console.error(`[TraktIntegration] Failed to refresh token, status: ${response.status}`, response.data);
     return false;
   } catch (error) {
-    console.error("[TraktIntegration] Exception during Trakt token refresh:", error.message);
     if (error.response?.status === 401) {
-      userConfig.traktAccessToken = null;
-      userConfig.traktRefreshToken = null;
-      userConfig.traktExpiresAt = null;
+      await db('users').where({ uuid }).update({ trakt_access_token: null, trakt_refresh_token: null, trakt_expires_at: null });
     }
     return false;
   }
+}
+
+async function initTraktApi(userConfig) {
+  if (userConfig.traktUuid && db) {
+    let user = await db('users').where('uuid', userConfig.traktUuid).first();
+    if (!user) return false;
+
+    if (Date.now() >= user.trakt_expires_at) {
+      const refreshed = await refreshTraktTokenFromDb(userConfig.traktUuid);
+      if (!refreshed) return false;
+      user = await db('users').where('uuid', userConfig.traktUuid).first();
+    }
+    
+    if (!user || !user.trakt_access_token) return false;
+    
+    userConfig.traktAccessToken = user.trakt_access_token;
+    return true;
+  }
+
+  if (userConfig.traktAccessToken && userConfig.traktExpiresAt) {
+    return new Date() < new Date(userConfig.traktExpiresAt);
+  }
+
+  return false;
 }
 
 function getTraktAuthUrl() {
@@ -54,33 +78,39 @@ function getTraktAuthUrl() {
 }
 
 async function authenticateTrakt(code) {
-  try {
-    const response = await axios.post(`${TRAKT_API_URL}/oauth/token`, {
-      code,
-      client_id: TRAKT_CLIENT_ID,
-      grant_type: 'authorization_code',
-      redirect_uri: 'urn:ietf:wg:oauth:2.0:oob'
-    }, { headers: { 'Content-Type': 'application/json' } });
+  const response = await axios.post(`${TRAKT_API_URL}/oauth/token`, {
+    code,
+    client_id: TRAKT_CLIENT_ID,
+    grant_type: 'authorization_code',
+    redirect_uri: 'urn:ietf:wg:oauth:2.0:oob'
+  });
 
-    if (response.status === 200 && response.data) {
-      const tokens = {
-        accessToken: response.data.access_token,
-        refreshToken: response.data.refresh_token,
-        expiresAt: new Date(Date.now() + (response.data.expires_in * 1000)).toISOString()
-      };
-      return tokens;
+  if (response.status === 200 && response.data) {
+    const { access_token, refresh_token, expires_in } = response.data;
+    const expires_at = Date.now() + (expires_in * 1000);
+
+    if (db) {
+      const uuid = await getTraktUserUuid(access_token);
+      await db('users').insert({
+        uuid,
+        trakt_access_token: access_token,
+        trakt_refresh_token: refresh_token,
+        trakt_expires_at: expires_at,
+      }).onConflict('uuid').merge();
+      return { uuid };
     }
-    console.error(`[TraktIntegration] Failed to authenticate with Trakt, status: ${response.status}`, response.data);
-    throw new Error('Failed to authenticate with Trakt');
-  } catch (error) {
-    console.error("[TraktIntegration] Exception during Trakt authentication:", error.response?.data || error.message);
-    throw error;
+    
+    return {
+      accessToken: access_token,
+      refreshToken: refresh_token,
+      expiresAt: new Date(expires_at).toISOString(),
+    };
   }
+  throw new Error('Failed to authenticate with Trakt');
 }
 
 async function fetchTraktLists(userConfig) {
   if (!await initTraktApi(userConfig)) {
-    console.error('[TraktIntegration] Trakt API not initialized or token refresh failed during fetchTraktLists.');
     return [];
   }
   try {
@@ -246,10 +276,10 @@ async function fetchTraktListItems(
       let listedAt = entry.listed_at; 
       const itemTypeFromEntry = entry.type;
 
-      if (itemTypeFromEntry === 'movie' && entry.movie) { // For user lists and watchlist with mixed content
+      if (itemTypeFromEntry === 'movie' && entry.movie) {
         resolvedStremioType = 'movie';
         itemDataForDetails = entry.movie;
-      } else if (itemTypeFromEntry === 'show' && entry.show) { // For user lists and watchlist with mixed content
+      } else if (itemTypeFromEntry === 'show' && entry.show) {
         resolvedStremioType = 'series';
         itemDataForDetails = entry.show;
       } else if (itemTypeFromEntry === 'episode' && entry.episode && entry.show) {
@@ -259,20 +289,17 @@ async function fetchTraktListItems(
          resolvedStremioType = 'series';
          itemDataForDetails = entry.show;
       } else { 
-         // Specific handling for different list types based on their typical response structure
-         if (listId.startsWith('trakt_trending_')) { // ***** FIX START *****
+         if (listId.startsWith('trakt_trending_')) {
             if (effectiveItemTypeForEndpoint === 'movie' && entry.movie && entry.movie.ids && entry.movie.title && typeof entry.movie.year === 'number') {
                 resolvedStremioType = 'movie';
-                itemDataForDetails = entry.movie; // Access nested movie object
+                itemDataForDetails = entry.movie;
             } else if (effectiveItemTypeForEndpoint === 'series' && entry.show && entry.show.ids && entry.show.title && typeof entry.show.year === 'number') {
                 resolvedStremioType = 'series';
-                itemDataForDetails = entry.show; // Access nested show object
+                itemDataForDetails = entry.show;
             } else {
-                console.log(`[DEBUG trakt.js] Skipping TRENDING item due to structure/missing fields. List: ${listId}, ItemTypeHint: ${effectiveItemTypeForEndpoint}, Entry:`, JSON.stringify(entry).substring(0,300));
                 return null;
             }
          } else if (listId.startsWith('trakt_recommendations_') || listId.startsWith('trakt_popular_')) {
-            // Popular and Recommendations lists return direct movie/show objects
             if (effectiveItemTypeForEndpoint === 'movie' && entry.ids && entry.title && typeof entry.year === 'number') {
                 resolvedStremioType = 'movie';
                 itemDataForDetails = entry;
@@ -280,14 +307,11 @@ async function fetchTraktListItems(
                 resolvedStremioType = 'series';
                 itemDataForDetails = entry;
             } else {
-                console.log(`[DEBUG trakt.js] Skipping POPULAR/RECOMMENDATION item due to structure/missing fields. List: ${listId}, ItemTypeHint: ${effectiveItemTypeForEndpoint}, Entry:`, JSON.stringify(entry).substring(0,300));
                 return null;
             }
          } else {
-             // This case should ideally not be hit if listId implies a known structure handled above
-             console.log(`[DEBUG trakt.js] Unhandled item structure for listId ${listId}. Entry:`, JSON.stringify(entry).substring(0,300));
              return null;
-         } // ***** FIX END *****
+         }
       }
       
       if (!itemDataForDetails) return null;
@@ -313,7 +337,6 @@ async function fetchTraktListItems(
     }
 
     let enrichedAllItems = await enrichItemsWithCinemeta(initialItems); 
-    // console.log(`[DEBUG trakt.js] Items after Cinemeta enrichment for ${listId}: ${enrichedAllItems.length}`);
 
     if (genre && enrichedAllItems.length > 0 && !isMetadataCheck) {
         const lowerGenre = String(genre).toLowerCase();
@@ -324,7 +347,6 @@ async function fetchTraktListItems(
         if (needsServerSideGenreFiltering) {
             enrichedAllItems = enrichedAllItems.filter(item => item.genres && item.genres.map(g => String(g).toLowerCase()).includes(lowerGenre));
         }
-        // console.log(`[DEBUG trakt.js] Items after genre filtering for ${listId} (genre: ${genre}): ${enrichedAllItems.length}`);
     }
 
     const finalResult = { allItems: enrichedAllItems, hasMovies: false, hasShows: false };
@@ -345,6 +367,10 @@ async function fetchTraktListItems(
 }
 
 module.exports = {
-  initTraktApi, refreshTraktToken, getTraktAuthUrl, authenticateTrakt,
-  fetchTraktLists, fetchTraktListItems, fetchPublicTraktListDetails
+  initTraktApi,
+  getTraktAuthUrl,
+  authenticateTrakt,
+  fetchTraktLists,
+  fetchTraktListItems,
+  fetchPublicTraktListDetails
 };

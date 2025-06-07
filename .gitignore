@@ -2,6 +2,10 @@
 *.log
 npm-debug.log*
 
+# Database files
+/aiolists.sqlite
+/data/
+
 # Dependencies
 node_modules/
 

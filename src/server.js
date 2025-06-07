@@ -1,11 +1,19 @@
+// src/server.js
+
+// Add these two lines at the very top
+const dotenv = require('dotenv');
+dotenv.config();
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const { PORT, IS_PRODUCTION } = require('./config');
 const configureRoutes = require('./routes');
+const { setupDatabase } = require('./db');
 
 async function initializeApp() {
   try {
+    await setupDatabase();
     const app = express();
 
     app.use(cors());
@@ -17,7 +25,7 @@ async function initializeApp() {
     app.listen(PORT, () => {
       if (!IS_PRODUCTION) {
         console.log(`AIOLists Stremio Addon running on port ${PORT}`);
-        console.log(`Admin panel: http://localhost:${PORT}/configure`);
+        console.log(`Admin panel: http://localhost:7000/configure`);
       }
     });
     
@@ -32,7 +40,7 @@ async function initializeApp() {
 
 if (require.main === module) {
   initializeApp().catch(err => {
-    console.error('Applikationen failed to start:', err);
+    console.error('Application failed to start:', err);
     process.exit(1);
   });
 } else {

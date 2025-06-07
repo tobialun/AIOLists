@@ -60,6 +60,7 @@ document.addEventListener('DOMContentLoaded', function() {
     isMobile: window.matchMedia('(max-width: 600px)').matches,
     appVersion: "...",
     isPotentiallySharedConfig: false,
+    isDbConnected: false,
     isLoadingFromUrl: false
   };
 
@@ -85,6 +86,7 @@ document.addEventListener('DOMContentLoaded', function() {
     placeholderText: document.querySelector('#listPlaceholder .placeholder-text'),
     updateStremioBtn: document.getElementById('updateStremioBtn'),
     copyManifestBtn: document.getElementById('copyManifestBtn'),
+    traktWarningMessage: document.getElementById('traktWarningMessage'),
     apiKeysNotification: document.getElementById('apiKeysNotification'),
     connectionsNotification: document.getElementById('connectionsNotification'),
     importNotification: document.getElementById('importNotification'),
@@ -613,6 +615,16 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   }
 
+  function updateTraktWarningVisibility() {
+    if (elements.traktWarningMessage) {
+      if (state.isDbConnected) {
+        elements.traktWarningMessage.style.display = 'none';
+      } else {
+        elements.traktWarningMessage.style.display = 'block';
+      }
+    }
+  }
+
   async function loadConfiguration() {
     if (!state.configHash) return;
     try {
@@ -620,6 +632,8 @@ document.addEventListener('DOMContentLoaded', function() {
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(data.error || `Failed to load config data. Status: ${response.status}`);
 
+
+      state.isDbConnected = data.isDbConnected;
       state.userConfig = {
         ...state.userConfig,
         ...data.config,
@@ -637,6 +651,7 @@ document.addEventListener('DOMContentLoaded', function() {
       const rpdbApiKey = state.userConfig.rpdbApiKey;
       updateApiKeyUI(elements.apiKeyInput, mdblistApiKey, 'mdblist', state.userConfig.mdblistUsername);
       updateApiKeyUI(elements.rpdbApiKeyInput, rpdbApiKey, 'rpdb');
+      updateTraktWarningVisibility();
       updateGenreFilterButtonText();
       updateRandomListButtonState();
 
@@ -645,7 +660,13 @@ document.addEventListener('DOMContentLoaded', function() {
       }
       updateTraktUI(!!state.userConfig.traktAccessToken);
       await loadUserListsAndAddons();
-    } catch (error) { console.error('Load Config Error:', error); showNotification('apiKeys', `Load Config Error: ${error.message}`, 'error', true); }
+    } catch (error) { 
+      console.error('Load Config Error:', error); 
+      showNotification('apiKeys', `Load Config Error: ${error.message}`, 'error', true); 
+      state.isDbConnected = false;
+      updateTraktWarningVisibility();
+
+    }
   }
 
   function handleApiKeyInput(inputElement, keyType) {
