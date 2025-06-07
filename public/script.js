@@ -1331,7 +1331,7 @@ function startNameEditing(listItemElement, list) {
         
         const manifestAffectingChanges = ['visibility', 'remove', 'order', 'merge', 'mediatype'];
         if (needsManifestReload || manifestAffectingChanges.includes(type)) {
-            await loadUserListsAndAddons();
+          await loadConfiguration();
         }
 
     } catch (error) {
