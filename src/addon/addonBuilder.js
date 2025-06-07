@@ -1,7 +1,5 @@
-// src/addon/addonBuilder.js
-
 const { addonBuilder } = require('stremio-addon-sdk');
-const { fetchTraktListItems, fetchTraktLists } = require('../integrations/trakt');
+const { fetchTraktListItems, fetchTraktLists, initTraktApi } = require('../integrations/trakt');
 const { fetchListItems: fetchMDBListItems, fetchAllLists: fetchAllMDBLists, fetchAllListsForUser } = require('../integrations/mdblist');
 const { fetchExternalAddonItems } = require('../integrations/externalAddons');
 const { convertToStremioFormat } = require('./converters');
@@ -22,8 +20,16 @@ const getManifestCatalogName = (listId, originalName, customListNames) => {
 };
 
 async function fetchListContent(listId, userConfig, skip = 0, genre = null, stremioCatalogType = 'all') {
-  const { apiKey, traktAccessToken, listsMetadata = {}, sortPreferences = {}, importedAddons = {}, rpdbApiKey, randomMDBListUsernames, enableRandomListFeature, customMediaTypeNames = {} } = userConfig;
   const catalogIdFromRequest = String(listId);
+
+  // THIS IS THE CORRECTED LOGIC
+  // If we are fetching a private Trakt list, we must first initialize the API
+  // to ensure the userConfig is hydrated with the token from the DB.
+  if (catalogIdFromRequest.startsWith('trakt_') && !catalogIdFromRequest.startsWith('traktpublic_')) {
+    await initTraktApi(userConfig);
+  }
+
+  const { apiKey, traktAccessToken, listsMetadata = {}, sortPreferences = {}, importedAddons = {}, rpdbApiKey, randomMDBListUsernames, enableRandomListFeature, customMediaTypeNames = {} } = userConfig;
   
   let itemTypeHintForFetching = (stremioCatalogType === 'movie' || stremioCatalogType === 'series') ? stremioCatalogType : 'all';
 
@@ -123,6 +129,7 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
 
 
 async function createAddon(userConfig) {
+  await initTraktApi(userConfig);
   const manifest = {
     id: 'org.stremio.aiolists',
     version: `1.1.0-${Date.now()}`,

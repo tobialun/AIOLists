@@ -7,7 +7,7 @@ const { convertToStremioFormat } = require('../addon/converters');
 const { setCacheHeaders, isWatchlist: commonIsWatchlist } = require('../utils/common');
 const Cache = require('../utils/cache');
 const { validateRPDBKey } = require('../utils/posters');
-const { authenticateTrakt, getTraktAuthUrl, fetchTraktLists, fetchPublicTraktListDetails } = require('../integrations/trakt');
+const { initTraktApi, authenticateTrakt, getTraktAuthUrl, fetchTraktLists, fetchPublicTraktListDetails } = require('../integrations/trakt');
 const { fetchAllLists: fetchAllMDBLists, validateMDBListKey, extractListFromUrl: extractMDBListFromUrl } = require('../integrations/mdblist');
 const { importExternalAddon: importExtAddon } = require('../integrations/externalAddons');
 const { db } = require('../db');
@@ -807,29 +807,32 @@ module.exports = function(router) {
 
   router.get('/:configHash/lists', async (req, res) => {
     try {
-      // Snapshots to detect if a change happens during this request
       const initialListsMetadataJson = JSON.stringify(req.userConfig.listsMetadata || {});
       const initialTraktAccessToken = req.userConfig.traktAccessToken;
       let configChangedByThisRequest = false;
-    
-      let allUserLists = [];
-      if (req.userConfig.apiKey) {
-          const mdbLists = await fetchAllMDBLists(req.userConfig.apiKey);
-          allUserLists.push(...mdbLists.map(l => ({...l, source: 'mdblist'})));
-      }
-      
-      // This will now correctly use the token from the DB for the subsequent API call
+        
       if (req.userConfig.traktUuid || req.userConfig.traktAccessToken) {
-          const traktLists = await fetchTraktLists(req.userConfig); 
-          allUserLists.push(...traktLists.map(l => ({...l, source: 'trakt'})));
-    
-          // A simpler, more reliable check to see if the token was refreshed in-memory
-          if (req.userConfig.traktAccessToken !== initialTraktAccessToken) {
-              console.log("[AIOLists] Trakt access token was updated in-memory during list processing.");
-              configChangedByThisRequest = true;
-          }
-      }
-    
+        await initTraktApi(req.userConfig); // This is the key change
+  
+        if (req.userConfig.traktAccessToken !== initialTraktAccessToken) {
+            console.log("[AIOLists] Trakt access token was updated in-memory during list processing.");
+            configChangedByThisRequest = true;
+        }
+    }
+
+    let allUserLists = [];
+    if (req.userConfig.apiKey) {
+        const mdbLists = await fetchAllMDBLists(req.userConfig.apiKey);
+        allUserLists.push(...mdbLists.map(l => ({...l, source: 'mdblist'})));
+    }
+
+    if (req.userConfig.traktAccessToken) {
+      const traktLists = await fetchTraktLists(req.userConfig); 
+      allUserLists.push(...traktLists.map(l => ({...l, source: 'trakt'})));
+  }
+
+
+  
       const removedListsSet = new Set(req.userConfig.removedLists || []);
       if (!req.userConfig.listsMetadata) req.userConfig.listsMetadata = {};
       if (!req.userConfig.customMediaTypeNames) req.userConfig.customMediaTypeNames = {};
