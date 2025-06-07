@@ -48,7 +48,7 @@ document.addEventListener('DOMContentLoaded', function() {
         importedAddons: {},
         listsMetadata: {},
         customListNames: {},
-        customMediaTypeNames: {}, // Added new field for frontend state
+        customMediaTypeNames: {},
         mergedLists: {},
         sortPreferences: {},
         disableGenreFilter: false,
@@ -59,7 +59,8 @@ document.addEventListener('DOMContentLoaded', function() {
     universalImportTimeout: null,
     isMobile: window.matchMedia('(max-width: 600px)').matches,
     appVersion: "...",
-    isPotentiallySharedConfig: false
+    isPotentiallySharedConfig: false,
+    isLoadingFromUrl: false
   };
 
   const elements = {
@@ -79,6 +80,9 @@ document.addEventListener('DOMContentLoaded', function() {
     addonsList: document.getElementById('addonsList'),
     listContainer: document.getElementById('listContainer'),
     listItems: document.getElementById('listItems'),
+    listPlaceholder: document.getElementById('listPlaceholder'),
+    placeholderSpinner: document.querySelector('#listPlaceholder .spinner'),
+    placeholderText: document.querySelector('#listPlaceholder .placeholder-text'),
     updateStremioBtn: document.getElementById('updateStremioBtn'),
     copyManifestBtn: document.getElementById('copyManifestBtn'),
     apiKeysNotification: document.getElementById('apiKeysNotification'),
@@ -103,7 +107,7 @@ document.addEventListener('DOMContentLoaded', function() {
     randomUsersDropdown: null,
     randomUsersTagContainer: null,
     randomUserInput: null,
-    appVersionSpan: document.getElementById('appVersion') // Added for easy access
+    appVersionSpan: document.getElementById('appVersion')
   };
 
   async function init() {
@@ -113,11 +117,14 @@ document.addEventListener('DOMContentLoaded', function() {
     let action = null;
 
     if (pathParts.length === 0 || (pathParts.length === 1 && pathParts[0] === 'configure')) {
+        // Fresh page, no config hash
     } else if (pathParts.length >= 1 && pathParts[0] === 'import-shared' && pathParts[1]) {
         action = 'import-shared';
         initialConfigHash = pathParts[1];
+        state.isLoadingFromUrl = true; // Set flag for loading state
     } else if (pathParts.length >= 1 && pathParts[0] !== 'api' && pathParts[0] !== 'configure') {
         initialConfigHash = pathParts[0];
+        state.isLoadingFromUrl = true; // Set flag for loading state
         if (pathParts.length === 1 || (pathParts.length > 1 && pathParts[1] !== 'configure')) {
             window.history.replaceState({}, '', `/${initialConfigHash}/configure`);
         }
@@ -160,10 +167,10 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   function createCopyBlankCharButton() {
-    if (elements.copyBlankCharBtn) return; // Already created
+    if (elements.copyBlankCharBtn) return;
 
     elements.copyBlankCharContainer = document.createElement('div');
-    elements.copyBlankCharContainer.className = 'setting-item'; // Reuse existing class
+    elements.copyBlankCharContainer.className = 'setting-item';
 
     elements.copyBlankCharBtn = document.createElement('button');
     elements.copyBlankCharBtn.id = 'copyBlankCharBtn';
@@ -182,10 +189,8 @@ document.addEventListener('DOMContentLoaded', function() {
     if (elements.settingsContent) {
         const copyHashContainer = document.getElementById('copyConfigHashContainer');
         if (copyHashContainer && copyHashContainer.parentNode === elements.settingsContent) {
-            // Insert the new button container after the "Copy Setup Code" container
             elements.settingsContent.insertBefore(elements.copyBlankCharContainer, copyHashContainer.nextSibling);
         } else {
-            // Fallback: append if the reference container is not found
             elements.settingsContent.appendChild(elements.copyBlankCharContainer);
         }
     }
@@ -194,8 +199,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
   async function handleCopyBlankChar() {
     try {
-        await navigator.clipboard.writeText("‎ "); // Copies U+200E (Left-to-Right Mark) followed by a space
-
+        await navigator.clipboard.writeText("‎ ");
         const buttonInstance = elements.copyBlankCharBtn;
         const originalText = 'Copy Blank';
         buttonInstance.textContent = 'Blank Copied!';
@@ -210,7 +214,6 @@ document.addEventListener('DOMContentLoaded', function() {
         showNotification('settings', 'Failed to copy blank character.', 'error', true);
     }
   }
-
 
   async function createNewEmptyConfig() {
     try {
@@ -250,27 +253,39 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   async function handleCopyConfigHash() {
-    if (!state.configHash) return showNotification('settings', 'Configuration not ready to share.', 'error');
-    try {
-        const response = await fetch(`/${state.configHash}/shareable-hash`);
-        const data = await response.json();
-        if (!response.ok || !data.success || !data.shareableHash) {
-            throw new Error(data.error || 'Failed to generate shareable hash.');
-        }
-        await navigator.clipboard.writeText(data.shareableHash);
+    if (!state.configHash) {
+      return showNotification('settings', 'Configuration not ready to share.', 'error');
+    }
 
-        const buttonInstance = elements.copyConfigHashBtnInstance || document.getElementById('copyConfigHashBtn');
-        const originalText = 'Copy Setup Code';
-        buttonInstance.textContent = 'Shareable Code Copied!';
-        buttonInstance.disabled = true;
-        setTimeout(() => {
-            buttonInstance.textContent = originalText;
-            buttonInstance.disabled = false;
-        }, 2500);
-        showNotification('settings', 'Shareable config hash copied to clipboard!', 'success');
+    const getShareableHashBlob = async () => {
+      const response = await fetch(`/${state.configHash}/shareable-hash`);
+      const data = await response.json();
+      if (!response.ok || !data.success || !data.shareableHash) {
+        throw new Error(data.error || 'Failed to generate shareable hash.');
+      }
+      return new Blob([data.shareableHash], { type: 'text/plain' });
+    };
+
+    try {
+      const clipboardItem = new ClipboardItem({
+        'text/plain': getShareableHashBlob()
+      });
+
+      await navigator.clipboard.write([clipboardItem]);
+
+      const buttonInstance = elements.copyConfigHashBtnInstance || document.getElementById('copyConfigHashBtn');
+      const originalText = 'Copy Setup Code';
+      buttonInstance.textContent = 'Shareable Code Copied!';
+      buttonInstance.disabled = true;
+      setTimeout(() => {
+        buttonInstance.textContent = originalText;
+        buttonInstance.disabled = false;
+      }, 2500);
+      showNotification('settings', 'Shareable config hash copied to clipboard!', 'success');
+
     } catch (err) {
-        console.error('Share config error:', err);
-        showNotification('settings', `Error: ${err.message}`, 'error', true);
+      console.error('Share config error:', err);
+      showNotification('settings', `Error: ${err.message}`, 'error', true);
     }
   }
 
@@ -324,6 +339,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (oldMobileState !== state.isMobile && state.currentLists.length > 0) { renderLists(); }
     });
   }
+
   function toggleSettingsSection() {
     const isOpen = elements.settingsSection.classList.toggle('open');
     elements.settingsContent.style.display = isOpen ? 'block' : 'none';
@@ -467,10 +483,9 @@ document.addEventListener('DOMContentLoaded', function() {
         elements.randomListFeatureContainer.appendChild(elements.editRandomUsersLink);
     }
 
-
     elements.randomUsersDropdown = document.createElement('div');
     elements.randomUsersDropdown.className = 'random-users-dropdown';
-    elements.randomUsersDropdown.style.display = 'none'; // Initially hidden
+    elements.randomUsersDropdown.style.display = 'none';
     elements.randomUsersDropdown.style.marginTop = '5px';
 
     elements.randomUsersTagContainer = document.createElement('div');
@@ -546,7 +561,7 @@ document.addEventListener('DOMContentLoaded', function() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                enable: state.userConfig.enableRandomListFeature, // Keep current enable state
+                enable: state.userConfig.enableRandomListFeature,
                 randomMDBListUsernames: state.userConfig.randomMDBListUsernames
             })
         });
@@ -597,8 +612,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
   }
-  // --- END: New functions for Random Usernames editor ---
-
 
   async function loadConfiguration() {
     if (!state.configHash) return;
@@ -612,7 +625,7 @@ document.addEventListener('DOMContentLoaded', function() {
         ...data.config,
         hiddenLists: new Set(data.config.hiddenLists || []),
         removedLists: new Set(data.config.removedLists || []),
-        customMediaTypeNames: data.config.customMediaTypeNames || {}, // Load custom media type names
+        customMediaTypeNames: data.config.customMediaTypeNames || {},
       };
       state.userConfig.randomMDBListUsernames = (data.config.randomMDBListUsernames && data.config.randomMDBListUsernames.length > 0)
                                                 ? data.config.randomMDBListUsernames
@@ -625,7 +638,7 @@ document.addEventListener('DOMContentLoaded', function() {
       updateApiKeyUI(elements.apiKeyInput, mdblistApiKey, 'mdblist', state.userConfig.mdblistUsername);
       updateApiKeyUI(elements.rpdbApiKeyInput, rpdbApiKey, 'rpdb');
       updateGenreFilterButtonText();
-      updateRandomListButtonState(); // This will now also handle the "Edit users" link and dropdown
+      updateRandomListButtonState();
 
       if (mdblistApiKey || rpdbApiKey) {
         await validateAndSaveApiKeys(mdblistApiKey, rpdbApiKey, true);
@@ -793,7 +806,22 @@ document.addEventListener('DOMContentLoaded', function() {
 
   async function loadUserListsAndAddons() {
     if (!state.configHash) return;
+
+    const isListCurrentlyEmpty = elements.listItems.children.length === 0;
+
+    if (isListCurrentlyEmpty) {
+        elements.listContainer.classList.remove('hidden');
+        if (state.isLoadingFromUrl) {
+            elements.listPlaceholder.classList.remove('hidden');
+            elements.placeholderSpinner.style.display = 'block';
+            elements.placeholderText.textContent = 'Loading Lists and Configs';
+        } else {
+            elements.listPlaceholder.classList.add('hidden');
+        }
+    }
+    
     showNotification('lists', 'Loading lists...', 'info', true);
+
     try {
       const response = await fetch(`/${state.configHash}/lists`);
       const data = await response.json();
@@ -803,35 +831,44 @@ document.addEventListener('DOMContentLoaded', function() {
       state.userConfig.importedAddons = data.importedAddons || {};
       state.userConfig.listsMetadata = data.listsMetadata || state.userConfig.listsMetadata || {};
       state.userConfig.customMediaTypeNames = data.customMediaTypeNames || state.userConfig.customMediaTypeNames || {};
-
-
       state.userConfig.availableSortOptions = [...defaultConfig.availableSortOptions];
       state.userConfig.traktSortOptions = [...defaultConfig.traktSortOptions];
-
       state.isPotentiallySharedConfig = data.isPotentiallySharedConfig || false;
-
       const randomCatalogEntry = data.lists.find(list => list.id === 'random_mdblist_catalog');
       state.userConfig.enableRandomListFeature = !!(randomCatalogEntry && !randomCatalogEntry.isHidden);
-
       if (data.randomMDBListUsernames) {
         state.userConfig.randomMDBListUsernames = data.randomMDBListUsernames;
       }
-
-
       if (data.newConfigHash && data.newConfigHash !== state.configHash) {
         state.configHash = data.newConfigHash;
         updateURL();
         updateStremioButtonHref();
       }
-      renderLists();
+      
+      elements.listItems.innerHTML = '';
+
+      if (state.currentLists.length > 0) {
+        elements.listPlaceholder.classList.add('hidden');
+        renderLists();
+      } else {
+        elements.listPlaceholder.classList.remove('hidden');
+        elements.placeholderSpinner.style.display = 'none';
+        elements.placeholderText.textContent = 'No lists added yet.';
+      }
+
       renderImportedAddons();
       updateRandomListButtonState();
-      elements.listContainer.classList.remove('hidden');
       showNotification('lists', 'Lists loaded.', 'success', false);
     } catch (error) {
       console.error('List Load Error:', error);
       showNotification('lists', `List Load Error: ${error.message}`, 'error', true);
-      elements.listContainer.classList.add('hidden');
+      if (isListCurrentlyEmpty) {
+          elements.listPlaceholder.classList.remove('hidden');
+          elements.placeholderSpinner.style.display = 'none';
+          elements.placeholderText.textContent = 'Failed to load lists.';
+      }
+    } finally {
+        state.isLoadingFromUrl = false;
     }
   }
 
@@ -877,7 +914,6 @@ document.addEventListener('DOMContentLoaded', function() {
         li.classList.add('requires-connection');
     }
 
-    // Media Type Display Element
     const mediaTypeDisplayElement = document.createElement('span');
     mediaTypeDisplayElement.className = 'media-type-display clickable-media-type';
     mediaTypeDisplayElement.textContent = `[${list.effectiveMediaTypeDisplay || 'All'}]`;
@@ -890,7 +926,6 @@ document.addEventListener('DOMContentLoaded', function() {
     if (list.id === 'random_mdblist_catalog' && apiKeyMissing && !state.userConfig.apiKey) {
         mediaTypeDisplayElement.style.display = 'none';
     }
-
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'list-name clickable-list-name';
@@ -913,7 +948,6 @@ document.addEventListener('DOMContentLoaded', function() {
         removeBtn.disabled = true; removeBtn.style.opacity = '0.5'; removeBtn.style.cursor = 'not-allowed';
     }
     if (isRandomCatalog && list.id === 'random_mdblist_catalog') removeBtn.style.display = 'none';
-
 
     const isHiddenInManifest = state.userConfig.hiddenLists.has(String(list.id));
     const visibilityToggleBtn = createButton(
@@ -1000,8 +1034,8 @@ document.addEventListener('DOMContentLoaded', function() {
             updateSortAndOrder(e.target.value, cs.order || 'desc');
         };
         sortControlsContainer.append(orderToggleBtn, sortSelect);
-         if (apiKeyMissing && state.isPotentiallySharedConfig && !isRandomCatalog) sortControlsContainer.style.display = 'none'; // Keep sort for random if API key present
-         else if (apiKeyMissing && isRandomCatalog && !state.userConfig.apiKey) sortControlsContainer.style.display = 'none'; // Hide sort for random if no API key
+         if (apiKeyMissing && state.isPotentiallySharedConfig && !isRandomCatalog) sortControlsContainer.style.display = 'none';
+         else if (apiKeyMissing && isRandomCatalog && !state.userConfig.apiKey) sortControlsContainer.style.display = 'none';
     }
 
     if (state.isMobile) {
@@ -1016,7 +1050,6 @@ document.addEventListener('DOMContentLoaded', function() {
             (apiKeyMissing && state.isPotentiallySharedConfig && !isRandomCatalog) ) {
           dragHandle.style.display = 'none';
         }
-
 
         const contentRowsContainer = document.createElement('div');
         contentRowsContainer.className = 'mobile-content-rows';
@@ -1159,16 +1192,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const saveAndRerender = async () => {
         if(input.disabled) return;
         input.disabled = true;
-
         const newMediaType = input.value.trim();
-        
         const listInState = state.currentLists.find(l => l.id === list.id);
         if (listInState) listInState.effectiveMediaTypeDisplay = newMediaType || 'All';
         state.userConfig.customMediaTypeNames[list.id] = newMediaType;
-        
         const newListItemElement = createListItemElement(listInState || list);
         listItemElement.replaceWith(newListItemElement);
-
         await updateListPreference(list.id, 'mediatype', { customMediaType: newMediaType });
     };
 
@@ -1185,7 +1214,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     input.addEventListener('blur', saveAndRerender);
 }
-
 
 function startNameEditing(listItemElement, list) {
     if (listItemElement.querySelector('.edit-name-input')) return;
@@ -1214,15 +1242,11 @@ function startNameEditing(listItemElement, list) {
     const saveAndRerender = async () => {
         if (input.disabled) return;
         input.disabled = true;
-
         const newName = input.value.trim();
-        
         const listInState = state.currentLists.find(l => l.id === list.id);
         if (listInState) listInState.customName = newName;
-        
         const newListItemElement = createListItemElement(listInState || list);
         listItemElement.replaceWith(newListItemElement);
-
         await updateListPreference(String(list.id), 'name', { customName: newName });
     };
 
@@ -1250,28 +1274,27 @@ function startNameEditing(listItemElement, list) {
     return false;
   }
 
-
   async function toggleListVisibility(listItemElement, listId) {
     const listIdStr = String(listId);
-    const isCurrentlyHiddenFromManifest = state.userConfig.hiddenLists.has(listIdStr);
-    const newHiddenStateInManifest = !isCurrentlyHiddenFromManifest;
-
+    const isCurrentlyHidden = state.userConfig.hiddenLists.has(listIdStr);
+    
+    if (isCurrentlyHidden) {
+      state.userConfig.hiddenLists.delete(listIdStr);
+    } else {
+      state.userConfig.hiddenLists.add(listIdStr);
+    }
+    
+    const newHiddenState = !isCurrentlyHidden;
     const eyeIconSpan = listItemElement.querySelector('.visibility-toggle .eye-icon');
     if (eyeIconSpan) {
-        eyeIconSpan.className = `eye-icon ${newHiddenStateInManifest ? 'eye-closed-svg' : 'eye-open-svg'}`;
+        eyeIconSpan.className = `eye-icon ${newHiddenState ? 'eye-closed-svg' : 'eye-open-svg'}`;
     }
     const visibilityButton = listItemElement.querySelector('.visibility-toggle');
     if (visibilityButton) {
-        visibilityButton.title = newHiddenStateInManifest ? 'Click to Show in Stremio Manifest' : 'Click to Hide from Stremio Manifest';
+        visibilityButton.title = newHiddenState ? 'Click to Show in Stremio Manifest' : 'Click to Hide from Stremio Manifest';
     }
 
-    let newHiddenListsArray;
-    if (newHiddenStateInManifest) {
-        newHiddenListsArray = Array.from(new Set([...state.userConfig.hiddenLists, listIdStr]));
-    } else {
-        newHiddenListsArray = Array.from(state.userConfig.hiddenLists).filter(id => id !== listIdStr);
-    }
-    await updateListPreference(null, 'visibility', { hiddenLists: newHiddenListsArray });
+    await updateListPreference(null, 'visibility', { hiddenLists: Array.from(state.userConfig.hiddenLists) });
   }
 
   async function removeListItem(listItemElement, listId) {
@@ -1331,7 +1354,7 @@ function startNameEditing(listItemElement, list) {
         
         const manifestAffectingChanges = ['visibility', 'remove', 'order', 'merge', 'mediatype'];
         if (needsManifestReload || manifestAffectingChanges.includes(type)) {
-          await loadConfiguration();
+            await loadConfiguration();
         }
 
     } catch (error) {
@@ -1424,20 +1447,11 @@ function startNameEditing(listItemElement, list) {
         notificationElement._timeoutId = null;
     }
 
-    notificationElement.textContent = message;
+    notificationElement.innerHTML = message;
     notificationElement.className = `section-notification ${type} visible`;
 
-    if (sectionKey === 'lists' && message === 'Loading lists...' && type === 'info' && persistent) {
-        const baseText = "Loading lists";
-        const dotStates = [".", "..", "...", ""];
-        let currentStateIndex = 0;
-
-        notificationElement.textContent = baseText + dotStates[currentStateIndex];
-
-        notificationElement._loadingIntervalId = setInterval(() => {
-            currentStateIndex = (currentStateIndex + 1) % dotStates.length;
-            notificationElement.textContent = baseText + dotStates[currentStateIndex];
-        }, 600);
+    if (sectionKey === 'lists' && message.includes('Loading lists') && type === 'info' && persistent) {
+        notificationElement.innerHTML = `Loading lists <div class="inline-spinner"></div>`;
     } else {
         if (!persistent) {
             notificationElement._timeoutId = setTimeout(() => {

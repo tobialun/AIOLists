@@ -339,21 +339,11 @@ async function createAddon(userConfig) {
             movieCatalogName = `${displayName}`;
             seriesCatalogName = `${displayName}`;
         }
-    
-        const content = await fetchListContent(currentListId, userConfig, 0, null, 'all');
-        const hasMovies = content?.hasMovies || false;
-        const hasShows = content?.hasShows || false;
-    
-        if (hasMovies) {
+        if (sourceHasMovies) {
             tempGeneratedCatalogs.push({ id: currentListId, type: 'movie', name: movieCatalogName, ...baseCatalogProps });
         }
-        if (hasShows) {
+        if (sourceHasShows) {
             tempGeneratedCatalogs.push({ id: currentListId, type: 'series', name: seriesCatalogName, ...baseCatalogProps });
-        }
-    
-        if (!content || (!hasMovies && !hasShows)) {
-            const catalogType = customUserDefinedType || 'all';
-            tempGeneratedCatalogs.push({ id: currentListId, type: catalogType, name: displayName, ...baseCatalogProps });
         }
     } else {
         if (customUserDefinedType) {

@@ -747,3 +747,59 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
     flex-grow: 1;
     min-width: 0;
 }
+
+/* Spinner Animation */
+.spinner {
+  border: 4px solid rgba(0, 0, 0, 0.1);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border-left-color: #8E5AF7; /* Main theme color */
+  animation: spin 1s ease infinite;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* List Placeholder Container */
+.list-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  text-align: center;
+  background-color: #f9f9f9;
+  border-radius: 6px;
+  margin-top: 15px;
+}
+
+.list-placeholder.hidden {
+  display: none;
+}
+
+.placeholder-text {
+  font-size: 1.1em;
+  color: #777;
+  font-weight: 500;
+  margin-top: 15px;
+}
+
+/* Smaller inline spinner for notifications */
+.inline-spinner {
+  display: inline-block;
+  vertical-align: middle;
+  border: 2px solid rgba(0, 0, 0, 0.1);
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border-left-color: #333; /* Neutral color for notifications */
+  animation: spin 0.8s linear infinite;
+  margin-left: 8px;
+}
