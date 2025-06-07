@@ -230,10 +230,18 @@ module.exports = function(router) {
                          catalogId.startsWith('traktpublic_') ? 'trakt_public' :
                          'external_addon';
   
+      // ** FIX START **
+      // If it's a private Trakt list, attempt to initialize the API to load the token from DB.
+      if (listSource === 'trakt_native') {
+        await initTraktApi(req.userConfig); // This loads the token into req.userConfig
+      }
+      // ** FIX END **
+
       if ((listSource === 'mdblist_native' || listSource === 'mdblist_url' || listSource === 'random_mdblist') && !req.userConfig.apiKey) {
           console.log(`[Shared Config] MDBList API key missing for ${catalogId}. Returning empty.`);
           return res.json({ metas: [] });
       }
+      // This check is now correct because initTraktApi has been called for Trakt lists.
       if (listSource === 'trakt_native' && !req.userConfig.traktAccessToken) {
           console.log(`[Shared Config] Trakt Access Token missing for ${catalogId}. Returning empty.`);
           return res.json({ metas: [] });
