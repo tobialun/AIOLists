@@ -230,18 +230,14 @@ module.exports = function(router) {
                          catalogId.startsWith('traktpublic_') ? 'trakt_public' :
                          'external_addon';
   
-      // ** FIX START **
-      // If it's a private Trakt list, attempt to initialize the API to load the token from DB.
       if (listSource === 'trakt_native') {
-        await initTraktApi(req.userConfig); // This loads the token into req.userConfig
+        await initTraktApi(req.userConfig);
       }
-      // ** FIX END **
 
       if ((listSource === 'mdblist_native' || listSource === 'mdblist_url' || listSource === 'random_mdblist') && !req.userConfig.apiKey) {
           console.log(`[Shared Config] MDBList API key missing for ${catalogId}. Returning empty.`);
           return res.json({ metas: [] });
       }
-      // This check is now correct because initTraktApi has been called for Trakt lists.
       if (listSource === 'trakt_native' && !req.userConfig.traktAccessToken) {
           console.log(`[Shared Config] Trakt Access Token missing for ${catalogId}. Returning empty.`);
           return res.json({ metas: [] });
@@ -551,6 +547,11 @@ module.exports = function(router) {
     try {
         const { order } = req.body;
         if (!Array.isArray(order)) return res.status(400).json({ error: 'Order must be an array of strings.' });
+        
+        if (req.userConfig.traktUuid && db) {
+            await initTraktApi(req.userConfig);
+        }
+
         req.userConfig.listOrder = order.map(String);
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
@@ -582,7 +583,6 @@ module.exports = function(router) {
     }
   });
 
-  // New endpoint to save custom media type names
   router.post('/:configHash/lists/mediatype', async (req, res) => {
     try {
       const { listId, customMediaType } = req.body;
@@ -595,7 +595,6 @@ module.exports = function(router) {
       if (customMediaType && customMediaType.trim()) {
         req.userConfig.customMediaTypeNames[String(listId)] = customMediaType.trim();
       } else {
-        // If customMediaType is empty or null, remove the custom setting
         delete req.userConfig.customMediaTypeNames[String(listId)];
       }
 
@@ -613,6 +612,11 @@ module.exports = function(router) {
     try {
       const { hiddenLists } = req.body;
       if (!Array.isArray(hiddenLists)) return res.status(400).json({ error: 'Hidden lists must be an array of strings.' });
+      
+      if (req.userConfig.traktUuid && db) {
+          await initTraktApi(req.userConfig);
+      }
+      
       req.userConfig.hiddenLists = hiddenLists.map(String);
       req.userConfig.lastUpdated = new Date().toISOString();
       const newConfigHash = await compressConfig(req.userConfig);
@@ -720,11 +724,17 @@ module.exports = function(router) {
     }
   });
 
+  // ** FIX START **
   router.post('/:configHash/lists/merge', async (req, res) => {
     try {
       const { listId, merged } = req.body;
       if (!listId || typeof merged !== 'boolean') {
         return res.status(400).json({ error: 'List ID (manifestId) and merge preference (boolean) required' });
+      }
+      
+      // If using a DB for Trakt, ensure tokens are loaded before re-compressing
+      if (req.userConfig.traktUuid && db) {
+        await initTraktApi(req.userConfig);
       }
   
       let canBeMerged = false;
@@ -767,6 +777,7 @@ module.exports = function(router) {
       res.status(500).json({ error: 'Failed to update list merge preference' });
     }
   });
+  // ** FIX END **
     
   router.post('/config/create', async (req, res) => {
     try {
