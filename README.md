@@ -106,19 +106,19 @@ You can also run the addon directly with Node.js if you prefer not to use Docker
 
 ### Connections and Settings
 
-    <img src="https://i.imgur.com/yvNS1Cl.png"/>
+<img src="https://i.imgur.com/yvNS1Cl.png" width="700"/>
 
 ### List Management Interface
 
-    <img src="https://i.imgur.com/7dP1ncf.png"/>
+<img src="https://i.imgur.com/7dP1ncf.png" width="700"/>
 
 ### Stremio
 
-    <img src="https://i.imgur.com/qCoHNcN.jpeg"/>
+<img src="https://i.imgur.com/qCoHNcN.jpeg" width="700"/>
 
 ### Discover Filters
 
-    <img src="https://i.imgur.com/nZZf1yx.png"/>
+<img src="https://i.imgur.com/nZZf1yx.png" width="700"/>
 
 
 # License
