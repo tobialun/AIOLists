@@ -1,9 +1,4 @@
 // src/server.js
-
-// Add these two lines at the very top
-const dotenv = require('dotenv');
-dotenv.config();
-
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
