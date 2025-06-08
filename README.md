@@ -2,7 +2,7 @@
 
 AIOLists is a stateless open source list management addon for Stremio. The project originated from this [post](https://www.reddit.com/r/StremioAddons/comments/1kbfk67/concept_for_an_aiolist_addon/), since then I have continued development to add features I would personally want in a list management addon, and fixed bugs shared by the users.
 
-## ✨ Features
+# ✨ Features
 - **Unified List Management:** Import and manage lists from various sources in one place.
 - **MDBList & Trakt URL Imports:** Directly import lists by pasting URLs from MDBList.com and Trakt.tv.
 - **Trakt Integration:** Connect your Trakt account to access personal lists, watchlist, recommendations, trending, and popular content.
@@ -20,11 +20,24 @@ AIOLists is a stateless open source list management addon for Stremio. The proje
 - **Discovery Lists:** Randomly selected MDBList from a set list of users, a new random list is delivered everytime you refresh the catalog.
 - **Share Your Setup:** Generate a shareable hash of your AIOLists configuration (list order, names, imported addons) to share with others.
 
-## Trakt Persistance
+# Trakt Persistance
 
-Due to the stateless nature of this addon Trakt keys can't automatically update when they expire. I have added an option to make Trakt persistant through Upstash. You can create a free account on there, create a Redis database and input the UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN given in the 'REST API' section. Also make sure the TTL is Marked as Persist in 'Data Browser' tab.
+Due to the stateless nature of this addon Trakt keys can't automatically update when they expire. I have added an option to make Trakt persistant through Upstash. You can create a free account on there. Here's a short guide:
 
-## Deployment
+1. Create an account, using a temp-mail works fine.
+2. After logging in you will be prompted to Create a database press Create Database.
+3. Input a Name and the region closest to you.
+4. Next -> Next -> Create
+5. Scroll down to REST API section and copy UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN and put them into AIOLists.
+
+Your Trakt tokens are now stored in the redis db and will automatically refresh when they expire.
+
+# Support
+
+If you find this project useful, the best way to support me is to **star this repository** on GitHub!
+
+
+# Deployment
 
 The easiest way to host this project for free is through hugging face.
 
@@ -41,14 +54,14 @@ The easiest way to host this project for free is through hugging face.
 6. Press "Commit new file to main"
 7. Wait for it to finish building and you should have your own instance.
 
-#### Deploying on Railway, Render, Fly.io, etc.
+## Deploying on Railway, Render, Fly.io, etc.
 
 Most modern PaaS providers that support Docker can deploy AIOLists.
 -   **Railway**: Connect your GitHub repository and let Railway build from the `Dockerfile`. Set the `PORT` environment variable if needed (Railway usually injects it).
 -   **Render**: Create a new "Web Service", connect your repository, and choose Docker as the environment. Render will build and deploy from the `Dockerfile`. Set the `PORT` environment variable.
 -   **Fly.io**: Use the `flyctl` CLI to launch a new app. It can often detect and use your `Dockerfile`.
 
-### Deploy with Docker
+## Deploy with Docker
 
 **Steps:**
 
@@ -69,7 +82,7 @@ Most modern PaaS providers that support Docker can deploy AIOLists.
     ```
     Your addon will be available at `http://YOUR_SERVER_IP:7000`. You can then access the configuration panel at `http://YOUR_SERVER_IP:7000/configure`.
 
-### Deploy on Your Own Node.js Server
+## Deploy on Your Own Node.js Server
 
 You can also run the addon directly with Node.js if you prefer not to use Docker.
 
@@ -87,15 +100,27 @@ You can also run the addon directly with Node.js if you prefer not to use Docker
     npm run prod
     ```
     The server will start on port 7000 by default. Access `/configure`.
-
 ---
 
-## Support
+# Showcase
 
-If you find this project useful, the best way to support me is to **star this repository** on GitHub!
+### Connections and Settings
 
----
+    <img src="https://i.imgur.com/yvNS1Cl.png"/>
 
-## License
+### List Management Interface
+
+    <img src="https://i.imgur.com/7dP1ncf.png"/>
+
+### Stremio
+
+    <img src="https://i.imgur.com/qCoHNcN.jpeg"/>
+
+### Discover Filters
+
+    <img src="https://i.imgur.com/nZZf1yx.png"/>
+
+
+# License
 
 MIT
