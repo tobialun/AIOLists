@@ -2,8 +2,7 @@
 const axios = require('axios');
 const { ITEMS_PER_PAGE, TRAKT_CLIENT_ID } = require('../config');
 const { enrichItemsWithCinemeta } = require('../utils/metadataFetcher');
-const { db } = require('../db');
-const { encrypt, decrypt } = require('../utils/crypto');
+const { getTraktTokens, saveTraktTokens } = require('../utils/remoteStorage');
 
 const TRAKT_API_URL = 'https://api.trakt.tv';
 
@@ -32,16 +31,19 @@ async function refreshTraktToken(userConfig) {
     });
 
     if (response.status === 200 && response.data) {
-      userConfig.traktAccessToken = response.data.access_token;
-      userConfig.traktRefreshToken = response.data.refresh_token;
-      userConfig.traktExpiresAt = Date.now() + (response.data.expires_in * 1000);
+      const newTokens = {
+          accessToken: response.data.access_token,
+          refreshToken: response.data.refresh_token,
+          expiresAt: Date.now() + (response.data.expires_in * 1000)
+      };
 
-      if (db && userConfig.traktUuid) {
-        await db('users').where({ uuid: userConfig.traktUuid }).update({
-          trakt_access_token: encrypt(userConfig.traktAccessToken),
-          trakt_refresh_token: encrypt(userConfig.traktRefreshToken),
-          trakt_expires_at: userConfig.traktExpiresAt
-        });
+      userConfig.traktAccessToken = newTokens.accessToken;
+      userConfig.traktRefreshToken = newTokens.refreshToken;
+      userConfig.traktExpiresAt = newTokens.expiresAt;
+
+      // Only save if Upstash credentials are provided
+      if (userConfig.upstashUrl && userConfig.traktUuid) {
+        await saveTraktTokens(userConfig, newTokens);
       }
       return true;
     }
@@ -51,12 +53,8 @@ async function refreshTraktToken(userConfig) {
       userConfig.traktAccessToken = null;
       userConfig.traktRefreshToken = null;
       userConfig.traktExpiresAt = null;
-      if (db && userConfig.traktUuid) {
-        await db('users').where({ uuid: userConfig.traktUuid }).update({
-          trakt_access_token: null,
-          trakt_refresh_token: null,
-          trakt_expires_at: null
-        });
+      if (userConfig.upstashUrl && userConfig.traktUuid) {
+        await saveTraktTokens(userConfig, { accessToken: null, refreshToken: null, expiresAt: null });
       }
     }
     return false;
@@ -64,29 +62,29 @@ async function refreshTraktToken(userConfig) {
 }
 
 async function initTraktApi(userConfig) {
-  if (userConfig.traktUuid && db) {
-    let user = await db('users').where('uuid', userConfig.traktUuid).first();
-    if (!user) return false;
+  // If Upstash credentials are provided, use them as the source of truth
+  if (userConfig.upstashUrl && userConfig.upstashToken && userConfig.traktUuid) {
+    const tokens = await getTraktTokens(userConfig);
+    if (tokens) {
+      userConfig.traktAccessToken = tokens.accessToken;
+      userConfig.traktRefreshToken = tokens.refreshToken;
+      userConfig.traktExpiresAt = tokens.expiresAt;
 
-    userConfig.traktAccessToken = decrypt(user.trakt_access_token);
-    userConfig.traktRefreshToken = decrypt(user.trakt_refresh_token);
-    userConfig.traktExpiresAt = user.trakt_expires_at;
-
-    if (Date.now() >= userConfig.traktExpiresAt) {
-      const refreshed = await refreshTraktToken(userConfig); // Pass the config with decrypted tokens
-      if (!refreshed) return false;
+      if (Date.now() >= userConfig.traktExpiresAt) {
+        return await refreshTraktToken(userConfig);
+      }
+      return true;
     }
-    
-    return true;
   }
 
-  // This part handles the non-DB flow
+  // Fallback for non-persistent flow (token is in the config hash)
   if (userConfig.traktAccessToken && userConfig.traktExpiresAt) {
     if (new Date() >= new Date(userConfig.traktExpiresAt)) {
       return await refreshTraktToken(userConfig);
     }
     return true;
   }
+
   return false;
 }
 
@@ -95,7 +93,7 @@ function getTraktAuthUrl() {
   return url;
 }
 
-async function authenticateTrakt(code) {
+async function authenticateTrakt(code, userConfig) {
   const response = await axios.post(`${TRAKT_API_URL}/oauth/token`, {
     code,
     client_id: TRAKT_CLIENT_ID,
@@ -104,30 +102,33 @@ async function authenticateTrakt(code) {
   });
 
   if (response.status === 200 && response.data) {
-    const { access_token, refresh_token, expires_in } = response.data;
-    const expires_at = Date.now() + (expires_in * 1000);
+    const tokens = {
+        accessToken: response.data.access_token,
+        refreshToken: response.data.refresh_token,
+        expiresAt: Date.now() + (response.data.expires_in * 1000)
+    };
 
-    if (db) {
-      const uuid = await getTraktUserUuid(access_token);
-      await db('users').insert({
-        uuid,
-        trakt_access_token: encrypt(access_token),
-        trakt_refresh_token: encrypt(refresh_token),
-        trakt_expires_at: expires_at,
-      }).onConflict('uuid').merge();
-      return { uuid };
+    const uuid = await getTraktUserUuid(tokens.accessToken);
+    userConfig.traktUuid = uuid;
+
+    // If user provided Upstash credentials, save the token there
+    if (userConfig.upstashUrl && userConfig.upstashToken) {
+        await saveTraktTokens(userConfig, tokens);
+        return { uuid };
     }
     
-    // Return plaintext tokens for non-DB flow
+    // Otherwise, return tokens for the non-persistent (URL hash) flow
     return {
-      accessToken: access_token,
-      refreshToken: refresh_token,
-      expiresAt: new Date(expires_at).toISOString(),
+      uuid,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      expiresAt: new Date(tokens.expiresAt).toISOString(),
     };
   }
   throw new Error('Failed to authenticate with Trakt');
 }
 
+// ... the rest of the file (fetchTraktLists, etc.) remains unchanged ...
 async function fetchTraktLists(userConfig) {
     if (!await initTraktApi(userConfig)) {
       return [];

@@ -288,7 +288,7 @@ module.exports = function(router) {
       success: true, 
       config: configToSend, 
       isPotentiallySharedConfig: req.isPotentiallySharedConfig,
-      isDbConnected: !!db
+      isDbConnected: false
     });
   });
 
@@ -340,27 +340,49 @@ module.exports = function(router) {
     }
   });
 
+  router.post('/:configHash/upstash', async (req, res) => {
+    try {
+      const { upstashUrl, upstashToken } = req.body;
+
+      req.userConfig.upstashUrl = upstashUrl || '';
+      req.userConfig.upstashToken = upstashToken || '';
+
+      if (upstashUrl && upstashToken) {
+        req.userConfig.traktAccessToken = null;
+        req.userConfig.traktRefreshToken = null;
+        req.userConfig.traktExpiresAt = null;
+      }
+      
+      req.userConfig.lastUpdated = new Date().toISOString();
+      const newConfigHash = await compressConfig(req.userConfig);
+      manifestCache.clear();
+      res.json({ success: true, configHash: newConfigHash });
+    } catch (error) {
+      console.error('Error in /upstash:', error);
+      res.status(500).json({ error: 'Internal server error in /upstash' });
+    }
+  });
+
   router.post('/:configHash/trakt/auth', async (req, res) => {
     try {
         const { code } = req.body;
         if (!code) return res.status(400).json({ error: 'Authorization code required' });
 
-        const traktAuthResult = await authenticateTrakt(code);
+        const traktAuthResult = await authenticateTrakt(code, req.userConfig);
         
-        if (traktAuthResult.uuid) {
+        if (req.userConfig.upstashUrl && req.userConfig.upstashToken) {
             req.userConfig.traktUuid = traktAuthResult.uuid;
             req.userConfig.traktAccessToken = null;
             req.userConfig.traktRefreshToken = null;
             req.userConfig.traktExpiresAt = null;
         } else {
-            req.userConfig.traktUuid = null;
+            req.userConfig.traktUuid = traktAuthResult.uuid;
             req.userConfig.traktAccessToken = traktAuthResult.accessToken;
             req.userConfig.traktRefreshToken = traktAuthResult.refreshToken;
             req.userConfig.traktExpiresAt = traktAuthResult.expiresAt;
         }
 
         req.userConfig.lastUpdated = new Date().toISOString();
-        
         const newConfigHash = await compressConfig(req.userConfig);
         manifestCache.clear();
         
@@ -377,10 +399,6 @@ module.exports = function(router) {
 
   router.post('/:configHash/trakt/disconnect', async (req, res) => {
     try {
-        if (db && req.userConfig.traktUuid) {
-            await db('users').where('uuid', req.userConfig.traktUuid).del();
-        }
-        
         req.userConfig.traktUuid = null;
         req.userConfig.traktAccessToken = null;
         req.userConfig.traktRefreshToken = null;
@@ -548,7 +566,7 @@ module.exports = function(router) {
         const { order } = req.body;
         if (!Array.isArray(order)) return res.status(400).json({ error: 'Order must be an array of strings.' });
         
-        if (req.userConfig.traktUuid && db) {
+        if (req.userConfig.upstashUrl) {
             await initTraktApi(req.userConfig);
         }
 
@@ -613,7 +631,7 @@ module.exports = function(router) {
       const { hiddenLists } = req.body;
       if (!Array.isArray(hiddenLists)) return res.status(400).json({ error: 'Hidden lists must be an array of strings.' });
       
-      if (req.userConfig.traktUuid && db) {
+      if (req.userConfig.upstashUrl) {
           await initTraktApi(req.userConfig);
       }
       
@@ -732,8 +750,8 @@ module.exports = function(router) {
         return res.status(400).json({ error: 'List ID (manifestId) and merge preference (boolean) required' });
       }
       
-      // If using a DB for Trakt, ensure tokens are loaded before re-compressing
-      if (req.userConfig.traktUuid && db) {
+      // ** THE FIX **
+      if (req.userConfig.upstashUrl) {
         await initTraktApi(req.userConfig);
       }
   
@@ -966,7 +984,9 @@ module.exports = function(router) {
               };
           }
       } else { 
-          determinedHasMovies = false; determinedHasShows = false; determinedCanBeMergedFromSource = false;
+          determinedHasMovies = false;
+          determinedHasShows = false;
+          determinedCanBeMergedFromSource = false;
       }
   
       if (list.isWatchlist && list.source === 'mdblist') tagType = 'W';
@@ -1128,9 +1148,8 @@ module.exports = function(router) {
               const indexA = orderMap.get(String(a.id));
               const indexB = orderMap.get(String(b.id));
               if (indexA !== undefined && indexB !== undefined) return indexA - indexB;
-              if (indexA !== undefined) return -1; // Items in listOrder come first
-              if (indexB !== undefined) return 1;  // Items in listOrder come first
-              // Fallback sort for items not in listOrder (e.g., newly added)
+              if (indexA !== undefined) return -1;
+              if (indexB !== undefined) return 1; 
               if (a.id === 'random_mdblist_catalog' && b.id !== 'random_mdblist_catalog') return -1;
               if (b.id === 'random_mdblist_catalog' && a.id !== 'random_mdblist_catalog') return 1;
               return (a.name || '').localeCompare(b.name || '');
@@ -1165,7 +1184,7 @@ module.exports = function(router) {
         console.log("[AIOLists] Config changed (metadata or Trakt token), generating new config hash.");
         const configToSave = { ...req.userConfig };
         
-        if (configToSave.traktUuid) {
+        if (configToSave.upstashUrl) {
             configToSave.traktAccessToken = null;
             configToSave.traktRefreshToken = null;
             configToSave.traktExpiresAt = null;

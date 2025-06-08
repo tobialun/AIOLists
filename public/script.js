@@ -39,6 +39,8 @@ document.addEventListener('DOMContentLoaded', function() {
         apiKey: '',
         rpdbApiKey: '',
         traktAccessToken: null,
+        upstashUrl: '',
+        upstashToken: '',
         enableRandomListFeature: defaultConfig.enableRandomListFeature,
         randomMDBListUsernames: [...defaultConfig.randomMDBListUsernames],
         availableSortOptions: [...defaultConfig.availableSortOptions],
@@ -56,6 +58,7 @@ document.addEventListener('DOMContentLoaded', function() {
     },
     currentLists: [],
     validationTimeout: null,
+    upstashSaveTimeout: null, // ** NEW STATE **
     universalImportTimeout: null,
     isMobile: window.matchMedia('(max-width: 600px)').matches,
     appVersion: "...",
@@ -76,6 +79,9 @@ document.addEventListener('DOMContentLoaded', function() {
     traktPinContainer: document.getElementById('traktPinContainer'),
     traktPin: document.getElementById('traktPin'),
     submitTraktPin: document.getElementById('submitTraktPin'),
+    upstashContainer: document.getElementById('upstashContainer'), // ** NEW ELEMENT **
+    upstashUrlInput: document.getElementById('upstashUrl'),       // ** NEW ELEMENT **
+    upstashTokenInput: document.getElementById('upstashToken'), // ** NEW ELEMENT **
     universalImportInput: document.getElementById('universalImportInput'),
     importedAddonsContainer: document.getElementById('importedAddons'),
     addonsList: document.getElementById('addonsList'),
@@ -327,6 +333,8 @@ document.addEventListener('DOMContentLoaded', function() {
   function setupEventListeners() {
     elements.apiKeyInput.addEventListener('input', () => handleApiKeyInput(elements.apiKeyInput, 'mdblist'));
     elements.rpdbApiKeyInput.addEventListener('input', () => handleApiKeyInput(elements.rpdbApiKeyInput, 'rpdb'));
+    elements.upstashUrlInput.addEventListener('input', handleUpstashInput); // ** NEW EVENT LISTENER **
+    elements.upstashTokenInput.addEventListener('input', handleUpstashInput); // ** NEW EVENT LISTENER **
     elements.traktLoginBtn?.addEventListener('click', () => { elements.traktPinContainer.style.display = 'flex'; });
     elements.submitTraktPin?.addEventListener('click', handleTraktPinSubmit);
     elements.universalImportInput.addEventListener('paste', handleUniversalPaste);
@@ -616,12 +624,13 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   function updateTraktWarningVisibility() {
+    // This warning is now for showing the Upstash option
+    if (elements.upstashContainer) {
+        elements.upstashContainer.classList.toggle('hidden', state.isDbConnected);
+    }
+    // The old warning message is no longer needed
     if (elements.traktWarningMessage) {
-      if (state.isDbConnected) {
         elements.traktWarningMessage.style.display = 'none';
-      } else {
-        elements.traktWarningMessage.style.display = 'block';
-      }
     }
   }
 
@@ -631,7 +640,6 @@ document.addEventListener('DOMContentLoaded', function() {
       const response = await fetch(`/${state.configHash}/config`);
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(data.error || `Failed to load config data. Status: ${response.status}`);
-
 
       state.isDbConnected = data.isDbConnected;
       state.userConfig = {
@@ -646,7 +654,11 @@ document.addEventListener('DOMContentLoaded', function() {
                                                 : [...defaultConfig.randomMDBListUsernames];
 
       state.isPotentiallySharedConfig = data.isPotentiallySharedConfig || false;
-
+      
+      // ** UPDATE UI FOR NEW FIELDS **
+      elements.upstashUrlInput.value = state.userConfig.upstashUrl || '';
+      elements.upstashTokenInput.value = state.userConfig.upstashToken || '';
+      
       const mdblistApiKey = state.userConfig.apiKey;
       const rpdbApiKey = state.userConfig.rpdbApiKey;
       updateApiKeyUI(elements.apiKeyInput, mdblistApiKey, 'mdblist', state.userConfig.mdblistUsername);
@@ -658,14 +670,16 @@ document.addEventListener('DOMContentLoaded', function() {
       if (mdblistApiKey || rpdbApiKey) {
         await validateAndSaveApiKeys(mdblistApiKey, rpdbApiKey, true);
       }
-      updateTraktUI(!!state.userConfig.traktAccessToken);
+      // Determine Trakt connected state based on either a token in the config or Upstash details
+      const isTraktConnected = !!(state.userConfig.traktAccessToken || (state.userConfig.upstashUrl && state.userConfig.traktUuid));
+      updateTraktUI(isTraktConnected);
+      
       await loadUserListsAndAddons();
     } catch (error) { 
       console.error('Load Config Error:', error); 
       showNotification('apiKeys', `Load Config Error: ${error.message}`, 'error', true); 
       state.isDbConnected = false;
       updateTraktWarningVisibility();
-
     }
   }
 
@@ -679,6 +693,47 @@ document.addEventListener('DOMContentLoaded', function() {
         keyType === 'rpdb' ? apiKey : elements.rpdbApiKeyInput.value.trim()
       );
     }, 700);
+  }
+
+  // ** NEW FUNCTION TO HANDLE UPSTASH INPUT **
+  function handleUpstashInput() {
+    if (state.upstashSaveTimeout) clearTimeout(state.upstashSaveTimeout);
+    state.upstashSaveTimeout = setTimeout(() => {
+        saveUpstashCredentials();
+    }, 1000);
+  }
+
+  // ** NEW FUNCTION TO SAVE UPSTASH CREDENTIALS **
+  async function saveUpstashCredentials() {
+    const upstashUrl = elements.upstashUrlInput.value.trim();
+    const upstashToken = elements.upstashTokenInput.value.trim();
+
+    try {
+        const response = await fetch(`/${state.configHash}/upstash`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ upstashUrl, upstashToken })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || "Failed to save Upstash credentials");
+        }
+        if (data.configHash && data.configHash !== state.configHash) {
+            state.configHash = data.configHash;
+            updateURL();
+            updateStremioButtonHref();
+        }
+        state.userConfig.upstashUrl = upstashUrl;
+        state.userConfig.upstashToken = upstashToken;
+        showNotification('connections', 'Upstash credentials saved.', 'success');
+        // If user is already connected to Trakt, this ensures the tokens get moved to Upstash
+        if (state.userConfig.traktUuid) {
+            await loadUserListsAndAddons();
+        }
+    } catch(error) {
+        console.error('Upstash Save Error:', error);
+        showNotification('connections', `Upstash Save Error: ${error.message}`, 'error', true);
+    }
   }
 
   async function validateAndSaveApiKeys(mdblistApiKeyToValidate, rpdbApiKeyToValidate, isInitialLoadOrSilentCheck = false) {
@@ -786,6 +841,7 @@ document.addEventListener('DOMContentLoaded', function() {
       state.userConfig.traktAccessToken = data.accessToken;
       state.userConfig.traktRefreshToken = data.refreshToken;
       state.userConfig.traktExpiresAt = data.expiresAt;
+      state.userConfig.traktUuid = data.uuid; // Capture the UUID
 
       updateURL(); updateStremioButtonHref(); updateTraktUI(true);
       showNotification('connections', 'Successfully connected to Trakt!', 'success');
@@ -928,7 +984,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!state.userConfig.apiKey) apiKeyMissing = true;
     } else if (list.source === 'trakt' && (list.isTraktList || list.isTraktWatchlist) && !list.isTraktTrending && !list.isTraktPopular && !list.isTraktRecommendations) {
         needsApiKey = true; apiKeyType = 'Trakt';
-        if (!state.userConfig.traktAccessToken) apiKeyMissing = true;
+        if (!state.userConfig.traktAccessToken && !state.userConfig.upstashUrl) apiKeyMissing = true;
     }
 
     if (apiKeyMissing && state.isPotentiallySharedConfig) {
@@ -1289,7 +1345,7 @@ function startNameEditing(listItemElement, list) {
     if ((list.source === 'mdblist' || list.source === 'mdblist_url' || list.source === 'random_mdblist' || list.id === 'random_mdblist_catalog') && !state.userConfig.apiKey) {
         return true;
     }
-    if (list.source === 'trakt' && (list.isTraktList || list.isTraktWatchlist) && !list.isTraktTrending && !list.isTraktPopular && !list.isTraktRecommendations && !state.userConfig.traktAccessToken) {
+    if (list.source === 'trakt' && (list.isTraktList || list.isTraktWatchlist) && !list.isTraktTrending && !list.isTraktPopular && !list.isTraktRecommendations && !state.userConfig.traktAccessToken && !state.userConfig.upstashUrl) {
         return true;
     }
     return false;
@@ -1508,6 +1564,7 @@ function startNameEditing(listItemElement, list) {
         state.userConfig.traktAccessToken = null;
         state.userConfig.traktRefreshToken = null;
         state.userConfig.traktExpiresAt = null;
+        state.userConfig.traktUuid = null;
 
         updateURL(); updateStremioButtonHref(); updateTraktUI(false);
         showNotification('connections', 'Disconnected from Trakt.', 'success');
