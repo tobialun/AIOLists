@@ -82,6 +82,16 @@ document.addEventListener('DOMContentLoaded', function() {
     upstashContainer: document.getElementById('upstashContainer'), // ** NEW ELEMENT **
     upstashUrlInput: document.getElementById('upstashUrl'),       // ** NEW ELEMENT **
     upstashTokenInput: document.getElementById('upstashToken'), // ** NEW ELEMENT **
+    traktPersistenceContainer: document.getElementById('traktPersistenceContainer'),
+    makePersistentBtn: document.getElementById('makePersistentBtn'),
+    traktStatus: document.getElementById('traktStatus'),
+    upstashContainer: document.getElementById('upstashContainer'),
+    upstashUrlInput: document.getElementById('upstashUrl'),
+    upstashTokenInput: document.getElementById('upstashToken'),
+    closeUpstashBtn: document.getElementById('closeUpstashBtn'),
+    upstashCredentialsStatus: document.getElementById('upstashCredentialsStatus'),
+    persistenceStatus: document.getElementById('persistenceStatus'),
+    editUpstashBtn: document.getElementById('editUpstashBtn'),
     universalImportInput: document.getElementById('universalImportInput'),
     importedAddonsContainer: document.getElementById('importedAddons'),
     addonsList: document.getElementById('addonsList'),
@@ -343,6 +353,17 @@ document.addEventListener('DOMContentLoaded', function() {
     elements.toggleGenreFilterBtn?.addEventListener('click', handleToggleGenreFilter);
     elements.toggleRandomListBtn?.addEventListener('click', handleToggleRandomListFeature);
     elements.settingsHeader?.addEventListener('click', toggleSettingsSection);
+    elements.makePersistentBtn.addEventListener('click', () => {
+    elements.upstashContainer.classList.remove('hidden');
+    });
+    elements.closeUpstashBtn.addEventListener('click', () => {
+        elements.upstashContainer.classList.add('hidden');
+    });
+    elements.editUpstashBtn.addEventListener('click', () => {
+        elements.upstashUrlInput.parentElement.style.display = 'flex';
+        elements.upstashTokenInput.parentElement.style.display = 'flex';
+        elements.upstashCredentialsStatus.style.display = 'none';
+    });
     window.addEventListener('resize', () => {
         const oldMobileState = state.isMobile;
         state.isMobile = window.matchMedia('(max-width: 600px)').matches;
@@ -700,6 +721,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (state.upstashSaveTimeout) clearTimeout(state.upstashSaveTimeout);
     state.upstashSaveTimeout = setTimeout(() => {
         saveUpstashCredentials();
+        checkUpstashCredentials(); // Add this line
     }, 1000);
   }
 
@@ -824,9 +846,83 @@ document.addEventListener('DOMContentLoaded', function() {
   function updateTraktUI(isConnected) {
     elements.traktLoginBtn.style.display = isConnected ? 'none' : 'block';
     elements.traktConnectedState.style.display = isConnected ? 'flex' : 'none';
+    elements.traktPersistenceContainer.style.display = isConnected ? 'flex' : 'none';
     elements.traktPinContainer.style.display = 'none';
-    if (!isConnected) elements.traktPin.value = '';
+    if (isConnected) {
+        updatePersistenceStatus();
+    } else {
+        elements.traktPin.value = '';
+        elements.upstashContainer.classList.add('hidden');
+    }
+}
+
+function updatePersistenceStatus() {
+  const isPersistent = state.userConfig.upstashUrl && state.userConfig.upstashToken;
+  elements.traktStatus.innerHTML = ''; // Clear previous state
+
+  const statusIcon = document.createElement('span');
+  statusIcon.className = 'status-icon';
+
+  const statusText = document.createElement('span');
+  statusText.className = 'status-text';
+
+  const actionLink = document.createElement('a');
+  actionLink.className = 'persistence-action-link';
+
+  if (isPersistent) {
+      statusIcon.textContent = '✔';
+      statusIcon.classList.add('persistent');
+      statusText.textContent = 'Persistent';
+      actionLink.textContent = 'Edit';
+      actionLink.onclick = () => {
+          elements.upstashForm.style.display = 'block';
+          elements.upstashContainer.classList.remove('hidden');
+      };
+      elements.upstashContainer.classList.add('hidden');
+  } else {
+      statusIcon.textContent = '✖';
+      statusIcon.classList.add('not-persistent');
+      statusText.textContent = 'Not persistent';
+      actionLink.textContent = 'Make persistent';
+      actionLink.onclick = () => {
+          elements.upstashContainer.classList.remove('hidden');
+      };
   }
+
+  elements.traktStatus.appendChild(statusIcon);
+  elements.traktStatus.appendChild(statusText);
+  elements.traktStatus.appendChild(actionLink);
+}
+
+async function checkUpstashCredentials() {
+  const upstashUrl = elements.upstashUrlInput.value.trim();
+  const upstashToken = elements.upstashTokenInput.value.trim();
+
+  if (!upstashUrl || !upstashToken) {
+      return;
+  }
+
+  try {
+      const response = await fetch(`/${state.configHash}/upstash/check`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ upstashUrl, upstashToken })
+      });
+      const data = await response.json();
+
+      if (data.success) {
+          state.userConfig.upstashUrl = upstashUrl;
+          state.userConfig.upstashToken = upstashToken;
+          updatePersistenceStatus();
+          elements.upstashContainer.classList.add('hidden');
+      } else {
+          showNotification('connections', 'Invalid Upstash credentials.', 'error', true);
+      }
+  } catch (error) {
+      console.error('Error checking Upstash credentials:', error);
+      showNotification('connections', 'Error checking Upstash credentials.', 'error', true);
+  }
+}
 
   async function handleTraktPinSubmit() {
     const pin = elements.traktPin.value.trim();

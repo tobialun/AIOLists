@@ -645,6 +645,22 @@ module.exports = function(router) {
     }
   });
 
+  router.post('/:configHash/upstash/check', async (req, res) => {
+    const { upstashUrl, upstashToken } = req.body;
+    try {
+        const { Redis } = require('@upstash/redis');
+        const redis = new Redis({
+            url: upstashUrl,
+            token: upstashToken,
+        });
+        // A simple command to check the connection
+        await redis.ping();
+        res.json({ success: true });
+    } catch (error) {
+        res.status(400).json({ success: false, error: 'Invalid Upstash credentials' });
+    }
+});
+
   router.post('/:configHash/lists/remove', async (req, res) => {
     try {
       const { listIds } = req.body;
