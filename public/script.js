@@ -270,30 +270,57 @@ document.addEventListener('DOMContentLoaded', function() {
     if (!state.configHash) {
       return showNotification('settings', 'Configuration not ready to share.', 'error');
     }
-
+  
     try {
       const response = await fetch(`/${state.configHash}/shareable-hash`);
       const data = await response.json();
       if (!response.ok || !data.success || !data.shareableHash) {
         throw new Error(data.error || 'Failed to generate shareable hash.');
       }
-      await navigator.clipboard.writeText(data.shareableHash);
-
+  
+      const textToCopy = data.shareableHash;
+  
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(textToCopy);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = textToCopy;
+        
+        textArea.style.position = 'fixed';
+        textArea.style.top = '-9999px';
+        textArea.style.left = '-9999px';
+  
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+  
+        try {
+          document.execCommand('copy');
+        } catch (err) {
+          console.error('Fallback copy to clipboard failed:', err);
+          showNotification('settings', 'Failed to copy.', 'error', true);
+          return;
+        }
+        document.body.removeChild(textArea);
+      }
+  
       const buttonInstance = elements.copyConfigHashBtnInstance || document.getElementById('copyConfigHashBtn');
       const originalText = 'Copy Setup Code';
       buttonInstance.textContent = 'Shareable Code Copied!';
       buttonInstance.disabled = true;
+  
       setTimeout(() => {
         buttonInstance.textContent = originalText;
         buttonInstance.disabled = false;
       }, 2500);
+  
       showNotification('settings', 'Shareable config hash copied to clipboard!', 'success');
     } catch (err) {
       console.error('Share config error:', err);
       showNotification('settings', `Error: ${err.message}`, 'error', true);
     }
   }
-
+  
   async function fetchAppVersion() {
     if (!state.configHash) {
       state.appVersion = "N/A";
