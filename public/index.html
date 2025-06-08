@@ -68,29 +68,55 @@
 
     <div class="api-section">
       <div class="section-header">
-        <h2>Connections</h2>
-        <span id="connectionsNotification" class="section-notification"></span>
+          <h2>Connections</h2>
+          <span id="connectionsNotification" class="section-notification"></span>
       </div>
-      <p class="info-text">Trakt profile imports will break after 1 day, import your recommended/trending/private lists from the <a href="https://trakt.dexter21767.com/configure/" target="_blank" rel="noopener noreferrer">Trakt addon</a> for now, if your lists are public you can still directly import them through the URL.</p>
       <div class="connections-row">
-        <div id="traktConnection">
-          <a href="/api/trakt/login" id="traktLoginBtn" class="trakt-login-btn" target="_blank">
-            Connect to Trakt
-            <img src="https://walter.trakt.tv/hotlink-ok/public/favicon.ico" alt="Trakt.tv">
-          </a>
-          <div id="traktConnectedState" class="connected-state" style="display: none;">
-            <b>Connected to Trakt.tv</b>
-            <button onclick="window.disconnectTrakt()" class="disconnect-btn">Disconnect</button>
+          <div id="traktConnection">
+              <a href="/api/trakt/login" id="traktLoginBtn" class="trakt-login-btn" target="_blank">
+                  Connect to Trakt
+                  <img src="https://walter.trakt.tv/hotlink-ok/public/favicon.ico" alt="Trakt.tv">
+              </a>
+              <div id="traktConnectedState" class="connected-state" style="display: none;">
+                  <b>Connected to Trakt.tv</b>
+                  <button onclick="window.disconnectTrakt()" class="disconnect-btn">Disconnect</button>
+              </div>
+              <div id="traktPinContainer" style="display: none;">
+                  <input type="text" id="traktPin" placeholder="Enter PIN" maxlength="8">
+                  <button id="submitTraktPin" class="trakt-login-btn action-btn">Submit PIN</button>
+              </div>
           </div>
-          <div id="traktPinContainer" style="display: none;">
-            <input type="text" id="traktPin" placeholder="Enter PIN" maxlength="8">
-            <button id="submitTraktPin" class="trakt-login-btn action-btn">Submit PIN</button>
-          </div>
-        </div>
       </div>
-      <div id="traktStatus"></div>
-    </div>
-
+      <div id="traktPersistenceContainer" style="display: none;">
+          <div id="traktStatus" class="persistence-status">
+              </div>
+      </div>
+      <div id="upstashContainer" class="hidden">
+          <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+          <div class="upstash-header">
+              <p class="info-text">
+                  For a persistent Trakt connection provide keys from a free Upstash Redis database.
+                  <a href="https://upstash.com/" target="_blank" rel="noopener noreferrer" class="label-link-icon">Get Keys Here</a>
+              </p>
+              <button id="closeUpstashBtn" class="remove-list-button action-icon" title="Close">❌</button>
+          </div>
+          <div id="upstashForm">
+              <div class="form-group">
+                  <label for="upstashUrl">Upstash URL:</label>
+                  <div class="input-container">
+                      <input type="text" id="upstashUrl" placeholder="Enter your Upstash REST URL">
+                  </div>
+              </div>
+              <div class="form-group">
+                  <label for="upstashToken">Upstash Token:</label>
+                  <div class="input-container">
+                      <input type="password" id="upstashToken" placeholder="Enter your Upstash REST Token">
+                  </div>
+              </div>
+          </div>
+      </div>
+  </div>
+    
     <div class="import-section api-section">
       <div class="section-header">
         <h2>Import</h2>
@@ -136,10 +162,13 @@
       </div>
       <div class="icon-legend">
         <div class="legend-item"><span class="merge-toggle merged" style="margin: 0; height:24px; padding: 0 8px; font-size:11px;">Merged</span><span class="legend-text">Merge/Split lists with movies and shows</span></div>
-        <div class="legend-item"><span class="legend-icon-text">✏️</span><span class="legend-text">Edit Name</span></div>
         <div class="legend-item"><span class="eye-icon eye-open-svg"></span><span class="legend-text">Show/Hide from Home View</span></div>
         <div class="legend-item"><span class="legend-icon-text">❌</span><span class="legend-text">Remove</span></div>
       </div>
+      <div id="listPlaceholder" class="list-placeholder hidden">
+        <div class="spinner"></div>
+        <span class="placeholder-text"></span>
+      </div>    
       <ul id="listItems"></ul>
     </div>
 

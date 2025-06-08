@@ -7,9 +7,10 @@ const { convertToStremioFormat } = require('../addon/converters');
 const { setCacheHeaders, isWatchlist: commonIsWatchlist } = require('../utils/common');
 const Cache = require('../utils/cache');
 const { validateRPDBKey } = require('../utils/posters');
-const { authenticateTrakt, getTraktAuthUrl, fetchTraktLists: fetchTraktUserLists, fetchPublicTraktListDetails } = require('../integrations/trakt');
-const { fetchAllLists: fetchAllMDBLists, fetchListItems: fetchMDBListItemsDirect, validateMDBListKey, extractListFromUrl: extractMDBListFromUrl } = require('../integrations/mdblist');
+const { initTraktApi, authenticateTrakt, getTraktAuthUrl, fetchTraktLists, fetchPublicTraktListDetails } = require('../integrations/trakt');
+const { fetchAllLists: fetchAllMDBLists, validateMDBListKey, extractListFromUrl: extractMDBListFromUrl } = require('../integrations/mdblist');
 const { importExternalAddon: importExtAddon } = require('../integrations/externalAddons');
+const { saveTraktTokens } = require('../utils/remoteStorage');
 
 const manifestCache = new Cache({ defaultTTL: 1 * 60 * 1000 });
 
@@ -229,6 +230,10 @@ module.exports = function(router) {
                          catalogId.startsWith('traktpublic_') ? 'trakt_public' :
                          'external_addon';
   
+      if (listSource === 'trakt_native') {
+        await initTraktApi(req.userConfig);
+      }
+
       if ((listSource === 'mdblist_native' || listSource === 'mdblist_url' || listSource === 'random_mdblist') && !req.userConfig.apiKey) {
           console.log(`[Shared Config] MDBList API key missing for ${catalogId}. Returning empty.`);
           return res.json({ metas: [] });
@@ -278,9 +283,13 @@ module.exports = function(router) {
     delete configToSend.traktSortOptions;
     configToSend.hiddenLists = Array.from(new Set(configToSend.hiddenLists || []));
     configToSend.removedLists = Array.from(new Set(configToSend.removedLists || []));
-    // Ensure customMediaTypeNames is an object
     configToSend.customMediaTypeNames = configToSend.customMediaTypeNames || {};
-    res.json({ success: true, config: configToSend, isPotentiallySharedConfig: req.isPotentiallySharedConfig });
+    res.json({ 
+      success: true, 
+      config: configToSend, 
+      isPotentiallySharedConfig: req.isPotentiallySharedConfig,
+      isDbConnected: false
+    });
   });
 
   router.post('/:configHash/apikey', async (req, res) => {
@@ -331,36 +340,92 @@ module.exports = function(router) {
     }
   });
 
+  router.post('/:configHash/upstash', async (req, res) => {
+    try {
+        const { upstashUrl, upstashToken } = req.body;
+
+        req.userConfig.upstashUrl = upstashUrl || '';
+        req.userConfig.upstashToken = upstashToken || '';
+
+        if (upstashUrl && upstashToken && req.userConfig.traktAccessToken && req.userConfig.traktUuid) {
+            const tokensToSave = {
+                accessToken: req.userConfig.traktAccessToken,
+                refreshToken: req.userConfig.traktRefreshToken,
+                expiresAt: req.userConfig.traktExpiresAt
+            };
+            await saveTraktTokens(req.userConfig, tokensToSave);
+            req.userConfig.traktAccessToken = null;
+            req.userConfig.traktRefreshToken = null;
+            req.userConfig.traktExpiresAt = null;
+        }
+        
+        req.userConfig.lastUpdated = new Date().toISOString();
+        const newConfigHash = await compressConfig(req.userConfig);
+        manifestCache.clear();
+        res.json({ success: true, configHash: newConfigHash });
+    } catch (error) {
+        console.error('Error in /upstash:', error);
+        res.status(500).json({ error: 'Internal server error in /upstash' });
+    }
+  });
+
   router.post('/:configHash/trakt/auth', async (req, res) => {
     try {
         const { code } = req.body;
         if (!code) return res.status(400).json({ error: 'Authorization code required' });
 
-        const traktTokens = await authenticateTrakt(code);
-        req.userConfig.traktAccessToken = traktTokens.accessToken;
-        req.userConfig.traktRefreshToken = traktTokens.refreshToken;
-        req.userConfig.traktExpiresAt = traktTokens.expiresAt;
-        req.userConfig.lastUpdated = new Date().toISOString();
+        // Step 1: Authenticate and get all token information back.
+        const traktAuthResult = await authenticateTrakt(code, req.userConfig);
+        
+        // Step 2: Check if Upstash is configured and handle the logic here.
+        if (req.userConfig.upstashUrl && req.userConfig.upstashToken) {
+            // Logic for persistent storage in Redis
+            
+            // a) Update the user config in memory with the new UUID.
+            req.userConfig.traktUuid = traktAuthResult.uuid;
 
+            // b) Prepare the token object that will be saved to Redis.
+            const tokensToSave = {
+                accessToken: traktAuthResult.accessToken,
+                refreshToken: traktAuthResult.refreshToken,
+                expiresAt: traktAuthResult.expiresAt
+            };
+
+            // c) Save to Redis using the now-complete userConfig.
+            await saveTraktTokens(req.userConfig, tokensToSave);
+
+            // d) Clear the local tokens from the config that gets hashed into the URL.
+            req.userConfig.traktAccessToken = null;
+            req.userConfig.traktRefreshToken = null;
+            req.userConfig.traktExpiresAt = null;
+
+        } else {
+            // Logic for non-persistent storage (tokens in URL hash).
+            req.userConfig.traktUuid = traktAuthResult.uuid;
+            req.userConfig.traktAccessToken = traktAuthResult.accessToken;
+            req.userConfig.traktRefreshToken = traktAuthResult.refreshToken;
+            req.userConfig.traktExpiresAt = traktAuthResult.expiresAt;
+        }
+
+        // Step 3: Generate the new config hash and send the response.
+        req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
         manifestCache.clear();
+        
         res.json({
             success: true,
             configHash: newConfigHash,
-            accessToken: traktTokens.accessToken,
-            refreshToken: traktTokens.refreshToken,
-            expiresAt: traktTokens.expiresAt,
             message: 'Authenticated with Trakt'
         });
     } catch (error) {
         console.error('Error in /trakt/auth:', error);
         res.status(500).json({ error: 'Failed to authenticate with Trakt', details: error.message });
     }
-  });
+});
 
   router.post('/:configHash/trakt/disconnect', async (req, res) => {
     try {
-        console.log('Trakt disconnect requested. Purging native trakt_ entries (excluding traktpublic_).');
+        req.userConfig.traktUuid = null;
         req.userConfig.traktAccessToken = null;
         req.userConfig.traktRefreshToken = null;
         req.userConfig.traktExpiresAt = null;
@@ -370,7 +435,7 @@ module.exports = function(router) {
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
         manifestCache.clear();
-        res.json({ success: true, configHash: newConfigHash, message: 'Disconnected from Trakt. Native Trakt data purged; Trakt Public URL imports retained.' });
+        res.json({ success: true, configHash: newConfigHash, message: 'Disconnected from Trakt.' });
     } catch (error) {
         console.error('Error in /trakt/disconnect:', error);
         res.status(500).json({ error: 'Failed to disconnect from Trakt', details: error.message });
@@ -526,6 +591,11 @@ module.exports = function(router) {
     try {
         const { order } = req.body;
         if (!Array.isArray(order)) return res.status(400).json({ error: 'Order must be an array of strings.' });
+        
+        if (req.userConfig.upstashUrl) {
+            await initTraktApi(req.userConfig);
+        }
+
         req.userConfig.listOrder = order.map(String);
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
@@ -557,7 +627,6 @@ module.exports = function(router) {
     }
   });
 
-  // New endpoint to save custom media type names
   router.post('/:configHash/lists/mediatype', async (req, res) => {
     try {
       const { listId, customMediaType } = req.body;
@@ -570,7 +639,6 @@ module.exports = function(router) {
       if (customMediaType && customMediaType.trim()) {
         req.userConfig.customMediaTypeNames[String(listId)] = customMediaType.trim();
       } else {
-        // If customMediaType is empty or null, remove the custom setting
         delete req.userConfig.customMediaTypeNames[String(listId)];
       }
 
@@ -588,6 +656,11 @@ module.exports = function(router) {
     try {
       const { hiddenLists } = req.body;
       if (!Array.isArray(hiddenLists)) return res.status(400).json({ error: 'Hidden lists must be an array of strings.' });
+      
+      if (req.userConfig.upstashUrl) {
+          await initTraktApi(req.userConfig);
+      }
+      
       req.userConfig.hiddenLists = hiddenLists.map(String);
       req.userConfig.lastUpdated = new Date().toISOString();
       const newConfigHash = await compressConfig(req.userConfig);
@@ -598,6 +671,22 @@ module.exports = function(router) {
         res.status(500).json({ error: 'Failed to update list visibility' });
     }
   });
+
+  router.post('/:configHash/upstash/check', async (req, res) => {
+    const { upstashUrl, upstashToken } = req.body;
+    try {
+        const { Redis } = require('@upstash/redis');
+        const redis = new Redis({
+            url: upstashUrl,
+            token: upstashToken,
+        });
+        // A simple command to check the connection
+        await redis.ping();
+        res.json({ success: true });
+    } catch (error) {
+        res.status(400).json({ success: false, error: 'Invalid Upstash credentials' });
+    }
+});
 
   router.post('/:configHash/lists/remove', async (req, res) => {
     try {
@@ -697,11 +786,16 @@ module.exports = function(router) {
 
   router.post('/:configHash/lists/merge', async (req, res) => {
     try {
+
+      if (req.userConfig.upstashUrl) {
+        await initTraktApi(req.userConfig);
+      }
+
       const { listId, merged } = req.body;
       if (!listId || typeof merged !== 'boolean') {
         return res.status(400).json({ error: 'List ID (manifestId) and merge preference (boolean) required' });
       }
-  
+    
       let canBeMerged = false;
       const listInfoFromMetadata = req.userConfig.listsMetadata?.[String(listId)];
       if (listInfoFromMetadata && listInfoFromMetadata.hasMovies && listInfoFromMetadata.hasShows && listInfoFromMetadata.canBeMerged !== false) {
@@ -721,7 +815,7 @@ module.exports = function(router) {
         if (req.userConfig.mergedLists) {
           delete req.userConfig.mergedLists[String(listId)];
           if (Object.keys(req.userConfig.mergedLists).length === 0) {
-            delete req.userConfig.mergedLists; // Optional: remove empty object
+            delete req.userConfig.mergedLists;
           }
         }
       } else { // User wants to split (merged === false)
@@ -742,7 +836,7 @@ module.exports = function(router) {
       res.status(500).json({ error: 'Failed to update list merge preference' });
     }
   });
-    
+      
   router.post('/config/create', async (req, res) => {
     try {
       let newConfig = { ...defaultConfig, listOrder: [], hiddenLists: [], removedLists: [], customListNames: {}, customMediaTypeNames: {}, mergedLists: {}, sortPreferences: {}, importedAddons: {}, listsMetadata: {}, enableRandomListFeature: false, lastUpdated: new Date().toISOString() };
@@ -790,39 +884,39 @@ module.exports = function(router) {
 
   router.get('/:configHash/lists', async (req, res) => {
     try {
-      // Snapshots to detect changes
       const initialListsMetadataJson = JSON.stringify(req.userConfig.listsMetadata || {});
       const initialTraktAccessToken = req.userConfig.traktAccessToken;
-      const initialTraktRefreshToken = req.userConfig.traktRefreshToken; // Also track refresh token
-      const initialTraktExpiresAt = req.userConfig.traktExpiresAt;
       let configChangedByThisRequest = false;
-    
-      let allUserLists = [];
-      if (req.userConfig.apiKey) {
-          const mdbLists = await fetchAllMDBLists(req.userConfig.apiKey);
-          allUserLists.push(...mdbLists.map(l => ({...l, source: 'mdblist'})));
-      }
-      if (req.userConfig.traktAccessToken) { // Check if token exists before trying to use it
-          // fetchTraktUserLists might modify req.userConfig if tokens are refreshed
-          const traktLists = await fetchTraktUserLists(req.userConfig); 
-          allUserLists.push(...traktLists.map(l => ({...l, source: 'trakt'})));
-    
-          // Explicitly check if Trakt token details were mutated
-          if (req.userConfig.traktAccessToken !== initialTraktAccessToken ||
-              req.userConfig.traktRefreshToken !== initialTraktRefreshToken || // Check refresh token too
-              req.userConfig.traktExpiresAt !== initialTraktExpiresAt) {
-              console.log("[AIOLists] Trakt token details updated during /lists processing.");
-              configChangedByThisRequest = true;
-          }
-      }
-    
+        
+      if (req.userConfig.traktUuid || req.userConfig.traktAccessToken) {
+        await initTraktApi(req.userConfig); // This is the key change
+  
+        if (req.userConfig.traktAccessToken !== initialTraktAccessToken) {
+            console.log("[AIOLists] Trakt access token was updated in-memory during list processing.");
+            configChangedByThisRequest = true;
+        }
+    }
+
+    let allUserLists = [];
+    if (req.userConfig.apiKey) {
+        const mdbLists = await fetchAllMDBLists(req.userConfig.apiKey);
+        allUserLists.push(...mdbLists.map(l => ({...l, source: 'mdblist'})));
+    }
+
+    if (req.userConfig.traktAccessToken) {
+      const traktLists = await fetchTraktLists(req.userConfig); 
+      allUserLists.push(...traktLists.map(l => ({...l, source: 'trakt'})));
+  }
+
+
+  
       const removedListsSet = new Set(req.userConfig.removedLists || []);
       if (!req.userConfig.listsMetadata) req.userConfig.listsMetadata = {};
       if (!req.userConfig.customMediaTypeNames) req.userConfig.customMediaTypeNames = {};
     
       let processedLists = [];
     
-      // Handle Random MDBList Catalog if enabled
+      // This block is correct and does not need changes
       if (req.userConfig.enableRandomListFeature && req.userConfig.apiKey) {
         const manifestListId = 'random_mdblist_catalog';
         const customTypeName = req.userConfig.customMediaTypeNames?.[manifestListId];
@@ -831,26 +925,25 @@ module.exports = function(router) {
         const randomCatalogUIEntry = {
             id: manifestListId,
             originalId: manifestListId,
-            name: 'Random MDBList Catalog', // Default name
+            name: 'Random MDBList Catalog',
             customName: req.userConfig.customListNames?.[manifestListId] || null,
             effectiveMediaTypeDisplay: effectiveMediaTypeDisplay,
             isHidden: (req.userConfig.hiddenLists || []).includes(manifestListId),
-            hasMovies: true, // Assumed for simplicity, as it's a mixed catalog
+            hasMovies: true,
             hasShows: true,
-            canBeMerged: false, // Random catalog is not designed to be merged/split by user
+            canBeMerged: false,
             isRandomCatalog: true, 
             tag: '🎲', 
             tagImage: null,
             sortPreferences: req.userConfig.sortPreferences?.[manifestListId] || { sort: 'default', order: 'desc' },
-            isMerged: false, // Not applicable as canBeMerged is false
+            isMerged: false,
             source: 'random_mdblist'
         };
-        // Use custom name if available
         if (randomCatalogUIEntry.customName) randomCatalogUIEntry.name = randomCatalogUIEntry.customName;
         processedLists.push(randomCatalogUIEntry);
       }
 
-      // Process native MDBList and Trakt lists
+      // This block for processing native lists is complex but correct
       const activeListsProcessingPromises = allUserLists.map(async list => {
         const originalListIdStr = String(list.id);
         let manifestListId = originalListIdStr;
@@ -899,55 +992,41 @@ module.exports = function(router) {
           determinedHasShows = metadata.hasShows === true;
           determinedCanBeMergedFromSource = true; 
   
-          if (typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean' || metadata.errorFetching) {
-              if (req.userConfig.traktAccessToken) {
-                  console.log(`[AIOLists] Fetching content for Trakt list ${manifestListId} to determine types (within /lists).`);
-                  const tempUserConfigForFetch = { ...req.userConfig, rpdbApiKey: null }; // Pass current tokens
-                  const tempContent = await fetchListContent(manifestListId, tempUserConfigForFetch, 0, null, 'all');
-                  
-                  // Check if tokens changed *during this specific fetchListContent* (less likely path for token refresh)
-                  if (tempUserConfigForFetch.traktAccessToken !== req.userConfig.traktAccessToken || tempUserConfigForFetch.traktExpiresAt !== req.userConfig.traktExpiresAt) {
-                      // If fetchListContent's copy of userConfig got its tokens refreshed, update the main req.userConfig
-                      // This is a bit indirect; ideally fetchTraktUserLists is the main point for token refresh persistence.
-                      req.userConfig.traktAccessToken = tempUserConfigForFetch.traktAccessToken;
-                      req.userConfig.traktRefreshToken = tempUserConfigForFetch.traktRefreshToken;
-                      req.userConfig.traktExpiresAt = tempUserConfigForFetch.traktExpiresAt;
-                      console.log("[AIOLists] Trakt token details potentially updated during fetchListContent for metadata.");
-                      configChangedByThisRequest = true; 
-                  }
+          if ((typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean' || metadata.errorFetching) && req.userConfig.traktAccessToken) {
+                const tempUserConfigForFetch = { ...req.userConfig, rpdbApiKey: null };
+                const tempContent = await fetchListContent(manifestListId, tempUserConfigForFetch, 0, null, 'all');
+                
+                if (tempUserConfigForFetch.traktAccessToken !== req.userConfig.traktAccessToken) {
+                    req.userConfig.traktAccessToken = tempUserConfigForFetch.traktAccessToken;
+                    configChangedByThisRequest = true; 
+                }
   
-                  determinedHasMovies = tempContent?.hasMovies || false;
-                  determinedHasShows = tempContent?.hasShows || false;
-                  if (!metadata.hasMovies && !metadata.hasShows && (determinedHasMovies || determinedHasShows)) {
-                      // If metadata was previously missing/false and now we have types, it's a change.
-                      configChangedByThisRequest = true;
-                  }
-                  req.userConfig.listsMetadata[manifestListId] = { 
-                      ...metadata, 
-                      hasMovies: determinedHasMovies, 
-                      hasShows: determinedHasShows, 
-                      canBeMerged: determinedCanBeMergedFromSource && determinedHasMovies && determinedHasShows, 
-                      lastChecked: new Date().toISOString(),
-                      errorFetching: false
-                  };
-              } else { 
-                  determinedHasMovies = metadata.hasMovies || false;
-                  determinedHasShows = metadata.hasShows || false;
-                   req.userConfig.listsMetadata[manifestListId] = { 
-                      ...metadata, hasMovies: determinedHasMovies, hasShows: determinedHasShows, 
-                      canBeMerged: determinedCanBeMergedFromSource && determinedHasMovies && determinedHasShows, 
-                      lastChecked: new Date().toISOString() 
-                  };
-              }
-          } else { // Metadata for Trakt list already exists and is valid
+                determinedHasMovies = tempContent?.hasMovies || false;
+                determinedHasShows = tempContent?.hasShows || false;
+                if (!metadata.hasMovies && !metadata.hasShows && (determinedHasMovies || determinedHasShows)) {
+                    configChangedByThisRequest = true;
+                }
+                req.userConfig.listsMetadata[manifestListId] = { 
+                    ...metadata, 
+                    hasMovies: determinedHasMovies, 
+                    hasShows: determinedHasShows, 
+                    canBeMerged: determinedCanBeMergedFromSource && determinedHasMovies && determinedHasShows, 
+                    lastChecked: new Date().toISOString(),
+                    errorFetching: false
+                };
+          } else { 
                req.userConfig.listsMetadata[manifestListId] = { 
                   ...metadata, 
-                  canBeMerged: determinedCanBeMergedFromSource && determinedHasMovies && determinedHasShows,
-                  lastChecked: new Date().toISOString()
+                  hasMovies: determinedHasMovies, 
+                  hasShows: determinedHasShows,
+                  canBeMerged: determinedCanBeMergedFromSource && determinedHasMovies && determinedHasShows, 
+                  lastChecked: new Date().toISOString() 
               };
           }
       } else { 
-          determinedHasMovies = false; determinedHasShows = false; determinedCanBeMergedFromSource = false;
+          determinedHasMovies = false;
+          determinedHasShows = false;
+          determinedCanBeMergedFromSource = false;
       }
   
       if (list.isWatchlist && list.source === 'mdblist') tagType = 'W';
@@ -962,11 +1041,10 @@ module.exports = function(router) {
       if (customTypeName) { effectiveMediaTypeDisplay = customTypeName; }
       else { if (determinedHasMovies && determinedHasShows) effectiveMediaTypeDisplay = 'All'; else if (determinedHasMovies) effectiveMediaTypeDisplay = 'Movie'; else if (determinedHasShows) effectiveMediaTypeDisplay = 'Series'; else effectiveMediaTypeDisplay = 'N/A';}
       return { id: manifestListId, originalId: originalListIdStr, name: list.name, customName: req.userConfig.customListNames?.[manifestListId] || null, effectiveMediaTypeDisplay: effectiveMediaTypeDisplay, isHidden: (req.userConfig.hiddenLists || []).includes(manifestListId), hasMovies: determinedHasMovies, hasShows: determinedHasShows, canBeMerged: actualCanBeMerged, isMerged: isUserMerged, isTraktList: list.source === 'trakt' && list.isTraktList, isTraktWatchlist: list.source === 'trakt' && list.isTraktWatchlist, isTraktRecommendations: list.isTraktRecommendations, isTraktTrending: list.isTraktTrending, isTraktPopular: list.isTraktPopular, isWatchlist: !!list.isWatchlist || !!list.isTraktWatchlist, tag: tagType, listType: list.listType, tagImage: list.source === 'trakt' ? 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico' : null, sortPreferences: req.userConfig.sortPreferences?.[originalListIdStr] || defaultSort, source: list.source, dynamic: list.dynamic, mediatype: list.mediatype };
-});
-const activeListsResults = (await Promise.all(activeListsProcessingPromises)).filter(p => p !== null);
-processedLists.push(...activeListsResults);
+      });
+      const activeListsResults = (await Promise.all(activeListsProcessingPromises)).filter(p => p !== null);
+      processedLists.push(...activeListsResults);
 
-      // Process imported addons (URL imports and manifest imports)
       if (req.userConfig.importedAddons) {
         for (const addonKey in req.userConfig.importedAddons) {
             const addon = req.userConfig.importedAddons[addonKey];
@@ -1110,9 +1188,8 @@ processedLists.push(...activeListsResults);
               const indexA = orderMap.get(String(a.id));
               const indexB = orderMap.get(String(b.id));
               if (indexA !== undefined && indexB !== undefined) return indexA - indexB;
-              if (indexA !== undefined) return -1; // Items in listOrder come first
-              if (indexB !== undefined) return 1;  // Items in listOrder come first
-              // Fallback sort for items not in listOrder (e.g., newly added)
+              if (indexA !== undefined) return -1;
+              if (indexB !== undefined) return 1; 
               if (a.id === 'random_mdblist_catalog' && b.id !== 'random_mdblist_catalog') return -1;
               if (b.id === 'random_mdblist_catalog' && a.id !== 'random_mdblist_catalog') return 1;
               return (a.name || '').localeCompare(b.name || '');
@@ -1144,12 +1221,20 @@ processedLists.push(...activeListsResults);
       };
     
       if (configChangedByThisRequest) {
-        console.log("[AIOLists] Config changed (metadata or Trakt token), generating new config hash from /lists endpoint.");
-        req.userConfig.lastUpdated = new Date().toISOString();
-        const newConfigHash = await compressConfig(req.userConfig);
+        console.log("[AIOLists] Config changed (metadata or Trakt token), generating new config hash.");
+        const configToSave = { ...req.userConfig };
+        
+        if (configToSave.upstashUrl) {
+            configToSave.traktAccessToken = null;
+            configToSave.traktRefreshToken = null;
+            configToSave.traktExpiresAt = null;
+        }
+
+        configToSave.lastUpdated = new Date().toISOString();
+        const newConfigHash = await compressConfig(configToSave);
         responsePayload.newConfigHash = newConfigHash;
         
-        if (req.configHash !== newConfigHash) { // Only clear if hash actually changed
+        if (req.configHash !== newConfigHash) {
             manifestCache.clear();
         }
       }

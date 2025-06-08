@@ -1,24 +1,43 @@
-# AIOLists Stremio Addon
+# <img src="https://i.imgur.com/GvUktU5.png" width="30"/> AIOLists Stremio Addon
 
-A Stremio addon to manage all your lists in one place, with powerful import, customization, and integration features.
+AIOLists is a stateless open source list management addon for Stremio. The project originated from this [post](https://www.reddit.com/r/StremioAddons/comments/1kbfk67/concept_for_an_aiolist_addon/), since then I have continued development to add features I would personally want in a list management addon, and fixed bugs shared by the users.
 
-#✨ Features
+# ✨ Features
 - **Unified List Management:** Import and manage lists from various sources in one place.
 - **MDBList & Trakt URL Imports:** Directly import lists by pasting URLs from MDBList.com and Trakt.tv.
 - **Trakt Integration:** Connect your Trakt account to access personal lists, watchlist, recommendations, trending, and popular content.
 - **External Addon Importing:** Import lists from other Stremio addons, should support most popular ones.
 - **Sorting:** If the sorting option exists it's there.
 - **List Customization:**
+    - **Change type:** Instead of movies/series change it to whatever you want, even make it blank.
     - **Reorder:** Drag and drop to arrange lists as you like.
     - **Rename:** Give custom names to any list for better organization.
     - **Merge/Split:** If a list contains both movies and series you can merge it into a single Stremio row so it doesn't take up more space than it needs to.
+- **Hide/Show from homeview:** Hide lists from homeview, while still accessing them through the Discover tab.
 - **Instant Watchlist Updates:** Fetches watchlist content on load.
 - **RPDB Support:** Optional RatingPosterDB (RPDB) integration for enhanced poster images across all your lists (requires your own RPDB API key).
 - **Configurable Genre Filtering:** If you add too many list you might hit the 8kb manifest size limit. By disabling genre filtering the manifest size should half so you can have more lists.
 - **Discovery Lists:** Randomly selected MDBList from a set list of users, a new random list is delivered everytime you refresh the catalog.
 - **Share Your Setup:** Generate a shareable hash of your AIOLists configuration (list order, names, imported addons) to share with others.
 
-## Deployment
+# Trakt Persistance
+
+Due to the stateless nature of this addon Trakt keys can't automatically update when they expire. I have added an option to make Trakt persistant through Upstash. You can create a free account on there. Here's a short guide:
+
+1. Create an account, using a temp-mail works fine.
+2. After logging in you will be prompted to Create a database press Create Database.
+3. Input a Name and the region closest to you.
+4. Next -> Next -> Create
+5. Scroll down to REST API section and copy UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN and put them into AIOLists.
+
+Your Trakt tokens are now stored in the redis db and will automatically refresh when they expire.
+
+# Support
+
+If you find this project useful, the best way to support me is to **star this repository** on GitHub!
+
+
+# Deployment
 
 The easiest way to host this project for free is through hugging face.
 
@@ -35,14 +54,14 @@ The easiest way to host this project for free is through hugging face.
 6. Press "Commit new file to main"
 7. Wait for it to finish building and you should have your own instance.
 
-#### Deploying on Railway, Render, Fly.io, etc.
+## Deploying on Railway, Render, Fly.io, etc.
 
 Most modern PaaS providers that support Docker can deploy AIOLists.
 -   **Railway**: Connect your GitHub repository and let Railway build from the `Dockerfile`. Set the `PORT` environment variable if needed (Railway usually injects it).
 -   **Render**: Create a new "Web Service", connect your repository, and choose Docker as the environment. Render will build and deploy from the `Dockerfile`. Set the `PORT` environment variable.
 -   **Fly.io**: Use the `flyctl` CLI to launch a new app. It can often detect and use your `Dockerfile`.
 
-### Deploy with Docker
+## Deploy with Docker
 
 **Steps:**
 
@@ -63,7 +82,7 @@ Most modern PaaS providers that support Docker can deploy AIOLists.
     ```
     Your addon will be available at `http://YOUR_SERVER_IP:7000`. You can then access the configuration panel at `http://YOUR_SERVER_IP:7000/configure`.
 
-### Deploy on Your Own Node.js Server
+## Deploy on Your Own Node.js Server
 
 You can also run the addon directly with Node.js if you prefer not to use Docker.
 
@@ -81,15 +100,27 @@ You can also run the addon directly with Node.js if you prefer not to use Docker
     npm run prod
     ```
     The server will start on port 7000 by default. Access `/configure`.
-
 ---
 
-## Support
+# Showcase
 
-If you find this project useful, the best way to support me is to **star this repository** on GitHub!
+### Connections and Settings
 
----
+<img src="https://i.imgur.com/yvNS1Cl.png" width="700"/>
 
-## License
+### List Management Interface
+
+<img src="https://i.imgur.com/7dP1ncf.png" width="700"/>
+
+### Stremio
+
+<img src="https://i.imgur.com/qCoHNcN.jpeg" width="700"/>
+
+### Discover Filters
+
+<img src="https://i.imgur.com/nZZf1yx.png" width="700"/>
+
+
+# License
 
 MIT

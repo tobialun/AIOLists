@@ -1,7 +1,5 @@
-// src/addon/addonBuilder.js
-
 const { addonBuilder } = require('stremio-addon-sdk');
-const { fetchTraktListItems, fetchTraktLists } = require('../integrations/trakt');
+const { fetchTraktListItems, fetchTraktLists, initTraktApi } = require('../integrations/trakt');
 const { fetchListItems: fetchMDBListItems, fetchAllLists: fetchAllMDBLists, fetchAllListsForUser } = require('../integrations/mdblist');
 const { fetchExternalAddonItems } = require('../integrations/externalAddons');
 const { convertToStremioFormat } = require('./converters');
@@ -22,8 +20,13 @@ const getManifestCatalogName = (listId, originalName, customListNames) => {
 };
 
 async function fetchListContent(listId, userConfig, skip = 0, genre = null, stremioCatalogType = 'all') {
-  const { apiKey, traktAccessToken, listsMetadata = {}, sortPreferences = {}, importedAddons = {}, rpdbApiKey, randomMDBListUsernames, enableRandomListFeature, customMediaTypeNames = {} } = userConfig;
   const catalogIdFromRequest = String(listId);
+
+  if (catalogIdFromRequest.startsWith('trakt_') && !catalogIdFromRequest.startsWith('traktpublic_')) {
+    await initTraktApi(userConfig);
+  }
+
+  const { apiKey, traktAccessToken, listsMetadata = {}, sortPreferences = {}, importedAddons = {}, rpdbApiKey, randomMDBListUsernames, enableRandomListFeature, customMediaTypeNames = {} } = userConfig;
   
   let itemTypeHintForFetching = (stremioCatalogType === 'movie' || stremioCatalogType === 'series') ? stremioCatalogType : 'all';
 
@@ -123,9 +126,10 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
 
 
 async function createAddon(userConfig) {
+  await initTraktApi(userConfig);
   const manifest = {
     id: 'org.stremio.aiolists',
-    version: `1.1.0-${Date.now()}`,
+    version: `1.1.1-${Date.now()}`,
     name: 'AIOLists',
     description: 'Manage all your lists in one place.',
     resources: ['catalog', 'meta'],
@@ -335,8 +339,8 @@ async function createAddon(userConfig) {
     } else if (!isUserMerged && sourceIsStructurallyMergeable) {
         let movieCatalogName = displayName;
         let seriesCatalogName = displayName;
-        if (customUserDefinedType) { // If user set a custom type, but list is split, name might need indicator
-            movieCatalogName = `${displayName}`; // Keep full name if custom type is set for the base ID
+        if (customUserDefinedType) {
+            movieCatalogName = `${displayName}`;
             seriesCatalogName = `${displayName}`;
         }
         if (sourceHasMovies) {
@@ -345,7 +349,7 @@ async function createAddon(userConfig) {
         if (sourceHasShows) {
             tempGeneratedCatalogs.push({ id: currentListId, type: 'series', name: seriesCatalogName, ...baseCatalogProps });
         }
-    } else { // Not structurally mergeable (e.g., movies-only) or user wants it split (covered by above)
+    } else {
         if (customUserDefinedType) {
              tempGeneratedCatalogs.push({ id: currentListId, type: customUserDefinedType, name: displayName, ...baseCatalogProps });
         } else {
@@ -353,7 +357,7 @@ async function createAddon(userConfig) {
                 tempGeneratedCatalogs.push({ id: currentListId, type: 'movie', name: displayName, ...baseCatalogProps });
             } else if (sourceHasShows) {
                 tempGeneratedCatalogs.push({ id: currentListId, type: 'series', name: displayName, ...baseCatalogProps });
-            } else if (listSourceInfo.type === 'all' && !customUserDefinedType) { // An 'all' list with no content yet, but no custom type
+            } else if (listSourceInfo.type === 'all' && !customUserDefinedType) {
                 tempGeneratedCatalogs.push({ id: currentListId, type: 'all', name: displayName, ...baseCatalogProps });
             }
         }
@@ -386,17 +390,15 @@ async function createAddon(userConfig) {
             determinedHasShows = showsCount > 0;
             const itemsCount = parseInt(listInfo.items) || 0;
 
-            if (itemsCount > 0 && !determinedHasMovies && !determinedHasShows) { // If items exist but types not directly counted
-                const mediatype = listInfo.mediatype; // 'movie', 'show', or empty for mixed
+            if (itemsCount > 0 && !determinedHasMovies && !determinedHasShows) {
+                const mediatype = listInfo.mediatype;
                 if (mediatype === 'movie') { determinedHasMovies = true; determinedHasShows = false; }
                 else if (mediatype === 'show' || mediatype === 'series') { determinedHasMovies = false; determinedHasShows = true; }
-                else if (!mediatype || mediatype === '') { determinedHasMovies = true; determinedHasShows = true; } // Assume mixed if mediatype empty
+                else if (!mediatype || mediatype === '') { determinedHasMovies = true; determinedHasShows = true; }
             } else if (!determinedHasMovies && !determinedHasShows && (!listInfo.mediatype || listInfo.mediatype === '')) {
-                // If no specific counts AND mediatype is empty, assume it CAN contain both
                 determinedHasMovies = true;
                 determinedHasShows = true;
             }
-            // Determine if list is structurally mergeable from source (static list or dynamic-mixed)
             determinedCanBeMergedFromSource = (listInfo.dynamic === false || !listInfo.mediatype || listInfo.mediatype === '');
         }
 
