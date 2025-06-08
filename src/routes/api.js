@@ -10,7 +10,6 @@ const { validateRPDBKey } = require('../utils/posters');
 const { initTraktApi, authenticateTrakt, getTraktAuthUrl, fetchTraktLists, fetchPublicTraktListDetails } = require('../integrations/trakt');
 const { fetchAllLists: fetchAllMDBLists, validateMDBListKey, extractListFromUrl: extractMDBListFromUrl } = require('../integrations/mdblist');
 const { importExternalAddon: importExtAddon } = require('../integrations/externalAddons');
-const { db } = require('../db');
 
 const manifestCache = new Cache({ defaultTTL: 1 * 60 * 1000 });
 
@@ -742,7 +741,6 @@ module.exports = function(router) {
     }
   });
 
-  // ** FIX START **
   router.post('/:configHash/lists/merge', async (req, res) => {
     try {
       const { listId, merged } = req.body;
@@ -795,7 +793,6 @@ module.exports = function(router) {
       res.status(500).json({ error: 'Failed to update list merge preference' });
     }
   });
-  // ** FIX END **
     
   router.post('/config/create', async (req, res) => {
     try {

@@ -1,14 +1,11 @@
-// src/server.js
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const { PORT, IS_PRODUCTION } = require('./config');
 const configureRoutes = require('./routes');
-const { setupDatabase } = require('./db');
 
 async function initializeApp() {
   try {
-    await setupDatabase();
     const app = express();
 
     app.use(cors());

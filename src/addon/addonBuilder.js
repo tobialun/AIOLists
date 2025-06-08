@@ -22,9 +22,6 @@ const getManifestCatalogName = (listId, originalName, customListNames) => {
 async function fetchListContent(listId, userConfig, skip = 0, genre = null, stremioCatalogType = 'all') {
   const catalogIdFromRequest = String(listId);
 
-  // THIS IS THE CORRECTED LOGIC
-  // If we are fetching a private Trakt list, we must first initialize the API
-  // to ensure the userConfig is hydrated with the token from the DB.
   if (catalogIdFromRequest.startsWith('trakt_') && !catalogIdFromRequest.startsWith('traktpublic_')) {
     await initTraktApi(userConfig);
   }

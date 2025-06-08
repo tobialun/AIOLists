@@ -14,7 +14,6 @@ const staticGenres = [
 const defaultConfig = {
   apiKey: '',
   rpdbApiKey: '',
-  traktUuid: '',
   traktAccessToken: '',
   traktRefreshToken: '',
   traktExpiresAt: null,
