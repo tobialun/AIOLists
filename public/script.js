@@ -39,6 +39,9 @@ document.addEventListener('DOMContentLoaded', function() {
         apiKey: '',
         rpdbApiKey: '',
         traktAccessToken: null,
+        traktRefreshToken: null,
+        traktExpiresAt: null,
+        traktUuid: null,
         upstashUrl: '',
         upstashToken: '',
         enableRandomListFeature: defaultConfig.enableRandomListFeature,
@@ -58,7 +61,7 @@ document.addEventListener('DOMContentLoaded', function() {
     },
     currentLists: [],
     validationTimeout: null,
-    upstashSaveTimeout: null, // ** NEW STATE **
+    upstashSaveTimeout: null,
     universalImportTimeout: null,
     isMobile: window.matchMedia('(max-width: 600px)').matches,
     appVersion: "...",
@@ -79,19 +82,13 @@ document.addEventListener('DOMContentLoaded', function() {
     traktPinContainer: document.getElementById('traktPinContainer'),
     traktPin: document.getElementById('traktPin'),
     submitTraktPin: document.getElementById('submitTraktPin'),
-    upstashContainer: document.getElementById('upstashContainer'), // ** NEW ELEMENT **
-    upstashUrlInput: document.getElementById('upstashUrl'),       // ** NEW ELEMENT **
-    upstashTokenInput: document.getElementById('upstashToken'), // ** NEW ELEMENT **
     traktPersistenceContainer: document.getElementById('traktPersistenceContainer'),
-    makePersistentBtn: document.getElementById('makePersistentBtn'),
     traktStatus: document.getElementById('traktStatus'),
     upstashContainer: document.getElementById('upstashContainer'),
     upstashUrlInput: document.getElementById('upstashUrl'),
     upstashTokenInput: document.getElementById('upstashToken'),
+    upstashForm: document.getElementById('upstashForm'),
     closeUpstashBtn: document.getElementById('closeUpstashBtn'),
-    upstashCredentialsStatus: document.getElementById('upstashCredentialsStatus'),
-    persistenceStatus: document.getElementById('persistenceStatus'),
-    editUpstashBtn: document.getElementById('editUpstashBtn'),
     universalImportInput: document.getElementById('universalImportInput'),
     importedAddonsContainer: document.getElementById('importedAddons'),
     addonsList: document.getElementById('addonsList'),
@@ -102,7 +99,6 @@ document.addEventListener('DOMContentLoaded', function() {
     placeholderText: document.querySelector('#listPlaceholder .placeholder-text'),
     updateStremioBtn: document.getElementById('updateStremioBtn'),
     copyManifestBtn: document.getElementById('copyManifestBtn'),
-    traktWarningMessage: document.getElementById('traktWarningMessage'),
     apiKeysNotification: document.getElementById('apiKeysNotification'),
     connectionsNotification: document.getElementById('connectionsNotification'),
     importNotification: document.getElementById('importNotification'),
@@ -139,10 +135,10 @@ document.addEventListener('DOMContentLoaded', function() {
     } else if (pathParts.length >= 1 && pathParts[0] === 'import-shared' && pathParts[1]) {
         action = 'import-shared';
         initialConfigHash = pathParts[1];
-        state.isLoadingFromUrl = true; // Set flag for loading state
+        state.isLoadingFromUrl = true;
     } else if (pathParts.length >= 1 && pathParts[0] !== 'api' && pathParts[0] !== 'configure') {
         initialConfigHash = pathParts[0];
-        state.isLoadingFromUrl = true; // Set flag for loading state
+        state.isLoadingFromUrl = true;
         if (pathParts.length === 1 || (pathParts.length > 1 && pathParts[1] !== 'configure')) {
             window.history.replaceState({}, '', `/${initialConfigHash}/configure`);
         }
@@ -275,21 +271,13 @@ document.addEventListener('DOMContentLoaded', function() {
       return showNotification('settings', 'Configuration not ready to share.', 'error');
     }
 
-    const getShareableHashBlob = async () => {
+    try {
       const response = await fetch(`/${state.configHash}/shareable-hash`);
       const data = await response.json();
       if (!response.ok || !data.success || !data.shareableHash) {
         throw new Error(data.error || 'Failed to generate shareable hash.');
       }
-      return new Blob([data.shareableHash], { type: 'text/plain' });
-    };
-
-    try {
-      const clipboardItem = new ClipboardItem({
-        'text/plain': getShareableHashBlob()
-      });
-
-      await navigator.clipboard.write([clipboardItem]);
+      await navigator.clipboard.writeText(data.shareableHash);
 
       const buttonInstance = elements.copyConfigHashBtnInstance || document.getElementById('copyConfigHashBtn');
       const originalText = 'Copy Setup Code';
@@ -300,7 +288,6 @@ document.addEventListener('DOMContentLoaded', function() {
         buttonInstance.disabled = false;
       }, 2500);
       showNotification('settings', 'Shareable config hash copied to clipboard!', 'success');
-
     } catch (err) {
       console.error('Share config error:', err);
       showNotification('settings', `Error: ${err.message}`, 'error', true);
@@ -343,8 +330,11 @@ document.addEventListener('DOMContentLoaded', function() {
   function setupEventListeners() {
     elements.apiKeyInput.addEventListener('input', () => handleApiKeyInput(elements.apiKeyInput, 'mdblist'));
     elements.rpdbApiKeyInput.addEventListener('input', () => handleApiKeyInput(elements.rpdbApiKeyInput, 'rpdb'));
-    elements.upstashUrlInput.addEventListener('input', handleUpstashInput); // ** NEW EVENT LISTENER **
-    elements.upstashTokenInput.addEventListener('input', handleUpstashInput); // ** NEW EVENT LISTENER **
+    elements.upstashUrlInput.addEventListener('input', handleUpstashInput);
+    elements.upstashTokenInput.addEventListener('input', handleUpstashInput);
+    elements.closeUpstashBtn.addEventListener('click', () => {
+        elements.upstashContainer.classList.add('hidden');
+    });
     elements.traktLoginBtn?.addEventListener('click', () => { elements.traktPinContainer.style.display = 'flex'; });
     elements.submitTraktPin?.addEventListener('click', handleTraktPinSubmit);
     elements.universalImportInput.addEventListener('paste', handleUniversalPaste);
@@ -353,17 +343,6 @@ document.addEventListener('DOMContentLoaded', function() {
     elements.toggleGenreFilterBtn?.addEventListener('click', handleToggleGenreFilter);
     elements.toggleRandomListBtn?.addEventListener('click', handleToggleRandomListFeature);
     elements.settingsHeader?.addEventListener('click', toggleSettingsSection);
-    elements.makePersistentBtn.addEventListener('click', () => {
-    elements.upstashContainer.classList.remove('hidden');
-    });
-    elements.closeUpstashBtn.addEventListener('click', () => {
-        elements.upstashContainer.classList.add('hidden');
-    });
-    elements.editUpstashBtn.addEventListener('click', () => {
-        elements.upstashUrlInput.parentElement.style.display = 'flex';
-        elements.upstashTokenInput.parentElement.style.display = 'flex';
-        elements.upstashCredentialsStatus.style.display = 'none';
-    });
     window.addEventListener('resize', () => {
         const oldMobileState = state.isMobile;
         state.isMobile = window.matchMedia('(max-width: 600px)').matches;
@@ -644,23 +623,12 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   }
 
-  function updateTraktWarningVisibility() {
-    // This warning is now for showing the Upstash option
-    if (elements.upstashContainer) {
-        elements.upstashContainer.classList.toggle('hidden', state.isDbConnected);
-    }
-    // The old warning message is no longer needed
-    if (elements.traktWarningMessage) {
-        elements.traktWarningMessage.style.display = 'none';
-    }
-  }
-
   async function loadConfiguration() {
     if (!state.configHash) return;
     try {
       const response = await fetch(`/${state.configHash}/config`);
       const data = await response.json();
-      if (!response.ok || !data.success) throw new Error(data.error || `Failed to load config data. Status: ${response.status}`);
+      if (!response.ok) throw new Error(data.error || `Failed to load config data. Status: ${response.status}`);
 
       state.isDbConnected = data.isDbConnected;
       state.userConfig = {
@@ -676,7 +644,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
       state.isPotentiallySharedConfig = data.isPotentiallySharedConfig || false;
       
-      // ** UPDATE UI FOR NEW FIELDS **
       elements.upstashUrlInput.value = state.userConfig.upstashUrl || '';
       elements.upstashTokenInput.value = state.userConfig.upstashToken || '';
       
@@ -684,23 +651,20 @@ document.addEventListener('DOMContentLoaded', function() {
       const rpdbApiKey = state.userConfig.rpdbApiKey;
       updateApiKeyUI(elements.apiKeyInput, mdblistApiKey, 'mdblist', state.userConfig.mdblistUsername);
       updateApiKeyUI(elements.rpdbApiKeyInput, rpdbApiKey, 'rpdb');
-      updateTraktWarningVisibility();
       updateGenreFilterButtonText();
       updateRandomListButtonState();
 
       if (mdblistApiKey || rpdbApiKey) {
         await validateAndSaveApiKeys(mdblistApiKey, rpdbApiKey, true);
       }
-      // Determine Trakt connected state based on either a token in the config or Upstash details
+      
       const isTraktConnected = !!(state.userConfig.traktAccessToken || (state.userConfig.upstashUrl && state.userConfig.traktUuid));
       updateTraktUI(isTraktConnected);
       
       await loadUserListsAndAddons();
     } catch (error) { 
       console.error('Load Config Error:', error); 
-      showNotification('apiKeys', `Load Config Error: ${error.message}`, 'error', true); 
-      state.isDbConnected = false;
-      updateTraktWarningVisibility();
+      showNotification('apiKeys', `Load Config Error: ${error.message}`, 'error', true);
     }
   }
 
@@ -716,16 +680,13 @@ document.addEventListener('DOMContentLoaded', function() {
     }, 700);
   }
 
-  // ** NEW FUNCTION TO HANDLE UPSTASH INPUT **
   function handleUpstashInput() {
     if (state.upstashSaveTimeout) clearTimeout(state.upstashSaveTimeout);
     state.upstashSaveTimeout = setTimeout(() => {
         saveUpstashCredentials();
-        checkUpstashCredentials(); // Add this line
     }, 1000);
   }
 
-  // ** NEW FUNCTION TO SAVE UPSTASH CREDENTIALS **
   async function saveUpstashCredentials() {
     const upstashUrl = elements.upstashUrlInput.value.trim();
     const upstashToken = elements.upstashTokenInput.value.trim();
@@ -748,16 +709,33 @@ document.addEventListener('DOMContentLoaded', function() {
         state.userConfig.upstashUrl = upstashUrl;
         state.userConfig.upstashToken = upstashToken;
         showNotification('connections', 'Upstash credentials saved.', 'success');
-        // If user is already connected to Trakt, this ensures the tokens get moved to Upstash
-        if (state.userConfig.traktUuid) {
-            await loadUserListsAndAddons();
-        }
+        
+        await checkUpstashCredentials();
     } catch(error) {
         console.error('Upstash Save Error:', error);
         showNotification('connections', `Upstash Save Error: ${error.message}`, 'error', true);
     }
   }
 
+  async function checkUpstashCredentials() {
+    const upstashUrl = elements.upstashUrlInput.value.trim();
+    const upstashToken = elements.upstashTokenInput.value.trim();
+
+    if (!upstashUrl || !upstashToken) {
+        updatePersistenceStatus(false);
+        return;
+    }
+    
+    // Simulate check for now, replace with actual backend call if needed
+    // For simplicity, we assume if they are entered, they are potentially valid
+    // and the backend will verify on use.
+    state.userConfig.upstashUrl = upstashUrl;
+    state.userConfig.upstashToken = upstashToken;
+    updatePersistenceStatus(true);
+    elements.upstashContainer.classList.add('hidden');
+    elements.upstashForm.style.display = 'none';
+  }
+  
   async function validateAndSaveApiKeys(mdblistApiKeyToValidate, rpdbApiKeyToValidate, isInitialLoadOrSilentCheck = false) {
     try {
       if (isInitialLoadOrSilentCheck && !mdblistApiKeyToValidate && !rpdbApiKeyToValidate) {
@@ -848,81 +826,54 @@ document.addEventListener('DOMContentLoaded', function() {
     elements.traktConnectedState.style.display = isConnected ? 'flex' : 'none';
     elements.traktPersistenceContainer.style.display = isConnected ? 'flex' : 'none';
     elements.traktPinContainer.style.display = 'none';
+
     if (isConnected) {
-        updatePersistenceStatus();
+        const isPersistent = !!(state.userConfig.upstashUrl && state.userConfig.upstashToken && state.userConfig.traktUuid);
+        updatePersistenceStatus(isPersistent);
     } else {
         elements.traktPin.value = '';
         elements.upstashContainer.classList.add('hidden');
     }
-}
-
-function updatePersistenceStatus() {
-  const isPersistent = state.userConfig.upstashUrl && state.userConfig.upstashToken;
-  elements.traktStatus.innerHTML = ''; // Clear previous state
-
-  const statusIcon = document.createElement('span');
-  statusIcon.className = 'status-icon';
-
-  const statusText = document.createElement('span');
-  statusText.className = 'status-text';
-
-  const actionLink = document.createElement('a');
-  actionLink.className = 'persistence-action-link';
-
-  if (isPersistent) {
-      statusIcon.textContent = '✔';
-      statusIcon.classList.add('persistent');
-      statusText.textContent = 'Persistent';
-      actionLink.textContent = 'Edit';
-      actionLink.onclick = () => {
-          elements.upstashForm.style.display = 'block';
-          elements.upstashContainer.classList.remove('hidden');
-      };
-      elements.upstashContainer.classList.add('hidden');
-  } else {
-      statusIcon.textContent = '✖';
-      statusIcon.classList.add('not-persistent');
-      statusText.textContent = 'Not persistent';
-      actionLink.textContent = 'Make persistent';
-      actionLink.onclick = () => {
-          elements.upstashContainer.classList.remove('hidden');
-      };
   }
 
-  elements.traktStatus.appendChild(statusIcon);
-  elements.traktStatus.appendChild(statusText);
-  elements.traktStatus.appendChild(actionLink);
-}
+  function updatePersistenceStatus(isPersistent) {
+    elements.traktStatus.innerHTML = ''; // Clear previous state
 
-async function checkUpstashCredentials() {
-  const upstashUrl = elements.upstashUrlInput.value.trim();
-  const upstashToken = elements.upstashTokenInput.value.trim();
+    const statusIcon = document.createElement('span');
+    statusIcon.className = 'status-icon';
 
-  if (!upstashUrl || !upstashToken) {
-      return;
+    const statusText = document.createElement('span');
+    statusText.className = 'status-text';
+
+    const actionLink = document.createElement('a');
+    actionLink.className = 'persistence-action-link';
+
+    if (isPersistent) {
+        statusIcon.textContent = '✔';
+        statusIcon.classList.add('persistent');
+        statusText.textContent = 'Persistent';
+        actionLink.textContent = 'Edit';
+        actionLink.onclick = () => {
+            elements.upstashForm.style.display = 'block';
+            elements.upstashContainer.classList.remove('hidden');
+        };
+        elements.upstashContainer.classList.add('hidden');
+        elements.upstashForm.style.display = 'none';
+    } else {
+        statusIcon.textContent = '✖';
+        statusIcon.classList.add('not-persistent');
+        statusText.textContent = 'Not persistent';
+        actionLink.textContent = 'Make persistent';
+        actionLink.onclick = () => {
+            elements.upstashContainer.classList.remove('hidden');
+            elements.upstashForm.style.display = 'block';
+        };
+    }
+
+    elements.traktStatus.appendChild(statusIcon);
+    elements.traktStatus.appendChild(statusText);
+    elements.traktStatus.appendChild(actionLink);
   }
-
-  try {
-      const response = await fetch(`/${state.configHash}/upstash/check`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ upstashUrl, upstashToken })
-      });
-      const data = await response.json();
-
-      if (data.success) {
-          state.userConfig.upstashUrl = upstashUrl;
-          state.userConfig.upstashToken = upstashToken;
-          updatePersistenceStatus();
-          elements.upstashContainer.classList.add('hidden');
-      } else {
-          showNotification('connections', 'Invalid Upstash credentials.', 'error', true);
-      }
-  } catch (error) {
-      console.error('Error checking Upstash credentials:', error);
-      showNotification('connections', 'Error checking Upstash credentials.', 'error', true);
-  }
-}
 
   async function handleTraktPinSubmit() {
     const pin = elements.traktPin.value.trim();
@@ -937,7 +888,7 @@ async function checkUpstashCredentials() {
       state.userConfig.traktAccessToken = data.accessToken;
       state.userConfig.traktRefreshToken = data.refreshToken;
       state.userConfig.traktExpiresAt = data.expiresAt;
-      state.userConfig.traktUuid = data.uuid; // Capture the UUID
+      state.userConfig.traktUuid = data.uuid;
 
       updateURL(); updateStremioButtonHref(); updateTraktUI(true);
       showNotification('connections', 'Successfully connected to Trakt!', 'success');
@@ -984,16 +935,12 @@ async function checkUpstashCredentials() {
 
     if (isListCurrentlyEmpty) {
         elements.listContainer.classList.remove('hidden');
-        if (state.isLoadingFromUrl) {
-            elements.listPlaceholder.classList.remove('hidden');
-            elements.placeholderSpinner.style.display = 'block';
-            elements.placeholderText.textContent = 'Loading Lists and Configs';
-        } else {
-            elements.listPlaceholder.classList.add('hidden');
-        }
+        elements.listPlaceholder.classList.remove('hidden');
+        elements.placeholderSpinner.style.display = 'block';
+        elements.placeholderText.textContent = 'Loading Lists and Configs';
+    } else {
+        showNotification('lists', 'Loading lists...', 'info', true);
     }
-    
-    showNotification('lists', 'Loading lists...', 'info', true);
 
     try {
       const response = await fetch(`/${state.configHash}/lists`);

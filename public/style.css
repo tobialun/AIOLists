@@ -842,19 +842,6 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
   align-items: center;
 }
 
-.close-btn {
-  background: none;
-  border: none;
-  font-size: 20px;
-  cursor: pointer;
-  color: #999;
-  transition: color 0.2s;
-}
-
-.close-btn:hover {
-  color: #f44336; /* Red on hover */
-}
-
 .persistence-action-link {
   color: #8E5AF7;
   text-decoration: none;
