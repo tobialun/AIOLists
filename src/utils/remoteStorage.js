@@ -31,7 +31,7 @@ async function saveTraktTokens(userConfig, tokens) {
             token: userConfig.upstashToken,
         });
 
-        await redis.set(`trakt:${userConfig.traktUuid}`, tokens, { ex: 90 * 24 * 60 * 60 });
+        await redis.set(`trakt:${userConfig.traktUuid}`, tokens);
     } catch (error) {
         console.error('Upstash Error: Failed to save Trakt tokens:', error.message);
     }

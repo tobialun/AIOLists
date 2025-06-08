@@ -342,24 +342,30 @@ module.exports = function(router) {
 
   router.post('/:configHash/upstash', async (req, res) => {
     try {
-      const { upstashUrl, upstashToken } = req.body;
+        const { upstashUrl, upstashToken } = req.body;
 
-      req.userConfig.upstashUrl = upstashUrl || '';
-      req.userConfig.upstashToken = upstashToken || '';
+        req.userConfig.upstashUrl = upstashUrl || '';
+        req.userConfig.upstashToken = upstashToken || '';
 
-      if (upstashUrl && upstashToken) {
-        req.userConfig.traktAccessToken = null;
-        req.userConfig.traktRefreshToken = null;
-        req.userConfig.traktExpiresAt = null;
-      }
-      
-      req.userConfig.lastUpdated = new Date().toISOString();
-      const newConfigHash = await compressConfig(req.userConfig);
-      manifestCache.clear();
-      res.json({ success: true, configHash: newConfigHash });
+        if (upstashUrl && upstashToken && req.userConfig.traktAccessToken && req.userConfig.traktUuid) {
+            const tokensToSave = {
+                accessToken: req.userConfig.traktAccessToken,
+                refreshToken: req.userConfig.traktRefreshToken,
+                expiresAt: req.userConfig.traktExpiresAt
+            };
+            await saveTraktTokens(req.userConfig, tokensToSave);
+            req.userConfig.traktAccessToken = null;
+            req.userConfig.traktRefreshToken = null;
+            req.userConfig.traktExpiresAt = null;
+        }
+        
+        req.userConfig.lastUpdated = new Date().toISOString();
+        const newConfigHash = await compressConfig(req.userConfig);
+        manifestCache.clear();
+        res.json({ success: true, configHash: newConfigHash });
     } catch (error) {
-      console.error('Error in /upstash:', error);
-      res.status(500).json({ error: 'Internal server error in /upstash' });
+        console.error('Error in /upstash:', error);
+        res.status(500).json({ error: 'Internal server error in /upstash' });
     }
   });
 

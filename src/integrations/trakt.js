@@ -70,7 +70,7 @@ async function initTraktApi(userConfig) {
       userConfig.traktRefreshToken = tokens.refreshToken;
       userConfig.traktExpiresAt = tokens.expiresAt;
 
-      if (Date.now() >= userConfig.traktExpiresAt) {
+      if (Date.now() >= new Date(userConfig.traktExpiresAt).getTime()) {
         return await refreshTraktToken(userConfig);
       }
       return true;
@@ -79,7 +79,7 @@ async function initTraktApi(userConfig) {
 
   // Fallback for non-persistent flow (token is in the config hash)
   if (userConfig.traktAccessToken && userConfig.traktExpiresAt) {
-    if (new Date() >= new Date(userConfig.traktExpiresAt)) {
+    if (Date.now() >= new Date(userConfig.traktExpiresAt).getTime()) {
       return await refreshTraktToken(userConfig);
     }
     return true;
@@ -114,7 +114,7 @@ async function authenticateTrakt(code, userConfig) {
       uuid,
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
-      expiresAt: new Date(tokens.expiresAt).toISOString(),
+      expiresAt: tokens.expiresAt,
     };
   }
   throw new Error('Failed to authenticate with Trakt');
