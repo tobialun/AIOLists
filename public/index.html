@@ -71,7 +71,6 @@
         <h2>Connections</h2>
         <span id="connectionsNotification" class="section-notification"></span>
       </div>
-      <p class="info-text">Trakt profile imports will break after 1 day, import your recommended/trending/private lists from the <a href="https://trakt.dexter21767.com/configure/" target="_blank" rel="noopener noreferrer">Trakt addon</a> for now, if your lists are public you can still directly import them through the URL.</p>
       <div class="connections-row">
         <div id="traktConnection">
           <a href="/api/trakt/login" id="traktLoginBtn" class="trakt-login-btn" target="_blank">
@@ -89,7 +88,27 @@
         </div>
       </div>
       <div id="traktStatus"></div>
-    </div>
+      
+      <div id="upstashContainer" class="hidden">
+        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+        <p class="info-text">
+            For persistent Trakt connections provide keys from a free Upstash Redis database.
+            <a href="https://upstash.com/" target="_blank" rel="noopener noreferrer" class="label-link-icon">Get Keys Here</a>
+        </p>
+        <div class="form-group">
+            <label for="upstashUrl">Upstash URL:</label>
+            <div class="input-container">
+                <input type="text" id="upstashUrl" placeholder="Enter your Upstash REST URL">
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="upstashToken">Upstash Token:</label>
+            <div class="input-container">
+                <input type="password" id="upstashToken" placeholder="Enter your Upstash REST Token">
+            </div>
+        </div>
+      </div>
+      </div>
 
     <div class="import-section api-section">
       <div class="section-header">
@@ -139,6 +158,10 @@
         <div class="legend-item"><span class="eye-icon eye-open-svg"></span><span class="legend-text">Show/Hide from Home View</span></div>
         <div class="legend-item"><span class="legend-icon-text">❌</span><span class="legend-text">Remove</span></div>
       </div>
+      <div id="listPlaceholder" class="list-placeholder hidden">
+        <div class="spinner"></div>
+        <span class="placeholder-text"></span>
+      </div>    
       <ul id="listItems"></ul>
     </div>
 
