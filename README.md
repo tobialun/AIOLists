@@ -1,22 +1,28 @@
-# AIOLists Stremio Addon
+# <img src="https://i.imgur.com/GvUktU5.png" width="30"/> AIOLists Stremio Addon
 
-A Stremio addon to manage all your lists in one place, with powerful import, customization, and integration features.
+AIOLists is a stateless open source list management addon for Stremio. The project originated from this [post](https://www.reddit.com/r/StremioAddons/comments/1kbfk67/concept_for_an_aiolist_addon/), since then I have continued development to add features I would personally want in a list management addon, and fixed bugs shared by the users.
 
-#✨ Features
+## ✨ Features
 - **Unified List Management:** Import and manage lists from various sources in one place.
 - **MDBList & Trakt URL Imports:** Directly import lists by pasting URLs from MDBList.com and Trakt.tv.
 - **Trakt Integration:** Connect your Trakt account to access personal lists, watchlist, recommendations, trending, and popular content.
 - **External Addon Importing:** Import lists from other Stremio addons, should support most popular ones.
 - **Sorting:** If the sorting option exists it's there.
 - **List Customization:**
+    - **Change type:** Instead of movies/series change it to whatever you want, even make it blank.
     - **Reorder:** Drag and drop to arrange lists as you like.
     - **Rename:** Give custom names to any list for better organization.
     - **Merge/Split:** If a list contains both movies and series you can merge it into a single Stremio row so it doesn't take up more space than it needs to.
+- **Hide/Show from homeview:** Hide lists from homeview, while still accessing them through the Discover tab.
 - **Instant Watchlist Updates:** Fetches watchlist content on load.
 - **RPDB Support:** Optional RatingPosterDB (RPDB) integration for enhanced poster images across all your lists (requires your own RPDB API key).
 - **Configurable Genre Filtering:** If you add too many list you might hit the 8kb manifest size limit. By disabling genre filtering the manifest size should half so you can have more lists.
 - **Discovery Lists:** Randomly selected MDBList from a set list of users, a new random list is delivered everytime you refresh the catalog.
 - **Share Your Setup:** Generate a shareable hash of your AIOLists configuration (list order, names, imported addons) to share with others.
+
+## Trakt Persistance
+
+Due to the stateless nature of this addon Trakt keys can't automatically update when they expire. I have added an option to make Trakt persistant through Upstash. You can create a free account on there, create a Redis database and input the UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN given in the 'REST API' section. Also make sure the TTL is Marked as Persist in 'Data Browser' tab.
 
 ## Deployment
 

@@ -829,11 +829,11 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 }
 
 .status-icon.not-persistent {
-  background-color: #f44336; /* Red */
+  background-color: #f44336;
 }
 
 .status-icon.persistent {
-  background-color: #4CAF50; /* Green */
+  background-color: #4CAF50;
 }
 
 .upstash-header {

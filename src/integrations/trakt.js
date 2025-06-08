@@ -109,15 +109,7 @@ async function authenticateTrakt(code, userConfig) {
     };
 
     const uuid = await getTraktUserUuid(tokens.accessToken);
-    userConfig.traktUuid = uuid;
-
-    // If user provided Upstash credentials, save the token there
-    if (userConfig.upstashUrl && userConfig.upstashToken) {
-        await saveTraktTokens(userConfig, tokens);
-        return { uuid };
-    }
     
-    // Otherwise, return tokens for the non-persistent (URL hash) flow
     return {
       uuid,
       accessToken: tokens.accessToken,

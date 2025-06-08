@@ -890,20 +890,29 @@ document.addEventListener('DOMContentLoaded', function() {
     if (!pin) return showNotification('connections', 'Please enter your Trakt PIN', 'error');
     try {
       const response = await fetch(`/${state.configHash}/trakt/auth`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: pin }) });
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ code: pin }) 
+      });
       const data = await response.json();
-      if (!response.ok || !data.success) throw new Error(data.error || data.details || 'Trakt auth failed');
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || data.details || 'Trakt auth failed');
+      }
 
-      state.configHash = data.configHash;
-      state.userConfig.traktAccessToken = data.accessToken;
-      state.userConfig.traktRefreshToken = data.refreshToken;
-      state.userConfig.traktExpiresAt = data.expiresAt;
-      state.userConfig.traktUuid = data.uuid;
-
-      updateURL(); updateStremioButtonHref(); updateTraktUI(true);
-      showNotification('connections', 'Successfully connected to Trakt!', 'success');
-      await loadUserListsAndAddons();
-    } catch (error) { console.error('Trakt Error:', error); showNotification('connections', `Trakt Error: ${error.message}`, 'error', true); }
+      if (data.configHash) {
+          state.configHash = data.configHash;
+          updateURL();
+          updateStremioButtonHref();
+          showNotification('connections', 'Successfully connected to Trakt! Reloading...', 'success');
+          await loadConfiguration(); 
+      } else {
+          throw new Error("Received success from server but no new config hash.");
+      }
+      
+    } catch (error) { 
+      console.error('Trakt Error:', error); 
+      showNotification('connections', `Trakt Error: ${error.message}`, 'error', true); 
+    }
   }
 
   async function handleListUrlImport(mockListUrlInput) {

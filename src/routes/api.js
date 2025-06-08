@@ -10,6 +10,7 @@ const { validateRPDBKey } = require('../utils/posters');
 const { initTraktApi, authenticateTrakt, getTraktAuthUrl, fetchTraktLists, fetchPublicTraktListDetails } = require('../integrations/trakt');
 const { fetchAllLists: fetchAllMDBLists, validateMDBListKey, extractListFromUrl: extractMDBListFromUrl } = require('../integrations/mdblist');
 const { importExternalAddon: importExtAddon } = require('../integrations/externalAddons');
+const { saveTraktTokens } = require('../utils/remoteStorage');
 
 const manifestCache = new Cache({ defaultTTL: 1 * 60 * 1000 });
 
@@ -367,20 +368,40 @@ module.exports = function(router) {
         const { code } = req.body;
         if (!code) return res.status(400).json({ error: 'Authorization code required' });
 
+        // Step 1: Authenticate and get all token information back.
         const traktAuthResult = await authenticateTrakt(code, req.userConfig);
         
+        // Step 2: Check if Upstash is configured and handle the logic here.
         if (req.userConfig.upstashUrl && req.userConfig.upstashToken) {
+            // Logic for persistent storage in Redis
+            
+            // a) Update the user config in memory with the new UUID.
             req.userConfig.traktUuid = traktAuthResult.uuid;
+
+            // b) Prepare the token object that will be saved to Redis.
+            const tokensToSave = {
+                accessToken: traktAuthResult.accessToken,
+                refreshToken: traktAuthResult.refreshToken,
+                expiresAt: traktAuthResult.expiresAt
+            };
+
+            // c) Save to Redis using the now-complete userConfig.
+            await saveTraktTokens(req.userConfig, tokensToSave);
+
+            // d) Clear the local tokens from the config that gets hashed into the URL.
             req.userConfig.traktAccessToken = null;
             req.userConfig.traktRefreshToken = null;
             req.userConfig.traktExpiresAt = null;
+
         } else {
+            // Logic for non-persistent storage (tokens in URL hash).
             req.userConfig.traktUuid = traktAuthResult.uuid;
             req.userConfig.traktAccessToken = traktAuthResult.accessToken;
             req.userConfig.traktRefreshToken = traktAuthResult.refreshToken;
             req.userConfig.traktExpiresAt = traktAuthResult.expiresAt;
         }
 
+        // Step 3: Generate the new config hash and send the response.
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
         manifestCache.clear();
@@ -759,16 +780,16 @@ module.exports = function(router) {
 
   router.post('/:configHash/lists/merge', async (req, res) => {
     try {
+
+      if (req.userConfig.upstashUrl) {
+        await initTraktApi(req.userConfig);
+      }
+
       const { listId, merged } = req.body;
       if (!listId || typeof merged !== 'boolean') {
         return res.status(400).json({ error: 'List ID (manifestId) and merge preference (boolean) required' });
       }
-      
-      // ** THE FIX **
-      if (req.userConfig.upstashUrl) {
-        await initTraktApi(req.userConfig);
-      }
-  
+    
       let canBeMerged = false;
       const listInfoFromMetadata = req.userConfig.listsMetadata?.[String(listId)];
       if (listInfoFromMetadata && listInfoFromMetadata.hasMovies && listInfoFromMetadata.hasShows && listInfoFromMetadata.canBeMerged !== false) {
@@ -788,7 +809,7 @@ module.exports = function(router) {
         if (req.userConfig.mergedLists) {
           delete req.userConfig.mergedLists[String(listId)];
           if (Object.keys(req.userConfig.mergedLists).length === 0) {
-            delete req.userConfig.mergedLists; // Optional: remove empty object
+            delete req.userConfig.mergedLists;
           }
         }
       } else { // User wants to split (merged === false)
@@ -809,7 +830,7 @@ module.exports = function(router) {
       res.status(500).json({ error: 'Failed to update list merge preference' });
     }
   });
-    
+      
   router.post('/config/create', async (req, res) => {
     try {
       let newConfig = { ...defaultConfig, listOrder: [], hiddenLists: [], removedLists: [], customListNames: {}, customMediaTypeNames: {}, mergedLists: {}, sortPreferences: {}, importedAddons: {}, listsMetadata: {}, enableRandomListFeature: false, lastUpdated: new Date().toISOString() };

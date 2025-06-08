@@ -21,7 +21,7 @@ async function getTraktTokens(userConfig) {
 }
 
 async function saveTraktTokens(userConfig, tokens) {
-    if (!userConfig.upstashUrl || !user.Config.upstashToken || !userConfig.traktUuid) {
+    if (!userConfig.upstashUrl || !userConfig.upstashToken || !userConfig.traktUuid) {
         return;
     }
 
