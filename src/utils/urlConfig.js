@@ -100,6 +100,9 @@ function createShareableConfig(config) {
   delete shareableConfig.mdblistUsername; 
   delete shareableConfig.availableSortOptions;
   delete shareableConfig.traktSortOptions;
+  delete shareableConfig.traktUuid;
+  delete shareableConfig.upstashUrl;
+  delete shareableConfig.upstashToken;
 
   return shareableConfig;
 }

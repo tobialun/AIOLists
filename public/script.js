@@ -658,6 +658,16 @@ document.addEventListener('DOMContentLoaded', function() {
         await validateAndSaveApiKeys(mdblistApiKey, rpdbApiKey, true);
       }
       
+      const isTraktTokenExpired = state.userConfig.traktExpiresAt && new Date() >= new Date(state.userConfig.traktExpiresAt);
+
+      if (isTraktTokenExpired && !state.userConfig.upstashUrl) {
+          // If the token is expired and there's no Upstash for persistence/refresh, treat as disconnected
+          state.userConfig.traktAccessToken = null;
+          state.userConfig.traktRefreshToken = null;
+          state.userConfig.traktExpiresAt = null;
+          showNotification('connections', 'Trakt connection expired. Please reconnect.', 'error', true);
+      }
+
       const isTraktConnected = !!(state.userConfig.traktAccessToken || (state.userConfig.upstashUrl && state.userConfig.traktUuid));
       updateTraktUI(isTraktConnected);
       

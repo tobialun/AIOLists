@@ -21,7 +21,7 @@ async function getTraktTokens(userConfig) {
 }
 
 async function saveTraktTokens(userConfig, tokens) {
-    if (!userConfig.upstashUrl || !userConfig.upstashToken || !userConfig.traktUuid) {
+    if (!userConfig.upstashUrl || !user.Config.upstashToken || !userConfig.traktUuid) {
         return;
     }
 
@@ -31,8 +31,7 @@ async function saveTraktTokens(userConfig, tokens) {
             token: userConfig.upstashToken,
         });
 
-        // Store the tokens object, setting it to expire in 90 days (the validity of a Trakt refresh token)
-        await redis.set(`trakt:${userConfig.traktUuid}`, tokens, { ex: 1 * 24 * 60 * 60 });
+        await redis.set(`trakt:${userConfig.traktUuid}`, tokens, { ex: 90 * 24 * 60 * 60 });
     } catch (error) {
         console.error('Upstash Error: Failed to save Trakt tokens:', error.message);
     }
