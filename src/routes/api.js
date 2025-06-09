@@ -798,7 +798,7 @@ module.exports = function(router) {
     
       let canBeMerged = false;
       const listInfoFromMetadata = req.userConfig.listsMetadata?.[String(listId)];
-      if (listInfoFromMetadata && listInfoFromMetadata.hasMovies && listInfoFromMetadata.hasShows && listInfoFromMetadata.canBeMerged !== false) {
+      if (listInfoFromMetadata && listInfoFromMetadata.hasMovies && listInfoFromMetadata.hasShows) {
           canBeMerged = true;
       } else {
           const listInfoFromImported = req.userConfig.importedAddons?.[String(listId)];
@@ -931,7 +931,6 @@ module.exports = function(router) {
             isHidden: (req.userConfig.hiddenLists || []).includes(manifestListId),
             hasMovies: true,
             hasShows: true,
-            canBeMerged: false,
             isRandomCatalog: true, 
             tag: '🎲', 
             tagImage: null,
@@ -948,39 +947,26 @@ module.exports = function(router) {
         const originalListIdStr = String(list.id);
         let manifestListId = originalListIdStr;
         let tagType = 'L'; 
-        let determinedHasMovies, determinedHasShows, determinedCanBeMergedFromSource;
+        let determinedHasMovies, determinedHasShows;
     
         if (list.source === 'mdblist') {
           const listTypeSuffix = list.listType || 'L';
           manifestListId = list.id === 'watchlist' ? `aiolists-watchlist-W` : `aiolists-${list.id}-${listTypeSuffix}`;
           tagType = listTypeSuffix;
-  
-          if (list.id === 'watchlist') {
-              determinedHasMovies = true;
-              determinedHasShows = true;
-              determinedCanBeMergedFromSource = true; 
-          } else {
-              const moviesCount = parseInt(list.movies) || 0;
-              const showsCount = parseInt(list.shows) || 0;
-              determinedHasMovies = moviesCount > 0;
-              determinedHasShows = showsCount > 0;
-              const itemsCount = parseInt(list.items) || 0;
-              if (itemsCount > 0 && !determinedHasMovies && !determinedHasShows) {
-                  const mediatype = list.mediatype;
-                  if (mediatype === 'movie') { determinedHasMovies = true; determinedHasShows = false; }
-                  else if (mediatype === 'show' || mediatype === 'series') { determinedHasMovies = false; determinedHasShows = true; }
-                  else if (!mediatype || mediatype === '') { determinedHasMovies = true; determinedHasShows = true; }
-              } else if (!determinedHasMovies && !determinedHasShows && (!list.mediatype || list.mediatype === '')) {
-                  determinedHasMovies = true;
-                  determinedHasShows = true;
-              }
-              determinedCanBeMergedFromSource = (list.dynamic === false || !list.mediatype || list.mediatype === '');
+          
+          let metadata = req.userConfig.listsMetadata[manifestListId] || {};
+          determinedHasMovies = metadata.hasMovies;
+          determinedHasShows = metadata.hasShows;
+
+          if (typeof determinedHasMovies !== 'boolean' || typeof determinedHasShows !== 'boolean') {
+            const tempContent = await fetchListContent(manifestListId, req.userConfig, 0, null, 'all');
+            determinedHasMovies = tempContent?.hasMovies || false;
+            determinedHasShows = tempContent?.hasShows || false;
           }
+
           req.userConfig.listsMetadata[manifestListId] = {
-              ...(req.userConfig.listsMetadata[manifestListId] || {}),
               hasMovies: determinedHasMovies,
               hasShows: determinedHasShows,
-              canBeMerged: determinedCanBeMergedFromSource && determinedHasMovies && determinedHasShows,
               lastChecked: new Date().toISOString()
           };
   
@@ -990,7 +976,6 @@ module.exports = function(router) {
           let metadata = req.userConfig.listsMetadata[manifestListId] || {};
           determinedHasMovies = metadata.hasMovies === true;
           determinedHasShows = metadata.hasShows === true;
-          determinedCanBeMergedFromSource = true; 
   
           if ((typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean' || metadata.errorFetching) && req.userConfig.traktAccessToken) {
                 const tempUserConfigForFetch = { ...req.userConfig, rpdbApiKey: null };
@@ -1010,7 +995,6 @@ module.exports = function(router) {
                     ...metadata, 
                     hasMovies: determinedHasMovies, 
                     hasShows: determinedHasShows, 
-                    canBeMerged: determinedCanBeMergedFromSource && determinedHasMovies && determinedHasShows, 
                     lastChecked: new Date().toISOString(),
                     errorFetching: false
                 };
@@ -1019,20 +1003,18 @@ module.exports = function(router) {
                   ...metadata, 
                   hasMovies: determinedHasMovies, 
                   hasShows: determinedHasShows,
-                  canBeMerged: determinedCanBeMergedFromSource && determinedHasMovies && determinedHasShows, 
                   lastChecked: new Date().toISOString() 
               };
           }
       } else { 
           determinedHasMovies = false;
           determinedHasShows = false;
-          determinedCanBeMergedFromSource = false;
       }
   
       if (list.isWatchlist && list.source === 'mdblist') tagType = 'W';
       if (list.isTraktWatchlist) tagType = 'W';
       if (removedListsSet.has(manifestListId)) return null;
-      const actualCanBeMerged = determinedCanBeMergedFromSource && determinedHasMovies && determinedHasShows;
+      const actualCanBeMerged = determinedHasMovies && determinedHasShows;
       const isUserMerged = actualCanBeMerged ? (req.userConfig.mergedLists?.[manifestListId] !== false) : false;
       let defaultSort = { sort: (list.source === 'trakt') ? 'rank' : 'default', order: (list.source === 'trakt') ? 'asc' : 'desc' };
       if (list.source === 'trakt' && list.isTraktWatchlist) { defaultSort = { sort: 'added', order: 'desc' }; }
@@ -1061,11 +1043,7 @@ module.exports = function(router) {
 
                 let urlImportHasMovies = addon.hasMovies;
                 let urlImportHasShows = addon.hasShows;
-                let urlImportCanBeMergedFromSource = true; // Default for URL imports
-                if (isMDBListUrlImport && typeof addon.dynamic === 'boolean' && typeof addon.mediatype !== 'undefined') {
-                    urlImportCanBeMergedFromSource = (addon.dynamic === false || !addon.mediatype || addon.mediatype === '');
-                }
-                const actualCanBeMergedForUrl = urlImportCanBeMergedFromSource && urlImportHasMovies && urlImportHasShows;
+                let actualCanBeMergedForUrl = urlImportHasMovies && urlImportHasShows;
                 const isUserMergedForUrl = actualCanBeMergedForUrl ? (req.userConfig.mergedLists?.[addonGroupId] !== false) : false;
                 
                 let tagType = 'A'; // Default for addon

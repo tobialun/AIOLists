@@ -1,3 +1,4 @@
+// src/addon/addonBuilder.js
 const { addonBuilder } = require('stremio-addon-sdk');
 const { fetchTraktListItems, fetchTraktLists, initTraktApi } = require('../integrations/trakt');
 const { fetchListItems: fetchMDBListItems, fetchAllLists: fetchAllMDBLists, fetchAllListsForUser } = require('../integrations/mdblist');
@@ -293,7 +294,7 @@ async function createAddon(userConfig) {
                     
                     const currentMetaForUpdate = userConfig.listsMetadata[currentListId] || {}; // Ensure listsMetadata exists
                     userConfig.listsMetadata[currentListId] = {
-                        ...currentMetaForUpdate, hasMovies: sourceHasMovies, hasShows: sourceHasShows, canBeMerged: true, lastChecked: new Date().toISOString()
+                        ...currentMetaForUpdate, hasMovies: sourceHasMovies, hasShows: sourceHasShows, lastChecked: new Date().toISOString()
                     };
                     delete userConfig.listsMetadata[currentListId].errorFetching;
                     success = true;
@@ -378,28 +379,24 @@ async function createAddon(userConfig) {
             originalId: originalMdbListId  
         };
 
-        let determinedHasMovies, determinedHasShows, determinedCanBeMergedFromSource;
+        let determinedHasMovies, determinedHasShows;
         if (originalMdbListId === 'watchlist') {
             determinedHasMovies = true;
             determinedHasShows = true;
-            determinedCanBeMergedFromSource = true; 
         } else {
             const moviesCount = parseInt(listInfo.movies) || 0;
             const showsCount = parseInt(listInfo.shows) || 0;
             determinedHasMovies = moviesCount > 0;
             determinedHasShows = showsCount > 0;
-            const itemsCount = parseInt(listInfo.items) || 0;
 
-            if (itemsCount > 0 && !determinedHasMovies && !determinedHasShows) {
+            if (moviesCount === 0 && showsCount === 0) {
                 const mediatype = listInfo.mediatype;
-                if (mediatype === 'movie') { determinedHasMovies = true; determinedHasShows = false; }
-                else if (mediatype === 'show' || mediatype === 'series') { determinedHasMovies = false; determinedHasShows = true; }
-                else if (!mediatype || mediatype === '') { determinedHasMovies = true; determinedHasShows = true; }
-            } else if (!determinedHasMovies && !determinedHasShows && (!listInfo.mediatype || listInfo.mediatype === '')) {
-                determinedHasMovies = true;
-                determinedHasShows = true;
+                if (mediatype === 'movie') {
+                    determinedHasMovies = true;
+                } else if (mediatype === 'show' || mediatype === 'series') {
+                    determinedHasShows = true;
+                }
             }
-            determinedCanBeMergedFromSource = (listInfo.dynamic === false || !listInfo.mediatype || listInfo.mediatype === '');
         }
 
         listDataForProcessing.hasMovies = determinedHasMovies;
@@ -410,7 +407,6 @@ async function createAddon(userConfig) {
             ...(userConfig.listsMetadata[fullManifestListId] || {}),
             hasMovies: determinedHasMovies,
             hasShows: determinedHasShows,
-            canBeMerged: determinedCanBeMergedFromSource && determinedHasMovies && determinedHasShows, // Actual mergeability
             lastChecked: new Date().toISOString()
         };
         

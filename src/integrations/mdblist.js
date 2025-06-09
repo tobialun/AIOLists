@@ -5,8 +5,8 @@ const { enrichItemsWithCinemeta } = require('../utils/metadataFetcher');
 
 // Helper function for delay
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-const MAX_RETRIES = 4; 
-const INITIAL_RETRY_DELAY_MS = 5000; 
+const MAX_RETRIES = 4;
+const INITIAL_RETRY_DELAY_MS = 5000;
 
 async function validateMDBListKey(apiKey) {
   if (!apiKey) return null;
@@ -23,8 +23,8 @@ async function fetchAllLists(apiKey) {
   if (!apiKey) return [];
   let allLists = [];
   const listEndpoints = [
-    { url: `https://api.mdblist.com/lists/user?apikey=${apiKey}`, type: 'L' }, // For authenticated user's lists
-    { url: `https://api.mdblist.com/external/lists/user?apikey=${apiKey}`, type: 'E' } // For authenticated user's external lists
+    { url: `https://api.mdblist.com/lists/user?apikey=${apiKey}`, type: 'L' },
+    { url: `https://api.mdblist.com/external/lists/user?apikey=${apiKey}`, type: 'E' }
   ];
 
   for (const endpoint of listEndpoints) {
@@ -46,12 +46,12 @@ async function fetchAllLists(apiKey) {
           await delay(retryDelay);
         } else {
           console.error(`Failed to fetch MDBList ${endpoint.type} lists after ${currentRetries} attempts.`);
-          break; 
+          break;
         }
       }
     }
     if (success && listEndpoints.indexOf(endpoint) < listEndpoints.length - 1) {
-      await delay(2000); 
+      await delay(2000);
     }
   }
   allLists.push({ id: 'watchlist', name: 'My Watchlist', listType: 'W', isWatchlist: true });
@@ -62,7 +62,7 @@ async function fetchAllLists(apiKey) {
 async function fetchAllListsForUser(apiKey, username) {
   if (!apiKey || !username) return [];
   let userLists = [];
-  
+
   // Fetch user's "standard" public lists
   try {
     // Using the path structure you confirmed works: /lists/user/{username}
@@ -95,47 +95,70 @@ async function fetchAllListsForUser(apiKey, username) {
 
   // Filter for public lists (MDBList API usually handles this, but an explicit check is good)
   // and ensure the list has items.
-  return userLists.filter(list => 
+  return userLists.filter(list =>
     (list.private === false || list.public === true) && list.items > 0 // Simplified check for public and ensure items
   );
 }
 
 
 function processMDBListApiResponse(data, isWatchlistUnified = false) {
-  if (!data || data.error) {
-    console.error('MDBList API error:', data?.error || 'No data received from MDBList');
-    return [];
-  }
-  let rawItems = [];
-
-  if (isWatchlistUnified && Array.isArray(data)) {
-    rawItems = data.map(item => ({
-        ...item,
-        type: (item.type === 'show' || item.mediatype === 'show' || item.media_type === 'show') ? 'series' : 'movie',
-        imdb_id: item.imdb_id || item.imdbid,
-        id: item.imdb_id || item.imdbid,
-    }));
-  } else {
-    if (Array.isArray(data.movies)) rawItems.push(...data.movies.map(m => ({ ...m, type: 'movie' })));
-    if (Array.isArray(data.shows)) rawItems.push(...data.shows.map(s => ({ ...s, type: 'series' })));
-    if (rawItems.length === 0) {
-      let itemsInput = [];
-      if (Array.isArray(data)) itemsInput = data;
-      else if (Array.isArray(data.items)) itemsInput = data.items;
-      else if (Array.isArray(data.results)) itemsInput = data.results;
-      rawItems = itemsInput.map(item => ({
-          ...item,
-          type: (item.type === 'show' || item.mediatype === 'show' || item.media_type === 'show') ? 'series' : 'movie'
-      }));
+    if (!data || data.error) {
+      console.error('MDBList API error:', data?.error || 'No data received from MDBList');
+      return { items: [], hasMovies: false, hasShows: false };
     }
-    rawItems = rawItems.map(item => ({
+  
+    let rawItems = [];
+    let hasMovies = false;
+    let hasShows = false;
+  
+    if (isWatchlistUnified && Array.isArray(data)) {
+      rawItems = data.map(item => {
+        const type = (item.type === 'show' || item.mediatype === 'show' || item.media_type === 'show') ? 'series' : 'movie';
+        if (type === 'movie') hasMovies = true;
+        if (type === 'series') hasShows = true;
+        return {
+          ...item,
+          type,
+          imdb_id: item.imdb_id || item.imdbid,
+          id: item.imdb_id || item.imdbid,
+        };
+      });
+    } else {
+      if (Array.isArray(data.movies) && data.movies.length > 0) {
+        rawItems.push(...data.movies.map(m => ({ ...m, type: 'movie' })));
+        hasMovies = true;
+      }
+      if (Array.isArray(data.shows) && data.shows.length > 0) {
+        rawItems.push(...data.shows.map(s => ({ ...s, type: 'series' })));
+        hasShows = true;
+      }
+  
+      if (rawItems.length === 0) {
+        let itemsInput = [];
+        if (Array.isArray(data)) itemsInput = data;
+        else if (Array.isArray(data.items)) itemsInput = data.items;
+        else if (Array.isArray(data.results)) itemsInput = data.results;
+  
+        rawItems = itemsInput.map(item => {
+          const type = (item.type === 'show' || item.mediatype === 'show' || item.media_type === 'show') ? 'series' : 'movie';
+          if (type === 'movie') hasMovies = true;
+          if (type === 'series') hasShows = true;
+          return {
+            ...item,
+            type
+          };
+        });
+      }
+    }
+  
+    const finalItems = rawItems.map(item => ({
       ...item,
       imdb_id: item.imdb_id || item.imdbid,
       id: item.imdb_id || item.imdbid,
-    }));
+    })).filter(item => item.imdb_id);
+  
+    return { items: finalItems, hasMovies, hasShows };
   }
-  return rawItems.filter(item => item.imdb_id);
-}
 
 async function fetchListItems(
     listId, // This will be the MDBList list ID (numeric) or slug
@@ -151,7 +174,7 @@ async function fetchListItems(
 ) {
   if (!apiKey) return null;
 
-  const MAX_ATTEMPTS_FOR_GENRE_FILTER = 1; 
+  const MAX_ATTEMPTS_FOR_GENRE_FILTER = 1;
   const MDBLIST_PAGE_LIMIT = ITEMS_PER_PAGE;
 
   let effectiveMdbListId = String(listId); // Ensure it's a string (could be numeric ID or slug)
@@ -162,9 +185,11 @@ async function fetchListItems(
   let allEnrichedGenreItems = [];
   let morePagesFromMdbList = true;
   let allItems = [];
+  let hasMovies = false;
+  let hasShows = false;
 
   // The usernameForRandomList parameter indicates we are fetching items for a list from a specific user (not the API key owner)
-  const listOwnerUsername = usernameForRandomList; 
+  const listOwnerUsername = usernameForRandomList;
 
   if (genre) { // If genre filtering is needed
     while (allEnrichedGenreItems.length < stremioSkip + MDBLIST_PAGE_LIMIT && attemptsForGenreCompletion < MAX_ATTEMPTS_FOR_GENRE_FILTER && morePagesFromMdbList) {
@@ -226,18 +251,21 @@ async function fetchListItems(
               await delay(retryDelay);
           } else if (error.response && error.response.status === 404 && listOwnerUsername) {
              console.warn(`MDBList user ${listOwnerUsername} or list ${effectiveMdbListId} not found (genre fetch). Returning null.`);
-             return null; 
+             return null;
           } else {
               console.error(`Failed to fetch page for ${effectiveMdbListId} (genre filter) after ${currentRetries} attempts.`);
               morePagesFromMdbList = false;
-              break; 
+              break;
           }
         }
       }
       if (!success || !morePagesFromMdbList) break;
       const mdbApiResponseData = response.data;
       const isWatchlistCall = !listOwnerUsername && (effectiveMdbListId === 'watchlist' || effectiveMdbListId === 'watchlist-W');
-      const initialItemsFlat = processMDBListApiResponse(mdbApiResponseData, isWatchlistCall);
+      const { items: initialItemsFlat, hasMovies: pageHasMovies, hasShows: pageHasShows } = processMDBListApiResponse(mdbApiResponseData, isWatchlistCall);
+      if (pageHasMovies) hasMovies = true;
+      if (pageHasShows) hasShows = true;
+
       if (!initialItemsFlat || initialItemsFlat.length === 0) { morePagesFromMdbList = false; break; }
       const enrichedPageItems = await enrichItemsWithCinemeta(initialItemsFlat);
       const genreItemsFromPage = enrichedPageItems.filter(item => item.genres && item.genres.map(g => String(g).toLowerCase()).includes(String(genre).toLowerCase()));
@@ -290,7 +318,7 @@ async function fetchListItems(
     while(currentRetries < MAX_RETRIES && !success) {
       try {
           response = await axios.get(apiUrl, { timeout: 15000 });
-          if (response.status === 429 && currentRetries < MAX_RETRIES) { 
+          if (response.status === 429 && currentRetries < MAX_RETRIES) {
              currentRetries++;
              const retryDelay = INITIAL_RETRY_DELAY_MS * Math.pow(2, currentRetries - 1);
              console.error(`Rate limited by MDBList API for list ${effectiveMdbListId} of user ${listOwnerUsername || 'self'} (single page), attempt ${currentRetries}/${MAX_RETRIES}. Retrying after ${retryDelay}ms...`);
@@ -307,34 +335,33 @@ async function fetchListItems(
               await delay(retryDelay);
           } else if (error.response && error.response.status === 404 && listOwnerUsername) {
              console.warn(`MDBList user ${listOwnerUsername} or list ${effectiveMdbListId} not found. Returning null.`);
-             return null; 
+             return null;
           } else {
               console.error(`Failed to fetch items for ${effectiveMdbListId} after ${currentRetries} attempts.`);
-              return null; 
+              return null;
           }
       }
     }
 
     if (!success) {
         console.error(`All retries failed for fetching items for list ID ${effectiveMdbListId} of user ${listOwnerUsername || 'self'}.`);
-        return null; 
+        return null;
     }
 
     const mdbApiResponseData = response.data;
     const isWatchlistCall = !listOwnerUsername && (effectiveMdbListId === 'watchlist' || effectiveMdbListId === 'watchlist-W');
-    const initialItemsFlat = processMDBListApiResponse(mdbApiResponseData, isWatchlistCall);
+    const { items: initialItemsFlat, hasMovies: pageHasMovies, hasShows: pageHasShows } = processMDBListApiResponse(mdbApiResponseData, isWatchlistCall);
+    if (pageHasMovies) hasMovies = true;
+    if (pageHasShows) hasShows = true;
 
     if (!initialItemsFlat || initialItemsFlat.length === 0) {
-      return { allItems: [], hasMovies: false, hasShows: false };
+        return { allItems: [], hasMovies: false, hasShows: false };
     }
     allItems = await enrichItemsWithCinemeta(initialItemsFlat);
   }
 
-  const finalResult = { allItems: allItems, hasMovies: false, hasShows: false };
-    allItems.forEach(item => {
-        if (item.type === 'movie') finalResult.hasMovies = true;
-        else if (item.type === 'series') finalResult.hasShows = true;
-    });
+  const finalResult = { allItems: allItems, hasMovies, hasShows };
+
   return finalResult;
 }
 
@@ -352,12 +379,10 @@ async function extractListFromUrl(url, apiKey) {
       if (!apiResponse.data || !Array.isArray(apiResponse.data) || apiResponse.data.length === 0) {
         throw new Error('Could not fetch list details from MDBList API or list is empty/not found. Response: ' + JSON.stringify(apiResponse.data));
       }
-      
+
       const listData = apiResponse.data[0]; // Correct: Access the first (and only) object in the array
 
-      // Corrected check: Ensure listData.user_name exists
       if (typeof listData.user_name === 'undefined') {
-        // It's helpful to include the actual response in the error for debugging
         const actualResponse = JSON.stringify(listData);
         throw new Error(`API response did not include expected 'user_name'. Response: ${actualResponse}`);
       }
@@ -365,7 +390,7 @@ async function extractListFromUrl(url, apiKey) {
       return {
         listId: String(listData.id),
         listSlug: listData.slug,
-        username: listData.user_name, // Corrected: Use listData.user_name
+        username: listData.user_name,
         listName: listData.name,
         isUrlImport: true,
         hasMovies: listData.movies > 0,
@@ -390,7 +415,7 @@ async function extractListFromUrl(url, apiKey) {
 
 module.exports = {
   fetchAllLists,
-  fetchAllListsForUser, 
+  fetchAllListsForUser,
   fetchListItems,
   validateMDBListKey,
   extractListFromUrl

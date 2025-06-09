@@ -1149,7 +1149,7 @@ document.addEventListener('DOMContentLoaded', function() {
         );
         if (apiKeyMissing && state.isPotentiallySharedConfig) mergeToggle.style.display = 'none';
       }
-      
+
     let sortControlsContainer = null;
     const isSpecialTraktNonSortable = list.isTraktTrending || list.isTraktPopular || list.isTraktRecommendations;
     const isSortableList = (list.source === 'mdblist' || list.source === 'mdblist_url' ||
