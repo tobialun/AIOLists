@@ -14,6 +14,10 @@ const staticGenres = [
 const defaultConfig = {
   apiKey: '',
   rpdbApiKey: '',
+  tmdbSessionId: '',
+  tmdbAccountId: '',
+  metadataSource: 'cinemeta',
+  tmdbLanguage: '',
   traktAccessToken: '',
   traktRefreshToken: '',
   traktExpiresAt: null,

@@ -1,7 +1,7 @@
 // src/integrations/mdblist.js
 const axios = require('axios');
 const { ITEMS_PER_PAGE } = require('../config');
-const { enrichItemsWithCinemeta } = require('../utils/metadataFetcher');
+const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
 
 // Helper function for delay
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -170,7 +170,8 @@ async function fetchListItems(
     isUrlImported = false, // Not directly relevant here, but part of original signature
     genre = null,
     usernameForRandomList = null, // The username whose list we are fetching
-    isMergedByUser = false
+    isMergedByUser = false,
+    userConfig = null // Added to access metadata preferences
 ) {
   if (!apiKey) return null;
 
@@ -267,7 +268,12 @@ async function fetchListItems(
       if (pageHasShows) hasShows = true;
 
       if (!initialItemsFlat || initialItemsFlat.length === 0) { morePagesFromMdbList = false; break; }
-      const enrichedPageItems = await enrichItemsWithCinemeta(initialItemsFlat);
+      // Extract metadata config from userConfig if available
+      const metadataSource = userConfig?.metadataSource || 'cinemeta';
+      const hasTmdbOAuth = !!(userConfig?.tmdbSessionId && userConfig?.tmdbAccountId);
+      const tmdbLanguage = userConfig?.tmdbLanguage || 'en-US';
+      
+      const enrichedPageItems = await enrichItemsWithMetadata(initialItemsFlat, metadataSource, hasTmdbOAuth, tmdbLanguage);
       const genreItemsFromPage = enrichedPageItems.filter(item => item.genres && item.genres.map(g => String(g).toLowerCase()).includes(String(genre).toLowerCase()));
       allEnrichedGenreItems.push(...genreItemsFromPage);
       mdbListOffset += MDBLIST_PAGE_LIMIT;
@@ -357,7 +363,12 @@ async function fetchListItems(
     if (!initialItemsFlat || initialItemsFlat.length === 0) {
         return { allItems: [], hasMovies: false, hasShows: false };
     }
-    allItems = await enrichItemsWithCinemeta(initialItemsFlat);
+    // Extract metadata config from userConfig if available  
+    const metadataSource = userConfig?.metadataSource || 'cinemeta';
+    const hasTmdbOAuth = !!(userConfig?.tmdbSessionId && userConfig?.tmdbAccountId);
+    const tmdbLanguage = userConfig?.tmdbLanguage || 'en-US';
+    
+    allItems = await enrichItemsWithMetadata(initialItemsFlat, metadataSource, hasTmdbOAuth, tmdbLanguage);
   }
 
   const finalResult = { allItems: allItems, hasMovies, hasShows };

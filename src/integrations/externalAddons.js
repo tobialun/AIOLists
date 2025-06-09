@@ -1,6 +1,6 @@
 // src/integrations/externalAddons.js
 const axios = require('axios');
-const { enrichItemsWithCinemeta } = require('../utils/metadataFetcher');
+const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
 
 class ExternalAddon {
   constructor(manifestUrl) {
@@ -189,7 +189,7 @@ async function importExternalAddon(manifestUrl, userConfig) {
   return await addon.import(userConfig);
 }
 
-async function fetchExternalAddonItems(targetOriginalId, targetOriginalType, sourceAddonConfig, skip = 0, rpdbApiKey = null, genre = null) {
+async function fetchExternalAddonItems(targetOriginalId, targetOriginalType, sourceAddonConfig, skip = 0, rpdbApiKey = null, genre = null, userConfig = null) {
   let attemptedUrl = "Unknown (URL could not be constructed before error)";
   try {
     if (!sourceAddonConfig || !sourceAddonConfig.apiBaseUrl || !sourceAddonConfig.catalogs) {
@@ -228,7 +228,12 @@ async function fetchExternalAddonItems(targetOriginalId, targetOriginalType, sou
     }
     let enrichedMetas = [];
     if (metasFromExternal.length > 0) {
-        enrichedMetas = await enrichItemsWithCinemeta(metasFromExternal);
+        // Extract metadata config from userConfig if available
+        const metadataSource = userConfig?.metadataSource || 'cinemeta';
+        const hasTmdbOAuth = !!(userConfig?.tmdbSessionId && userConfig?.tmdbAccountId);
+        const tmdbLanguage = userConfig?.tmdbLanguage || 'en-US';
+        
+        enrichedMetas = await enrichItemsWithMetadata(metasFromExternal, metadataSource, hasTmdbOAuth, tmdbLanguage);
     }
     let finalMetas = enrichedMetas;
     if (genre && finalMetas.length > 0) {

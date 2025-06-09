@@ -103,11 +103,103 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
   transform: translateY(1px);
 }
 
+/* Connection Buttons Styling */
+.connections-column {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  padding-bottom: 15px;
+}
+
+.connection-item {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.trakt-connection-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.connection-btn {
+  background: #8E5AF7 !important;
+  color: white !important;
+  border: none !important;
+  padding: 8px 16px !important;
+  border-radius: 6px !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  font-family: inherit !important;
+  cursor: pointer;
+  transition: background-color 0.2s, transform 0.1s;
+  text-decoration: none !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 10px !important;
+  white-space: nowrap !important;
+  line-height: 1.4 !important;
+  min-height: 34px !important;
+  width: fit-content;
+  box-sizing: border-box;
+}
+
+/* Ensure text within connection buttons uses consistent font weight and family */
+.connection-btn b {
+  font-weight: 500 !important;
+  font-family: inherit !important;
+}
+
+.connection-btn:hover {
+  transform: translateY(-1px);
+}
+
+.connection-btn:active {
+  transform: translateY(1px);
+}
+
+.connection-logo {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.trakt-btn {
+  background-color: #ed1c24 !important;
+}
+
+.trakt-btn:hover {
+  background-color: #d4181e !important;
+}
+
+.tmdb-btn {
+  background-color: #0d253f !important;
+}
+
+.tmdb-btn:hover {
+  background-color: #081a2a !important;
+}
+
+/* Legacy support for existing trakt-login-btn class */
 .trakt-login-btn { background-color: #4CAF50; gap: 8px; }
 .trakt-login-btn:hover { background-color: #45a049; }
 .trakt-login-btn img { width: 16px; height: 16px; object-fit: contain; }
 
-.disconnect-btn { background-color: #f44336; font-size: 12px; padding: 6px 10px; margin-left: 10px; }
+.disconnect-btn { 
+  background-color: #f44336; 
+  font-size: 12px; 
+  padding: 6px 10px; 
+  border: none;
+  border-radius: 4px;
+  color: white;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
 .disconnect-btn:hover { background-color: #d32f2f; }
 
 .copy-manifest-btn { background-color: #2196F3; margin-left: 10px; height: auto; }
@@ -118,14 +210,30 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 
 .api-section { border: 1px solid #e0e0e0; border-radius: 6px; padding: 15px 15px 0px 15px; margin-bottom: 15px; }
 .api-section h2 { margin-top: 0; margin-bottom: 0; color: #333; font-size: 1.15em; font-weight: 600; }
-.connections-row, #traktConnection { display: flex; align-items: center; gap: 15px; padding-bottom: 7px; }
 #traktPinContainer { display: none; align-items: center; gap: 10px; }
-#traktPin { width: 100px; padding: 9px 12px; border: 1px solid #ddd; border-radius: 4px; }
+#traktPin { 
+  width: 100px; 
+  padding: 9px 12px; 
+  border: 1px solid #ddd; 
+  border-radius: 4px;
+  font-size: 14px;
+  height: 38px;
+  box-sizing: border-box;
+  font-family: 'Lexend', sans-serif;
+  text-transform: uppercase;
+}
 .connected-state {
   display: none;
-  align-items: center; justify-content: space-between; padding: 8px 12px;
-  background-color: rgba(76, 175, 80, 0.08); border: 1px solid #a5d6a7; border-radius: 4px;
-  color: #2e7d32; flex-grow: 1; font-size: 14px;
+  align-items: center; 
+  justify-content: flex-start; 
+  padding: 8px 12px;
+  background-color: rgba(76, 175, 80, 0.08); 
+  border: 1px solid #a5d6a7; 
+  border-radius: 4px;
+  color: #2e7d32; 
+  font-size: 14px;
+  width: fit-content;
+  gap: 12px;
 }
 .connected-text { font-weight: 500; }
 
@@ -179,6 +287,47 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
     color: #555;
 }
 
+.metadata-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    width: 100%;
+}
+
+.metadata-source-group,
+.language-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.metadata-source-group label,
+.language-group label {
+    min-width: 140px;
+    font-weight: 500;
+}
+
+.metadata-select {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    background-color: white;
+    font-size: 14px;
+    min-width: 200px;
+    transition: border-color 0.2s ease;
+}
+
+.metadata-select:focus {
+    outline: none;
+    border-color: #4CAF50;
+    box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+}
+
+.metadata-select option:disabled {
+    color: #999;
+    font-style: italic;
+}
+
 .list-container { margin-top: 30px; }
 .list-container.hidden { display: none !important; }
 .list-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
@@ -218,6 +367,7 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 }
 .tag.l { background-color: #9C27B0; } .tag.e { background-color: #4CAF50; }
 .tag.w { background-color: #FF9800; } .tag.t { background-color: #c50000; }
+.tag.m { background-color: #0d253f; } /* TMDB tag */
 .tag.tag-with-image,
 .tag.t.tag-with-image {
   background-color: transparent !important;
@@ -376,8 +526,38 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
   .form-group { flex-direction: column; align-items: stretch; }
   .form-group label { width: auto; margin-bottom: 5px; text-align: left; }
   .input-container { max-width: none; }
+  
+  /* Connection buttons mobile styling */
+  .connections-column { gap: 12px; }
+  .connection-btn { 
+    padding: 10px 16px; 
+    font-size: 14px; 
+    min-height: 40px; 
+  }
+  .connection-logo { 
+    width: 18px; 
+    height: 18px; 
+  }
   .list-heading { flex-direction: column; align-items: flex-start; gap: 10px; }
   .icon-legend { flex-direction: column; gap: 8px; align-items: flex-start; }
+  
+  .metadata-source-group,
+  .language-group {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 5px;
+  }
+  
+  .metadata-source-group label,
+  .language-group label {
+    min-width: auto;
+    margin-bottom: 5px;
+  }
+  
+  .metadata-select {
+    min-width: auto;
+    width: 100%;
+  }
 
   .list-item {
       padding: 0;

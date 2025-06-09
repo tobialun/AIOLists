@@ -1,121 +1,213 @@
 // src/utils/metadataFetcher.js
 const axios = require('axios');
+const { batchFetchPosters } = require('./posters');
 
-const MAX_IDS_PER_CINEMETA_REQUEST = 40; // Chunk size for Cinemeta requests (reduced for safety)
-const CINEMETA_REQUEST_TIMEOUT = 20000; // 15 seconds timeout for each Cinemeta chunk
+// Import TMDB functions that use the built-in Bearer token
+const { 
+  batchConvertImdbToTmdbIds, 
+  batchFetchTmdbMetadata,
+  convertImdbToTmdbId,
+  fetchTmdbMetadata 
+} = require('../integrations/tmdb');
 
-/**
- * Fetches detailed metadata from Cinemeta for a chunk of IMDb IDs.
- * @param {string[]} imdbIdChunk - A chunk of IMDb IDs.
- * @param {string} type - 'movie' or 'series'.
- * @returns {Promise<Object>} A map of IMDb ID to Cinemeta meta object for this chunk.
- */
+const CINEMETA_BASE = 'https://v3-cinemeta.strem.io';
+const BATCH_SIZE = 50;
+
+// Fetch metadata from Cinemeta for a chunk of IMDB IDs
 async function fetchCinemetaChunk(imdbIdChunk, type) {
-  if (!imdbIdChunk || imdbIdChunk.length === 0) {
-    return {};
-  }
-  const cinemetaUrl = `https://v3-cinemeta.strem.io/catalog/${type}/last-videos/lastVideosIds=${imdbIdChunk.join(',')}.json`;
   try {
-    // console.log(`Workspaceing Cinemeta chunk: ${type}, IDs: ${imdbIdChunk.length}`); // Optional: for debugging
-    const response = await axios.get(cinemetaUrl, { timeout: CINEMETA_REQUEST_TIMEOUT });
-    const metasDetailed = response.data?.metasDetailed;
-    const metadataMapChunk = {};
-    if (Array.isArray(metasDetailed)) {
-      metasDetailed.forEach(meta => {
-        if (meta && (meta.id || meta.imdb_id)) { // meta.id from Cinemeta is the IMDb ID
-          metadataMapChunk[meta.id || meta.imdb_id] = meta;
-        }
-      });
-    }
-    return metadataMapChunk;
+    const promises = imdbIdChunk.map(async (imdbId) => {
+      try {
+        const response = await axios.get(`${CINEMETA_BASE}/meta/${type}/${imdbId}.json`, {
+          timeout: 15000
+        });
+        return { imdbId, data: response.data?.meta };
+      } catch (error) {
+        return { imdbId, data: null };
+      }
+    });
+
+    const results = await Promise.all(promises);
+    const metadataMap = {};
+    
+    results.forEach(({ imdbId, data }) => {
+      if (data) {
+        metadataMap[imdbId] = data;
+      }
+    });
+
+    return metadataMap;
   } catch (error) {
-    console.error(`Error fetching Cinemeta chunk for type ${type}, IDs ${imdbIdChunk.join(',')}: ${error.message}`);
-    return {}; // Return empty for this chunk on error, allowing other chunks to proceed
+    console.error('Error fetching Cinemeta chunk:', error.message);
+    return {};
   }
 }
 
 /**
- * Enriches a list of items with detailed metadata from Cinemeta, with optimized batching.
- * @param {Array<Object>} items - Array of items. Each item must have 'imdb_id' (or 'id' as imdb_id) and 'type'.
- * @returns {Promise<Array<Object>>} A promise that resolves to an array of enriched items.
+ * Enrich items with metadata from the specified source
+ * @param {Array} items - Array of items to enrich
+ * @param {string} metadataSource - 'cinemeta' or 'tmdb'
+ * @param {boolean} hasTmdbOAuth - Whether user has TMDB OAuth connected
+ * @param {string} tmdbLanguage - TMDB language preference
+ * @returns {Promise<Array>} Enriched items
+ */
+async function enrichItemsWithMetadata(items, metadataSource = 'cinemeta', hasTmdbOAuth = false, tmdbLanguage = 'en-US') {
+  if (!items || items.length === 0) return [];
+  
+  // Use TMDB only if user has OAuth connected and explicitly chose TMDB
+  if (metadataSource === 'tmdb' && hasTmdbOAuth) {
+    return await enrichItemsWithTMDB(items, tmdbLanguage);
+  }
+  
+  // Default to Cinemeta for all other cases
+  return await enrichItemsWithCinemeta(items);
+}
+
+/**
+ * Enrich items with TMDB metadata (requires OAuth)
+ * @param {Array} items - Items to enrich
+ * @param {string} language - TMDB language preference
+ * @returns {Promise<Array>} Enriched items
+ */
+async function enrichItemsWithTMDB(items, language = 'en-US') {
+  if (!items || items.length === 0) return [];
+
+  try {
+    // Step 1: Convert IMDB IDs to TMDB IDs for items that need it
+    const itemsNeedingConversion = items.filter(item => 
+      item.imdb_id && item.imdb_id.startsWith('tt') && !item.tmdb_id
+    );
+    
+    let imdbToTmdbMap = {};
+    if (itemsNeedingConversion.length > 0) {
+      const imdbIds = itemsNeedingConversion.map(item => item.imdb_id);
+      imdbToTmdbMap = await batchConvertImdbToTmdbIds(imdbIds);
+    }
+
+    // Step 2: Prepare items for metadata fetching
+    const tmdbItems = items.map(item => {
+      let tmdbId = item.tmdb_id;
+      let type = item.type === 'series' ? 'series' : 'movie';
+      
+      // Try to get TMDB ID from conversion if we don't have one
+      if (!tmdbId && item.imdb_id && imdbToTmdbMap[item.imdb_id]) {
+        tmdbId = imdbToTmdbMap[item.imdb_id].tmdbId;
+        type = imdbToTmdbMap[item.imdb_id].type;
+      }
+      
+      return tmdbId ? {
+        tmdbId,
+        type,
+        imdbId: item.imdb_id,
+        originalItem: item
+      } : null;
+    }).filter(Boolean);
+
+    // Step 3: Fetch metadata from TMDB
+    let tmdbMetadataMap = {};
+    if (tmdbItems.length > 0) {
+      tmdbMetadataMap = await batchFetchTmdbMetadata(tmdbItems, language);
+    }
+
+    // Step 4: Merge metadata back into original items
+    const enrichedItems = items.map(item => {
+      const identifier = item.imdb_id || `tmdb:${item.tmdb_id}`;
+      const tmdbData = tmdbMetadataMap[identifier];
+      
+      if (tmdbData) {
+        return {
+          ...item,
+          ...tmdbData,
+          // Preserve original fields that might be important
+          imdb_id: item.imdb_id || tmdbData.imdb_id,
+          id: item.imdb_id || tmdbData.id,
+          type: item.type || tmdbData.type
+        };
+      }
+      
+      return item;
+    });
+
+    return enrichedItems;
+
+  } catch (error) {
+    console.error('Error enriching items with TMDB:', error.message);
+    // Fallback to original items if enrichment fails
+    return items;
+  }
+}
+
+/**
+ * Enrich items with Cinemeta metadata
+ * @param {Array} items - Items to enrich
+ * @returns {Promise<Array>} Enriched items
  */
 async function enrichItemsWithCinemeta(items) {
-  if (!items || items.length === 0) {
-    return [];
-  }
+  if (!items || items.length === 0) return [];
 
-  const itemsByType = { movie: [], series: [] };
-  // Use a map to ensure original item references are preserved if IDs are duplicated across inputs
-  const originalItemsByImdbId = new Map();
-
-  items.forEach(item => {
-    const imdbId = item.imdb_id || item.id; // Prefer imdb_id, fallback to id if it's the IMDb ID
-    if (!imdbId || !item.type) {
-      console.warn('Item missing imdb_id or type, cannot enrich:', item.title || 'Unknown Item');
-      return; // Skip items that can't be processed
-    }
+  try {
+    // Group items by type for efficient batching
+    const movieItems = items.filter(item => item.type === 'movie' && item.imdb_id);
+    const seriesItems = items.filter(item => item.type === 'series' && item.imdb_id);
     
-    // Store the first occurrence of an item if multiple have the same imdbId
-    if (!originalItemsByImdbId.has(imdbId)) {
-        originalItemsByImdbId.set(imdbId, item);
-    }
-
-    if (itemsByType[item.type]) {
-      // Add to list for batching, duplicates will be handled by Set later
-      itemsByType[item.type].push(imdbId);
-    } else {
-      console.warn('Unknown item type for Cinemeta enrichment:', item.type, item.title || 'Unknown Item');
-    }
-  });
-
-  const allEnrichedMetadataMap = {};
-
-  for (const type in itemsByType) {
-    const allIdsForType = Array.from(new Set(itemsByType[type])); // Deduplicate IDs for fetching
-    if (allIdsForType.length > 0) {
-      const chunkPromises = [];
-      for (let i = 0; i < allIdsForType.length; i += MAX_IDS_PER_CINEMETA_REQUEST) {
-        const chunk = allIdsForType.slice(i, i + MAX_IDS_PER_CINEMETA_REQUEST);
-        chunkPromises.push(fetchCinemetaChunk(chunk, type));
+    const movieIds = movieItems.map(item => item.imdb_id);
+    const seriesIds = seriesItems.map(item => item.imdb_id);
+    
+    // Fetch metadata in batches
+    const [movieMetadata, seriesMetadata] = await Promise.all([
+      fetchCinemetaBatched(movieIds, 'movie'),
+      fetchCinemetaBatched(seriesIds, 'series')
+    ]);
+    
+    // Combine all metadata
+    const allMetadata = { ...movieMetadata, ...seriesMetadata };
+    
+    // Merge metadata back into items
+    const enrichedItems = items.map(item => {
+      const metadata = allMetadata[item.imdb_id];
+      if (metadata) {
+        return {
+          ...item,
+          ...metadata,
+          // Preserve essential fields
+          imdb_id: item.imdb_id,
+          id: item.imdb_id,
+          type: item.type
+        };
       }
+      return item;
+    });
 
-      try {
-        const chunkResults = await Promise.all(chunkPromises);
-        chunkResults.forEach(chunkMap => {
-          Object.assign(allEnrichedMetadataMap, chunkMap); // Merge results from all chunks
-        });
-      } catch (error) {
-        // This catch is more for Promise.all itself failing, though individual chunk errors are handled within fetchCinemetaChunk
-        console.error(`Error processing Cinemeta chunks for type ${type}: ${error.message}`);
-      }
+    return enrichedItems;
+    
+  } catch (error) {
+    console.error('Error enriching items with Cinemeta:', error.message);
+    return items;
+  }
+}
+
+async function fetchCinemetaBatched(imdbIds, type) {
+  if (!imdbIds || imdbIds.length === 0) return {};
+  
+  const allMetadata = {};
+  
+  // Process in batches to avoid overwhelming the API
+  for (let i = 0; i < imdbIds.length; i += BATCH_SIZE) {
+    const batch = imdbIds.slice(i, i + BATCH_SIZE);
+    const batchMetadata = await fetchCinemetaChunk(batch, type);
+    Object.assign(allMetadata, batchMetadata);
+    
+    // Small delay between batches to be respectful
+    if (i + BATCH_SIZE < imdbIds.length) {
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
   }
-
-  // Map over the original input items to maintain order and structure
-  return items.map(originalItemFromInput => {
-    const imdbId = originalItemFromInput.imdb_id || originalItemFromInput.id;
-    const cinemetaItem = imdbId ? allEnrichedMetadataMap[imdbId] : null;
-    const baseItem = originalItemsByImdbId.get(imdbId) || originalItemFromInput; // Use the item stored in map
-
-    if (cinemetaItem) {
-      // Spread original item first, then Cinemeta item to let Cinemeta override.
-      const enriched = { ...baseItem, ...cinemetaItem };
-      enriched.id = imdbId; // Ensure Stremio 'id' is the IMDb ID from original source
-      enriched.imdb_id = imdbId; // Ensure 'imdb_id' field is present
-      // Preserve original type if Cinemeta somehow changes it (should not happen for 'movie'/'series')
-      enriched.type = baseItem.type; 
-      return enriched;
-    }
-    
-    // If no Cinemeta data, return the original item, ensuring 'id' property based on 'imdb_id'
-    const fallbackItem = { ...baseItem };
-    if (!fallbackItem.id && fallbackItem.imdb_id) {
-        fallbackItem.id = fallbackItem.imdb_id;
-    }
-    return fallbackItem;
-  });
+  
+  return allMetadata;
 }
 
 module.exports = {
-  enrichItemsWithCinemeta,
+  enrichItemsWithMetadata,
+  enrichItemsWithTMDB,
+  enrichItemsWithCinemeta
 };

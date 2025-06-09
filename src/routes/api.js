@@ -1,12 +1,13 @@
 // src/routes/api.js
 const path = require('path');
-const { defaultConfig } = require('../config');
+const { defaultConfig, staticGenres } = require('../config');
 const { compressConfig, decompressConfig, compressShareableConfig, createShareableConfig } = require('../utils/urlConfig');
 const { createAddon, fetchListContent } = require('../addon/addonBuilder');
 const { convertToStremioFormat } = require('../addon/converters');
 const { setCacheHeaders, isWatchlist: commonIsWatchlist } = require('../utils/common');
 const Cache = require('../utils/cache');
 const { validateRPDBKey } = require('../utils/posters');
+const { validateTMDBKey } = require('../utils/tmdb');
 const { initTraktApi, authenticateTrakt, getTraktAuthUrl, fetchTraktLists, fetchPublicTraktListDetails } = require('../integrations/trakt');
 const { fetchAllLists: fetchAllMDBLists, validateMDBListKey, extractListFromUrl: extractMDBListFromUrl } = require('../integrations/mdblist');
 const { importExternalAddon: importExtAddon } = require('../integrations/externalAddons');
@@ -180,6 +181,39 @@ module.exports = function(router) {
     }
   });
 
+  router.post('/:configHash/config/metadata', async (req, res) => {
+    try {
+      const { metadataSource, tmdbLanguage } = req.body;
+      
+      if (metadataSource && !['cinemeta', 'tmdb'].includes(metadataSource)) {
+        return res.status(400).json({ success: false, error: 'Invalid metadata source. Must be "cinemeta" or "tmdb".' });
+      }
+      
+      if (metadataSource === 'tmdb' && !req.userConfig.tmdbSessionId) {
+        return res.status(400).json({ 
+          error: 'TMDB metadata source requires OAuth connection. Please connect your TMDB account.' 
+        });
+      }
+
+      if (metadataSource) {
+        req.userConfig.metadataSource = metadataSource;
+      }
+      
+      if (tmdbLanguage && typeof tmdbLanguage === 'string') {
+        req.userConfig.tmdbLanguage = tmdbLanguage;
+      }
+
+      req.userConfig.lastUpdated = new Date().toISOString();
+
+      const newConfigHash = await compressConfig(req.userConfig);
+      manifestCache.clear();
+      res.json({ success: true, configHash: newConfigHash });
+    } catch (error) {
+      console.error('Error updating metadata settings:', error);
+      res.status(500).json({ success: false, error: 'Failed to update metadata settings' });
+    }
+  });
+
   router.get('/:configHash/configure', (req, res) => {
     res.sendFile(path.join(__dirname, '..', '..', 'public', 'index.html'));
   });
@@ -294,16 +328,16 @@ module.exports = function(router) {
 
   router.post('/:configHash/apikey', async (req, res) => {
     try {
-      const { apiKey, rpdbApiKey } = req.body;
-      let configChanged = false;
+          const { apiKey, rpdbApiKey } = req.body;
+    let configChanged = false;
 
-      const newApiKey = apiKey || '';
-      const newRpdbApiKey = rpdbApiKey || '';
+    const newApiKey = apiKey || '';
+    const newRpdbApiKey = rpdbApiKey || '';
 
-      if (req.userConfig.rpdbApiKey !== newRpdbApiKey) {
-        req.userConfig.rpdbApiKey = newRpdbApiKey;
-        configChanged = true;
-      }
+    if (req.userConfig.rpdbApiKey !== newRpdbApiKey) {
+      req.userConfig.rpdbApiKey = newRpdbApiKey;
+      configChanged = true;
+    }
 
       if (req.userConfig.apiKey !== newApiKey) {
         configChanged = true;
@@ -857,16 +891,16 @@ module.exports = function(router) {
 
   router.post('/validate-keys', async (req, res) => {
     try {
-      const { apiKey, rpdbApiKey } = req.body;
-      const results = { mdblist: null, rpdb: null };
+          const { apiKey, rpdbApiKey } = req.body;
+    const results = { mdblist: null, rpdb: null };
 
-      if (apiKey) {
-        const mdblistResult = await validateMDBListKey(apiKey);
-        results.mdblist = (mdblistResult && mdblistResult.username) ? { valid: true, username: mdblistResult.username } : { valid: false };
-      }
-      if (rpdbApiKey) {
-        results.rpdb = { valid: await validateRPDBKey(rpdbApiKey) };
-      }
+    if (apiKey) {
+      const mdblistResult = await validateMDBListKey(apiKey);
+      results.mdblist = (mdblistResult && mdblistResult.username) ? { valid: true, username: mdblistResult.username } : { valid: false };
+    }
+    if (rpdbApiKey) {
+      results.rpdb = { valid: await validateRPDBKey(rpdbApiKey) };
+    }
       res.json(results);
     } catch (error) {
         console.error('Error in /validate-keys:', error);
@@ -907,6 +941,15 @@ module.exports = function(router) {
       const traktLists = await fetchTraktLists(req.userConfig); 
       allUserLists.push(...traktLists.map(l => ({...l, source: 'trakt'})));
   }
+
+    // Fetch from TMDB
+    const { fetchTmdbLists } = require('../integrations/tmdb');
+    const tmdbResult = await fetchTmdbLists(req.userConfig);
+    
+    // Add TMDB lists to the main lists if OAuth is connected
+    if (tmdbResult.isConnected && tmdbResult.lists && tmdbResult.lists.length > 0) {
+      allUserLists.push(...tmdbResult.lists.map(l => ({...l, source: 'tmdb'})));
+    }
 
 
   
@@ -1006,6 +1049,45 @@ module.exports = function(router) {
                   lastChecked: new Date().toISOString() 
               };
           }
+      } else if (list.source === 'tmdb') {
+          manifestListId = list.id;
+          tagType = 'M'; // M for TMDB
+          let metadata = req.userConfig.listsMetadata[manifestListId] || {};
+          determinedHasMovies = metadata.hasMovies;
+          determinedHasShows = metadata.hasShows;
+
+          // If we don't have metadata, try to fetch or use default assumptions
+          if (typeof determinedHasMovies !== 'boolean' || typeof determinedHasShows !== 'boolean') {
+              if (req.userConfig.tmdbSessionId) {
+                  try {
+                      const tempUserConfigForFetch = { ...req.userConfig, rpdbApiKey: null };
+                      const tempContent = await fetchListContent(manifestListId, tempUserConfigForFetch, 0, null, 'all');
+                      determinedHasMovies = tempContent?.hasMovies || false;
+                      determinedHasShows = tempContent?.hasShows || false;
+                  } catch (error) {
+                      console.error(`Error fetching TMDB list metadata for ${manifestListId}:`, error.message);
+                      // Default assumptions for TMDB lists
+                      if (manifestListId === 'tmdb_watchlist' || manifestListId === 'tmdb_favorites') {
+                          determinedHasMovies = true;
+                          determinedHasShows = true;
+                      } else {
+                          determinedHasMovies = true;
+                          determinedHasShows = true;
+                      }
+                  }
+              } else {
+                  // Default for TMDB lists when not connected
+                  determinedHasMovies = true;
+                  determinedHasShows = true;
+              }
+              
+              req.userConfig.listsMetadata[manifestListId] = {
+                  ...metadata,
+                  hasMovies: determinedHasMovies,
+                  hasShows: determinedHasShows,
+                  lastChecked: new Date().toISOString()
+              };
+          }
       } else { 
           determinedHasMovies = false;
           determinedHasShows = false;
@@ -1020,9 +1102,23 @@ module.exports = function(router) {
       if (list.source === 'trakt' && list.isTraktWatchlist) { defaultSort = { sort: 'added', order: 'desc' }; }
       const customTypeName = req.userConfig.customMediaTypeNames?.[manifestListId];
       let effectiveMediaTypeDisplay;
-      if (customTypeName) { effectiveMediaTypeDisplay = customTypeName; }
-      else { if (determinedHasMovies && determinedHasShows) effectiveMediaTypeDisplay = 'All'; else if (determinedHasMovies) effectiveMediaTypeDisplay = 'Movie'; else if (determinedHasShows) effectiveMediaTypeDisplay = 'Series'; else effectiveMediaTypeDisplay = 'N/A';}
-      return { id: manifestListId, originalId: originalListIdStr, name: list.name, customName: req.userConfig.customListNames?.[manifestListId] || null, effectiveMediaTypeDisplay: effectiveMediaTypeDisplay, isHidden: (req.userConfig.hiddenLists || []).includes(manifestListId), hasMovies: determinedHasMovies, hasShows: determinedHasShows, canBeMerged: actualCanBeMerged, isMerged: isUserMerged, isTraktList: list.source === 'trakt' && list.isTraktList, isTraktWatchlist: list.source === 'trakt' && list.isTraktWatchlist, isTraktRecommendations: list.isTraktRecommendations, isTraktTrending: list.isTraktTrending, isTraktPopular: list.isTraktPopular, isWatchlist: !!list.isWatchlist || !!list.isTraktWatchlist, tag: tagType, listType: list.listType, tagImage: list.source === 'trakt' ? 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico' : null, sortPreferences: req.userConfig.sortPreferences?.[originalListIdStr] || defaultSort, source: list.source, dynamic: list.dynamic, mediatype: list.mediatype };
+      if (customTypeName) {
+          effectiveMediaTypeDisplay = customTypeName;
+      } else {
+          if (determinedHasMovies && determinedHasShows) effectiveMediaTypeDisplay = 'All';
+          else if (determinedHasMovies) effectiveMediaTypeDisplay = 'Movie';
+          else if (determinedHasShows) effectiveMediaTypeDisplay = 'Series';
+          else effectiveMediaTypeDisplay = 'N/A';
+      }
+      // Set tag image based on source
+      let tagImage = null;
+      if (list.source === 'trakt') {
+          tagImage = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico';
+      } else if (list.source === 'tmdb') {
+          tagImage = 'https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_2-d537fb228cf3ded904ef09b136fe3fec72548ebc1fea3fbbd1ad9e36364db38b.svg';
+      }
+
+      return { id: manifestListId, originalId: originalListIdStr, name: list.name, customName: req.userConfig.customListNames?.[manifestListId] || null, effectiveMediaTypeDisplay: effectiveMediaTypeDisplay, isHidden: (req.userConfig.hiddenLists || []).includes(manifestListId), hasMovies: determinedHasMovies, hasShows: determinedHasShows, canBeMerged: actualCanBeMerged, isMerged: isUserMerged, isTraktList: list.source === 'trakt' && list.isTraktList, isTraktWatchlist: list.source === 'trakt' && list.isTraktWatchlist, isTraktRecommendations: list.isTraktRecommendations, isTraktTrending: list.isTraktTrending, isTraktPopular: list.isTraktPopular, isWatchlist: !!list.isWatchlist || !!list.isTraktWatchlist || (list.source === 'tmdb' && (list.isTmdbWatchlist || list.id === 'tmdb_watchlist')), tag: tagType, listType: list.listType, tagImage: tagImage, sortPreferences: req.userConfig.sortPreferences?.[originalListIdStr] || defaultSort, source: list.source, dynamic: list.dynamic, mediatype: list.mediatype };
       });
       const activeListsResults = (await Promise.all(activeListsProcessingPromises)).filter(p => p !== null);
       processedLists.push(...activeListsResults);
@@ -1195,7 +1291,8 @@ module.exports = function(router) {
         isPotentiallySharedConfig: req.isPotentiallySharedConfig,
         randomMDBListUsernames: (req.userConfig.randomMDBListUsernames && req.userConfig.randomMDBListUsernames.length > 0) 
                                 ? req.userConfig.randomMDBListUsernames 
-                                : defaultConfig.randomMDBListUsernames 
+                                : defaultConfig.randomMDBListUsernames,
+        tmdbStatus: tmdbResult
       };
     
       if (configChangedByThisRequest) {
@@ -1224,4 +1321,92 @@ module.exports = function(router) {
         res.status(500).json({ error: 'Failed to fetch lists', details: error.message });
     }
     });
+
+  router.get('/:configHash/genres', async (req, res) => {
+    try {
+      let genres = staticGenres;
+      
+      // Use TMDB genres if TMDB is selected and configured
+          if (req.userConfig.metadataSource === 'tmdb' && req.userConfig.tmdbSessionId && req.userConfig.tmdbLanguage) {
+      try {
+        const { fetchTmdbGenres } = require('../integrations/tmdb');
+        const tmdbGenres = await fetchTmdbGenres(req.userConfig.tmdbLanguage);
+          if (tmdbGenres.length > 0) {
+            genres = tmdbGenres;
+          }
+        } catch (error) {
+          console.warn('Failed to fetch TMDB genres for API response:', error.message);
+        }
+      }
+      
+      res.json({ success: true, genres });
+    } catch (error) {
+      console.error('Error fetching genres:', error);
+      res.status(500).json({ success: false, error: 'Failed to fetch genres' });
+    }
+  });
+
+  router.post('/:configHash/tmdb/auth', async (req, res) => {
+    try {
+      const { requestToken } = req.body;
+      if (!requestToken) return res.status(400).json({ error: 'Request token required' });
+
+      const { authenticateTmdb } = require('../integrations/tmdb');
+      const tmdbAuthResult = await authenticateTmdb(requestToken);
+      
+      req.userConfig.tmdbSessionId = tmdbAuthResult.sessionId;
+      req.userConfig.tmdbAccountId = tmdbAuthResult.accountId;
+      req.userConfig.lastUpdated = new Date().toISOString();
+      
+      const newConfigHash = await compressConfig(req.userConfig);
+      manifestCache.clear();
+      
+      res.json({
+        success: true,
+        configHash: newConfigHash,
+        message: 'Authenticated with TMDB',
+        username: tmdbAuthResult.username
+      });
+    } catch (error) {
+      console.error('Error in /tmdb/auth:', error);
+      res.status(500).json({ error: 'Failed to authenticate with TMDB', details: error.message });
+    }
+  });
+
+  router.post('/:configHash/tmdb/disconnect', async (req, res) => {
+    try {
+      req.userConfig.tmdbSessionId = null;
+      req.userConfig.tmdbAccountId = null;
+      
+      // Revert to default metadata source if TMDB was selected
+      if (req.userConfig.metadataSource === 'tmdb') {
+        req.userConfig.metadataSource = 'cinemeta';
+      }
+      
+      req.userConfig.lastUpdated = new Date().toISOString();
+      
+      const newConfigHash = await compressConfig(req.userConfig);
+      manifestCache.clear();
+      
+      res.json({ success: true, configHash: newConfigHash, message: 'Disconnected from TMDB' });
+    } catch (error) {
+      console.error('Error in /tmdb/disconnect:', error);
+      res.status(500).json({ error: 'Failed to disconnect from TMDB', details: error.message });
+    }
+  });
+
+  router.get('/tmdb/login', async (req, res) => {
+    try {
+      const { getTmdbAuthUrl } = require('../integrations/tmdb');
+      const authData = await getTmdbAuthUrl();
+      res.json({ 
+        success: true, 
+        requestToken: authData.requestToken,
+        authUrl: authData.authUrl 
+      });
+    } catch (error) {
+      console.error('Error in /tmdb/login:', error);
+      res.status(500).json({ error: 'Failed to get TMDB auth URL', details: error.message });
+    }
+  });
 };

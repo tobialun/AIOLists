@@ -38,6 +38,9 @@ document.addEventListener('DOMContentLoaded', function() {
     userConfig: {
         apiKey: '',
         rpdbApiKey: '',
+    
+        metadataSource: 'cinemeta',
+        tmdbLanguage: 'en-US',
         traktAccessToken: null,
         traktRefreshToken: null,
         traktExpiresAt: null,
@@ -74,9 +77,14 @@ document.addEventListener('DOMContentLoaded', function() {
     apiKeyInput: document.getElementById('apiKey'),
     rpdbApiKeyInput: document.getElementById('rpdbApiKey'),
     mdblistConnected: document.getElementById('mdblistConnected'),
-    mdblistConnectedText: document.getElementById('mdblistConnected').querySelector('.connected-text'),
+    mdblistConnectedText: document.getElementById('mdblistConnected')?.querySelector('.connected-text'),
     rpdbConnected: document.getElementById('rpdbConnected'),
-    rpdbConnectedText: document.getElementById('rpdbConnected').querySelector('.connected-text'),
+    rpdbConnectedText: document.getElementById('rpdbConnected')?.querySelector('.connected-text'),
+    tmdbConnectedState: document.getElementById('tmdbConnectedState'),
+    tmdbLoginBtn: document.getElementById('tmdbLoginBtn'),
+    tmdbAuthContainer: document.getElementById('tmdbAuthContainer'),
+    tmdbAuthLink: document.getElementById('tmdbAuthLink'),
+    tmdbApproveBtn: document.getElementById('tmdbApproveBtn'),
     traktLoginBtn: document.getElementById('traktLoginBtn'),
     traktConnectedState: document.getElementById('traktConnectedState'),
     traktPinContainer: document.getElementById('traktPinContainer'),
@@ -121,7 +129,11 @@ document.addEventListener('DOMContentLoaded', function() {
     randomUsersDropdown: null,
     randomUsersTagContainer: null,
     randomUserInput: null,
-    appVersionSpan: document.getElementById('appVersion')
+    appVersionSpan: document.getElementById('appVersion'),
+    metadataSourceSelect: document.getElementById('metadataSourceSelect'),
+    tmdbLanguageSelect: document.getElementById('tmdbLanguageSelect'),
+    tmdbLanguageGroup: document.getElementById('tmdbLanguageGroup'),
+    metadataInfo: document.getElementById('metadataInfo')
   };
 
   async function init() {
@@ -357,12 +369,17 @@ document.addEventListener('DOMContentLoaded', function() {
   function setupEventListeners() {
     elements.apiKeyInput.addEventListener('input', () => handleApiKeyInput(elements.apiKeyInput, 'mdblist'));
     elements.rpdbApiKeyInput.addEventListener('input', () => handleApiKeyInput(elements.rpdbApiKeyInput, 'rpdb'));
+    elements.metadataSourceSelect.addEventListener('change', handleMetadataSourceChange);
+    elements.tmdbLanguageSelect.addEventListener('change', handleTmdbLanguageChange);
     elements.upstashUrlInput.addEventListener('input', handleUpstashInput);
     elements.upstashTokenInput.addEventListener('input', handleUpstashInput);
     elements.closeUpstashBtn.addEventListener('click', () => {
         elements.upstashContainer.classList.add('hidden');
     });
-    elements.traktLoginBtn?.addEventListener('click', () => { elements.traktPinContainer.style.display = 'flex'; });
+    elements.traktLoginBtn?.addEventListener('click', () => { 
+      elements.traktPinContainer.style.setProperty('display', 'inline-flex', 'important'); 
+      // Keep the login button visible until successful PIN submission
+    });
     elements.submitTraktPin?.addEventListener('click', handleTraktPinSubmit);
     elements.universalImportInput.addEventListener('paste', handleUniversalPaste);
     elements.universalImportInput.addEventListener('input', handleUniversalInputChange);
@@ -370,6 +387,9 @@ document.addEventListener('DOMContentLoaded', function() {
     elements.toggleGenreFilterBtn?.addEventListener('click', handleToggleGenreFilter);
     elements.toggleRandomListBtn?.addEventListener('click', handleToggleRandomListFeature);
     elements.settingsHeader?.addEventListener('click', toggleSettingsSection);
+    
+    // TMDB OAuth event listeners (handled in showTmdbAuthContainer when needed)
+    // elements.tmdbApproveBtn?.addEventListener('click', handleTmdbApproval) - set dynamically
     window.addEventListener('resize', () => {
         const oldMobileState = state.isMobile;
         state.isMobile = window.matchMedia('(max-width: 600px)').matches;
@@ -678,11 +698,20 @@ document.addEventListener('DOMContentLoaded', function() {
       const rpdbApiKey = state.userConfig.rpdbApiKey;
       updateApiKeyUI(elements.apiKeyInput, mdblistApiKey, 'mdblist', state.userConfig.mdblistUsername);
       updateApiKeyUI(elements.rpdbApiKeyInput, rpdbApiKey, 'rpdb');
+      
+      // Update metadata settings
+      if (elements.metadataSourceSelect) {
+        elements.metadataSourceSelect.value = state.userConfig.metadataSource || 'cinemeta';
+      }
+      if (elements.tmdbLanguageSelect) {
+        elements.tmdbLanguageSelect.value = state.userConfig.tmdbLanguage || 'en-US';
+      }
+      updateMetadataSourceUI();
       updateGenreFilterButtonText();
       updateRandomListButtonState();
 
       if (mdblistApiKey || rpdbApiKey) {
-        await validateAndSaveApiKeys(mdblistApiKey, rpdbApiKey, true);
+        await validateAndSaveApiKeys(mdblistApiKey, rpdbApiKey, '', true);
       }
       
       const isTraktTokenExpired = state.userConfig.traktExpiresAt && new Date() >= new Date(state.userConfig.traktExpiresAt);
@@ -698,6 +727,9 @@ document.addEventListener('DOMContentLoaded', function() {
       const isTraktConnected = !!(state.userConfig.traktAccessToken || (state.userConfig.upstashUrl && state.userConfig.traktUuid));
       updateTraktUI(isTraktConnected);
       
+      const isTmdbConnected = !!state.userConfig.tmdbSessionId;
+      updateTmdbConnectionUI(isTmdbConnected, state.userConfig.tmdbUsername);
+      
       await loadUserListsAndAddons();
     } catch (error) { 
       console.error('Load Config Error:', error); 
@@ -712,7 +744,8 @@ document.addEventListener('DOMContentLoaded', function() {
     state.validationTimeout = setTimeout(() => {
       validateAndSaveApiKeys(
         keyType === 'mdblist' ? apiKey : elements.apiKeyInput.value.trim(),
-        keyType === 'rpdb' ? apiKey : elements.rpdbApiKeyInput.value.trim()
+        keyType === 'rpdb' ? apiKey : elements.rpdbApiKeyInput.value.trim(),
+        ''
       );
     }, 700);
   }
@@ -773,7 +806,7 @@ document.addEventListener('DOMContentLoaded', function() {
     elements.upstashForm.style.display = 'none';
   }
   
-  async function validateAndSaveApiKeys(mdblistApiKeyToValidate, rpdbApiKeyToValidate, isInitialLoadOrSilentCheck = false) {
+  async function validateAndSaveApiKeys(mdblistApiKeyToValidate, rpdbApiKeyToValidate, tmdbApiKeyToValidate = '', isInitialLoadOrSilentCheck = false) {
     try {
       if (isInitialLoadOrSilentCheck && !mdblistApiKeyToValidate && !rpdbApiKeyToValidate) {
           updateApiKeyUI(elements.apiKeyInput, '', 'mdblist', null, null);
@@ -846,7 +879,11 @@ document.addEventListener('DOMContentLoaded', function() {
     if (key && isValid === true) {
       inputElement.style.display = 'none';
       connectedDiv.style.display = 'flex';
-      connectedText.textContent = keyType === 'mdblist' ? `Connected as ${username}` : 'RPDB Key Valid';
+      if (keyType === 'mdblist') {
+        connectedText.textContent = `Connected as ${username}`;
+      } else if (keyType === 'rpdb') {
+        connectedText.textContent = 'RPDB Key Valid';
+      }
       if (inputElement.classList) inputElement.classList.add('valid');
     } else {
       inputElement.style.display = 'block';
@@ -859,15 +896,27 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   function updateTraktUI(isConnected) {
-    elements.traktLoginBtn.style.display = isConnected ? 'none' : 'block';
-    elements.traktConnectedState.style.display = isConnected ? 'flex' : 'none';
-    elements.traktPersistenceContainer.style.display = isConnected ? 'flex' : 'none';
-    elements.traktPinContainer.style.display = 'none';
-
     if (isConnected) {
+        // Connected state: hide connect button, show connected state
+        elements.traktLoginBtn.style.setProperty('display', 'none', 'important');
+        elements.traktConnectedState.style.setProperty('display', 'flex', 'important');
+        elements.traktPersistenceContainer.style.setProperty('display', 'flex', 'important');
+        elements.traktPinContainer.style.setProperty('display', 'none', 'important');
+        
+        // Update the connected state text
+        const connectedText = elements.traktConnectedState.querySelector('b');
+        if (connectedText) {
+          connectedText.textContent = 'Connected to Trakt';
+        }
+        
         const isPersistent = !!(state.userConfig.upstashUrl && state.userConfig.upstashToken && state.userConfig.traktUuid);
         updatePersistenceStatus(isPersistent);
     } else {
+        // Disconnected state: show connect button, hide connected state
+        elements.traktLoginBtn.style.setProperty('display', 'inline-flex', 'important');
+        elements.traktConnectedState.style.setProperty('display', 'none', 'important');
+        elements.traktPersistenceContainer.style.setProperty('display', 'none', 'important');
+        elements.traktPinContainer.style.setProperty('display', 'none', 'important');
         elements.traktPin.value = '';
         elements.upstashContainer.classList.add('hidden');
     }
@@ -888,7 +937,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (isPersistent) {
         statusIcon.textContent = '✔';
         statusIcon.classList.add('persistent');
-        statusText.textContent = 'Persistent';
+        statusText.textContent = 'Trakt persistent';
         actionLink.textContent = 'Edit';
         actionLink.onclick = () => {
             elements.upstashForm.style.display = 'block';
@@ -899,7 +948,7 @@ document.addEventListener('DOMContentLoaded', function() {
     } else {
         statusIcon.textContent = '✖';
         statusIcon.classList.add('not-persistent');
-        statusText.textContent = 'Not persistent';
+        statusText.textContent = 'Trakt not persistent';
         actionLink.textContent = 'Make persistent';
         actionLink.onclick = () => {
             elements.upstashContainer.classList.remove('hidden');
@@ -928,9 +977,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
       if (data.configHash) {
           state.configHash = data.configHash;
+          
+          // Update Trakt connection state
+          state.userConfig.traktAccessToken = 'connected'; // Don't store actual token
+          state.userConfig.traktRefreshToken = 'connected';
+          state.userConfig.traktExpiresAt = new Date(Date.now() + 86400000).toISOString(); // 24 hours from now
+          if (data.uuid) state.userConfig.traktUuid = data.uuid;
+          
           updateURL();
           updateStremioButtonHref();
-          showNotification('connections', 'Successfully connected to Trakt! Reloading...', 'success');
+          updateTraktUI(true); // Explicitly update UI before reloading
+          
+          showNotification('connections', 'Successfully connected to Trakt!', 'success');
           await loadConfiguration(); 
       } else {
           throw new Error("Received success from server but no new config hash.");
@@ -938,7 +996,10 @@ document.addEventListener('DOMContentLoaded', function() {
       
     } catch (error) { 
       console.error('Trakt Error:', error); 
-      showNotification('connections', `Trakt Error: ${error.message}`, 'error', true); 
+      showNotification('connections', `Trakt Error: ${error.message}`, 'error', true);
+      // Hide PIN container on error, keep login button visible
+      elements.traktPinContainer.style.setProperty('display', 'none', 'important');
+      elements.traktPin.value = ''; // Clear the PIN field
     }
   }
 
@@ -1009,6 +1070,11 @@ document.addEventListener('DOMContentLoaded', function() {
         state.configHash = data.newConfigHash;
         updateURL();
         updateStremioButtonHref();
+      }
+      
+      // Handle TMDB status notification
+      if (data.tmdbStatus && data.tmdbStatus.isConnected && data.tmdbStatus.message) {
+        showNotification('connections', data.tmdbStatus.message, 'success');
       }
       
       elements.listItems.innerHTML = '';
@@ -1620,9 +1686,11 @@ function startNameEditing(listItemElement, list) {
         notificationElement.innerHTML = `Loading lists <div class="inline-spinner"></div>`;
     } else {
         if (!persistent) {
+            // Special case for TMDB warning - shorter timeout
+            const timeout = message.includes('TMDB API Key required') ? 2500 : 3000;
             notificationElement._timeoutId = setTimeout(() => {
                 notificationElement.classList.remove('visible');
-            }, 3000);
+            }, timeout);
         }
     }
   }
@@ -1636,12 +1704,191 @@ function startNameEditing(listItemElement, list) {
 
   window.disconnectMDBList = async function() {
     updateApiKeyUI(elements.apiKeyInput, '', 'mdblist', null, false);
-    await validateAndSaveApiKeys('', elements.rpdbApiKeyInput.value.trim());
+    await validateAndSaveApiKeys('', elements.rpdbApiKeyInput.value.trim(), '');
   };
-  window.disconnectRPDB = async function() {
-    updateApiKeyUI(elements.rpdbApiKeyInput, '', 'rpdb', null, false);
-    await validateAndSaveApiKeys(elements.apiKeyInput.value.trim(), '');
+
+  // Make connectToTmdb globally available
+  window.connectToTmdb = connectToTmdb;
+  
+
+
+  // TMDB OAuth connection functions
+  async function connectToTmdb() {
+    try {
+      showNotification('connections', 'Getting TMDB authorization URL...', 'info', true);
+      
+      const response = await fetch('/tmdb/login');
+      const data = await response.json();
+      
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to get TMDB auth URL');
+      }
+      
+      // Store request token for later use
+      state.tmdbRequestToken = data.requestToken;
+      
+      // Show TMDB auth container
+      showTmdbAuthContainer(data.authUrl);
+      showNotification('connections', 'Please authorize the app and return here.', 'info', true);
+    } catch (error) {
+      console.error('TMDB Auth Error:', error);
+      showNotification('connections', `TMDB Auth Error: ${error.message}`, 'error', true);
+    }
+  }
+
+  function showTmdbAuthContainer(authUrl) {
+    const tmdbLoginBtn = document.getElementById('tmdbLoginBtn');
+    const tmdbAuthContainer = document.getElementById('tmdbAuthContainer');
+    const tmdbAuthLink = document.getElementById('tmdbAuthLink');
+    const tmdbApproveBtn = document.getElementById('tmdbApproveBtn');
+    
+    if (tmdbLoginBtn) tmdbLoginBtn.style.display = 'none';
+    if (tmdbAuthContainer) tmdbAuthContainer.style.display = 'block';
+    if (tmdbAuthLink) {
+      tmdbAuthLink.href = authUrl;
+    }
+    
+    // Set up approve button
+    if (tmdbApproveBtn) {
+      tmdbApproveBtn.onclick = handleTmdbApproval;
+    }
+  }
+
+  async function handleTmdbApproval() {
+    try {
+      if (!state.tmdbRequestToken) {
+        throw new Error('No request token available');
+      }
+      
+      showNotification('connections', 'Completing TMDB authentication...', 'info', true);
+      
+      const response = await fetch(`/${state.configHash}/tmdb/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestToken: state.tmdbRequestToken })
+      });
+      
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to authenticate with TMDB');
+      }
+      
+      state.configHash = data.configHash;
+      state.userConfig.tmdbSessionId = 'connected'; // Don't store actual session
+      state.userConfig.tmdbAccountId = 'connected';
+      
+      // Clean up
+      delete state.tmdbRequestToken;
+      
+      updateURL();
+      updateStremioButtonHref();
+      updateTmdbConnectionUI(true, data.username);
+      
+      // Reset auth container to ensure clean state
+      resetTmdbAuthContainer();
+      
+      showNotification('connections', `Successfully connected to TMDB as ${data.username || 'user'}!`, 'success');
+      await loadUserListsAndAddons();
+    } catch (error) {
+      console.error('TMDB Authentication Error:', error);
+      showNotification('connections', `TMDB Authentication Error: ${error.message}`, 'error', true);
+      resetTmdbAuthContainer();
+    }
+  }
+
+  function resetTmdbAuthContainer() {
+    const tmdbLoginBtn = document.getElementById('tmdbLoginBtn');
+    const tmdbAuthContainer = document.getElementById('tmdbAuthContainer');
+    const tmdbConnectedState = document.getElementById('tmdbConnectedState');
+    
+    // Only show login button if not actually connected
+    if (tmdbLoginBtn && !state.userConfig.tmdbSessionId) {
+      tmdbLoginBtn.style.display = 'block';
+    }
+    if (tmdbAuthContainer) {
+      tmdbAuthContainer.style.display = 'none';
+    }
+    
+    // Clear any pending approval state
+    state.tmdbRequestToken = null;
+  }
+
+  function updateTmdbConnectionUI(isConnected, username = null) {
+    const tmdbLoginBtn = document.getElementById('tmdbLoginBtn');
+    const tmdbConnectedState = document.getElementById('tmdbConnectedState');
+    const tmdbAuthContainer = document.getElementById('tmdbAuthContainer');
+    
+    if (isConnected) {
+      // Connected state: hide connect button and auth container, show connected state
+      if (tmdbLoginBtn) tmdbLoginBtn.style.setProperty('display', 'none', 'important');
+      if (tmdbAuthContainer) tmdbAuthContainer.style.setProperty('display', 'none', 'important');
+      if (tmdbConnectedState) {
+        tmdbConnectedState.style.setProperty('display', 'flex', 'important');
+        const connectedText = tmdbConnectedState.querySelector('b');
+        if (connectedText) {
+          connectedText.textContent = username ? `Connected to TMDB (${username})` : 'Connected to TMDB';
+        }
+      }
+    } else {
+      // Disconnected state: show connect button, hide connected state and auth container
+      if (tmdbLoginBtn) tmdbLoginBtn.style.setProperty('display', 'inline-flex', 'important');
+      if (tmdbConnectedState) tmdbConnectedState.style.setProperty('display', 'none', 'important');
+      if (tmdbAuthContainer) tmdbAuthContainer.style.setProperty('display', 'none', 'important');
+    }
+    
+    // Update metadata source UI when TMDB connection changes
+    updateMetadataSourceUI();
+  }
+
+  window.disconnectTMDB = async function() {
+    try {
+      const response = await fetch(`/${state.configHash}/tmdb/disconnect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to disconnect TMDB');
+      }
+      
+      state.configHash = data.configHash;
+      state.userConfig.tmdbSessionId = null;
+      state.userConfig.tmdbAccountId = null;
+      
+      // Reset metadata source to Cinemeta if it was set to TMDB
+      if (state.userConfig.metadataSource === 'tmdb') {
+        state.userConfig.metadataSource = 'cinemeta';
+        if (elements.metadataSourceSelect) {
+          elements.metadataSourceSelect.value = 'cinemeta';
+        }
+      }
+      
+      updateURL();
+      updateStremioButtonHref();
+      updateTmdbConnectionUI(false);
+      
+      showNotification('connections', 'Disconnected from TMDB. Metadata source reset to Cinemeta.', 'success');
+      await loadUserListsAndAddons();
+    } catch (error) {
+      console.error('TMDB Disconnect Error:', error);
+      showNotification('connections', `TMDB Disconnect Error: ${error.message}`, 'error', true);
+    }
   };
+
+
+
+  window.disconnectRPDB = function() {
+    const rpdbApiKeyInput = document.getElementById('rpdbApiKey');
+    const rpdbConnected = document.getElementById('rpdbConnected');
+    
+    if (rpdbApiKeyInput) rpdbApiKeyInput.value = '';
+    if (rpdbConnected) rpdbConnected.style.display = 'none';
+    
+    state.userConfig.rpdbApiKey = '';
+    handleApiKeyInput(rpdbApiKeyInput, 'rpdb');
+  };
+
   window.disconnectTrakt = async function() {
     try {
         const response = await fetch(`/${state.configHash}/trakt/disconnect`, {
@@ -1661,5 +1908,91 @@ function startNameEditing(listItemElement, list) {
     } catch (error) { console.error('Trakt Disconnect Error:', error); showNotification('connections', `Trakt Disconnect Error: ${error.message}`, 'error', true); }
   };
 
-  init();
+  // Handle metadata source change
+  async function handleMetadataSourceChange() {
+    const newMetadataSource = elements.metadataSourceSelect.value;
+    
+    if (newMetadataSource === 'tmdb' && !state.userConfig.tmdbSessionId) {
+      showNotification('settings', 'TMDB OAuth connection required to use TMDB as metadata source. Please connect to TMDB first.', 'error');
+      elements.metadataSourceSelect.value = state.userConfig.metadataSource;
+      return;
+    }
+    
+    await updateMetadataSettings(newMetadataSource, null);
+  }
+
+  // Handle TMDB language change
+  async function handleTmdbLanguageChange() {
+    const newLanguage = elements.tmdbLanguageSelect.value;
+    await updateMetadataSettings(null, newLanguage);
+  }
+
+  // Update metadata settings on server
+  async function updateMetadataSettings(metadataSource = null, tmdbLanguage = null) {
+    try {
+      const payload = {};
+      if (metadataSource) payload.metadataSource = metadataSource;
+      if (tmdbLanguage) payload.tmdbLanguage = tmdbLanguage;
+      
+      const response = await fetch(`/${state.configHash}/config/metadata`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to update metadata settings');
+      }
+      
+      if (data.configHash && data.configHash !== state.configHash) {
+        state.configHash = data.configHash;
+        updateURL();
+        updateStremioButtonHref();
+      }
+      
+      if (metadataSource) state.userConfig.metadataSource = metadataSource;
+      if (tmdbLanguage) state.userConfig.tmdbLanguage = tmdbLanguage;
+      
+      updateMetadataSourceUI();
+      showNotification('settings', 'Metadata settings updated.', 'success');
+    } catch (error) {
+      console.error('Error updating metadata settings:', error);
+      showNotification('settings', `Error: ${error.message}`, 'error', true);
+      // Revert UI changes on error
+      if (elements.metadataSourceSelect) {
+        elements.metadataSourceSelect.value = state.userConfig.metadataSource;
+      }
+      if (elements.tmdbLanguageSelect) {
+        elements.tmdbLanguageSelect.value = state.userConfig.tmdbLanguage;
+      }
+      updateMetadataSourceUI();
+    }
+  }
+
+  // Update metadata source UI
+  function updateMetadataSourceUI() {
+    if (elements.tmdbLanguageGroup) {
+      const showLanguageSettings = state.userConfig.metadataSource === 'tmdb';
+      elements.tmdbLanguageGroup.style.display = showLanguageSettings ? 'flex' : 'none';
+    }
+    
+    // Enable/disable TMDB option based on OAuth connection
+    if (elements.metadataSourceSelect) {
+      const tmdbOption = elements.metadataSourceSelect.querySelector('option[value="tmdb"]');
+      if (tmdbOption) {
+        const isTmdbConnected = !!state.userConfig.tmdbSessionId;
+        tmdbOption.disabled = !isTmdbConnected;
+        tmdbOption.textContent = isTmdbConnected ? 'TMDB' : 'TMDB (Connect first)';
+      }
+    }
+    
+    if (elements.metadataInfo) {
+      const currentSource = state.userConfig.metadataSource === 'tmdb' ? 'TMDB' : 'Cinemeta';
+      const currentLang = state.userConfig.metadataSource === 'tmdb' ? ` (${state.userConfig.tmdbLanguage})` : '';
+      elements.metadataInfo.textContent = `Currently using ${currentSource}${currentLang} for metadata.`;
+    }
+  }
+
+    init();
 });

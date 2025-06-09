@@ -1,7 +1,7 @@
 // src/integrations/trakt.js
 const axios = require('axios');
 const { ITEMS_PER_PAGE, TRAKT_CLIENT_ID } = require('../config');
-const { enrichItemsWithCinemeta } = require('../utils/metadataFetcher');
+const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
 const { getTraktTokens, saveTraktTokens } = require('../utils/remoteStorage');
 
 const TRAKT_API_URL = 'https://api.trakt.tv';
@@ -349,7 +349,12 @@ async function fetchTraktLists(userConfig) {
           });
       }
   
-      let enrichedAllItems = await enrichItemsWithCinemeta(initialItems); 
+      // Extract metadata config from userConfig
+      const metadataSource = userConfig.metadataSource || 'cinemeta';
+      const hasTmdbOAuth = !!(userConfig.tmdbSessionId && userConfig.tmdbAccountId);
+      const tmdbLanguage = userConfig.tmdbLanguage || 'en-US';
+      
+      let enrichedAllItems = await enrichItemsWithMetadata(initialItems, metadataSource, hasTmdbOAuth, tmdbLanguage); 
   
       if (genre && enrichedAllItems.length > 0 && !isMetadataCheck) {
           const lowerGenre = String(genre).toLowerCase();

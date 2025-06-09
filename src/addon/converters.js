@@ -1,7 +1,8 @@
 // src/addon/converters.js
 const { batchFetchPosters } = require('../utils/posters');
+const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
 
-async function convertToStremioFormat(listContent, rpdbApiKey = null) {
+async function convertToStremioFormat(listContent, rpdbApiKey = null, metadataConfig = {}) {
   let metas = [];
   if (!listContent) return metas;
 
@@ -18,11 +19,11 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null) {
         const baseMeta = {
             id: imdbId,
             type: item.type,
-            name: item.title || item.name || `Untitled ${item.type}`,
+            name: item.name || item.title || `Untitled ${item.type}`,
             poster: item.poster,
-            background: item.backdrop || item.background,
-            description: item.overview || item.description,
-            releaseInfo: item.year || item.release_year || 
+            background: item.background || item.backdrop,
+            description: item.description || item.overview,
+            releaseInfo: item.releaseInfo || item.year || item.release_year || 
                          (item.release_date ? item.release_date.split('-')[0] : 
                          (item.first_air_date ? item.first_air_date.split('-')[0] : undefined)),
             imdbRating: item.imdbRating || (item.imdbrating ? (typeof item.imdbrating === 'number' ? item.imdbrating.toFixed(1) : item.imdbrating) : undefined),
@@ -61,11 +62,11 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null) {
       itemsToProcess.push({
         id: imdbId,
         type: 'movie',
-        name: movie.title || movie.name || 'Untitled Movie',
+        name: movie.name || movie.title || 'Untitled Movie',
         poster: movie.poster,
-        background: movie.backdrop || movie.background,
-        description: movie.overview || movie.description,
-        releaseInfo: movie.year || movie.release_year || (movie.release_date ? movie.release_date.split('-')[0] : undefined),
+        background: movie.background || movie.backdrop,
+        description: movie.description || movie.overview,
+        releaseInfo: movie.releaseInfo || movie.year || movie.release_year || (movie.release_date ? movie.release_date.split('-')[0] : undefined),
         imdbRating: movie.imdbRating || (movie.imdbrating ? (typeof movie.imdbrating === 'number' ? movie.imdbrating.toFixed(1) : movie.imdbrating) : undefined),
         runtime: movie.runtime ? `${movie.runtime}`.includes(' min') ? movie.runtime : `${movie.runtime} min` : undefined,
         genres: movie.genres || movie.genre,
@@ -94,11 +95,11 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null) {
       itemsToProcess.push({
         id: imdbId,
         type: 'series',
-        name: show.title || show.name || 'Untitled Series',
+        name: show.name || show.title || 'Untitled Series',
         poster: show.poster,
-        background: show.backdrop || show.background,
-        description: show.overview || show.description,
-        releaseInfo: show.year || show.release_year || (show.first_air_date ? show.first_air_date.split('-')[0] : undefined),
+        background: show.background || show.backdrop,
+        description: show.description || show.overview,
+        releaseInfo: show.releaseInfo || show.year || show.release_year || (show.first_air_date ? show.first_air_date.split('-')[0] : undefined),
         imdbRating: show.imdbRating || (show.imdbrating ? (typeof show.imdbrating === 'number' ? show.imdbrating.toFixed(1) : show.imdbrating) : undefined),
         runtime: show.runtime ? `${show.runtime}`.includes(' min') ? show.runtime : `${show.runtime} min` : undefined,
         genres: show.genres || show.genre,
