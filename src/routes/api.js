@@ -310,6 +310,89 @@ module.exports = function(router) {
       res.status(500).json({ error: 'Internal server error in catalog handler' });
     }
   });
+
+  router.get('/:configHash/meta/:type/:id.json', async (req, res) => {
+    try {
+      const { type, id } = req.params;
+      
+      if (!id.startsWith('tt')) {
+        return res.status(404).json({ meta: null });
+      }
+
+      // Set cache headers - meta data can be cached longer since it doesn't change often
+      res.setHeader('Cache-Control', 'public, max-age=3600'); // 1 hour cache
+      
+      // Create a minimal item object for enrichment
+      const itemForEnrichment = [{
+        id: id,
+        imdb_id: id,
+        type: type,
+        title: "Loading...",
+        name: "Loading..."
+      }];
+      
+      // Extract metadata config from userConfig
+      const metadataSource = req.userConfig.metadataSource || 'cinemeta';
+      const hasTmdbOAuth = !!(req.userConfig.tmdbSessionId && req.userConfig.tmdbAccountId);
+      const tmdbLanguage = req.userConfig.tmdbLanguage || 'en-US';
+      const tmdbBearerToken = req.userConfig.tmdbBearerToken;
+      
+      // Use the same enrichment as catalog items
+      const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
+      const enrichedItems = await enrichItemsWithMetadata(itemForEnrichment, metadataSource, hasTmdbOAuth, tmdbLanguage, tmdbBearerToken);
+      
+      if (enrichedItems && enrichedItems.length > 0) {
+        const enrichedItem = enrichedItems[0];
+        
+        // Convert to Stremio meta format
+        const meta = {
+          id: id,
+          type: type,
+          name: enrichedItem.name || enrichedItem.title || "Unknown Title",
+          poster: enrichedItem.poster,
+          background: enrichedItem.background || enrichedItem.backdrop,
+          description: enrichedItem.description || enrichedItem.overview,
+          releaseInfo: enrichedItem.releaseInfo || enrichedItem.year || 
+                       (enrichedItem.release_date ? enrichedItem.release_date.split('-')[0] : 
+                       (enrichedItem.first_air_date ? enrichedItem.first_air_date.split('-')[0] : undefined)),
+          imdbRating: enrichedItem.imdbRating,
+          runtime: enrichedItem.runtime,
+          genres: enrichedItem.genres,
+          cast: enrichedItem.cast,
+          director: enrichedItem.director,
+          writer: enrichedItem.writer,
+          country: enrichedItem.country,
+          trailers: enrichedItem.trailers,
+          status: type === 'series' ? enrichedItem.status : undefined,
+          videos: enrichedItem.videos // Include episode data for series
+        };
+        
+        // Clean up undefined values
+        Object.keys(meta).forEach(key => meta[key] === undefined && delete meta[key]);
+        
+        return res.json({ meta });
+      }
+      
+      // Fallback if enrichment fails
+      return res.json({ 
+        meta: { 
+          id, 
+          type, 
+          name: "Details unavailable" 
+        } 
+      });
+      
+    } catch (error) {
+      console.error(`Error in meta endpoint for ${req.params.id}:`, error);
+      return res.status(500).json({ 
+        meta: { 
+          id: req.params.id, 
+          type: req.params.type, 
+          name: "Error loading details" 
+        } 
+      });
+    }
+  });
   
   router.get('/:configHash/config', (req, res) => {
     const configToSend = JSON.parse(JSON.stringify(req.userConfig));
@@ -1327,10 +1410,10 @@ module.exports = function(router) {
       let genres = staticGenres;
       
       // Use TMDB genres if TMDB is selected and configured
-          if (req.userConfig.metadataSource === 'tmdb' && req.userConfig.tmdbSessionId && req.userConfig.tmdbLanguage) {
+          if (req.userConfig.metadataSource === 'tmdb' && req.userConfig.tmdbSessionId && req.userConfig.tmdbLanguage && req.userConfig.tmdbBearerToken) {
       try {
         const { fetchTmdbGenres } = require('../integrations/tmdb');
-        const tmdbGenres = await fetchTmdbGenres(req.userConfig.tmdbLanguage);
+        const tmdbGenres = await fetchTmdbGenres(req.userConfig.tmdbLanguage, req.userConfig.tmdbBearerToken);
           if (tmdbGenres.length > 0) {
             genres = tmdbGenres;
           }
@@ -1348,12 +1431,14 @@ module.exports = function(router) {
 
   router.post('/:configHash/tmdb/auth', async (req, res) => {
     try {
-      const { requestToken } = req.body;
+      const { requestToken, tmdbBearerToken } = req.body;
       if (!requestToken) return res.status(400).json({ error: 'Request token required' });
+      if (!tmdbBearerToken) return res.status(400).json({ error: 'TMDB Bearer Token required' });
 
       const { authenticateTmdb } = require('../integrations/tmdb');
-      const tmdbAuthResult = await authenticateTmdb(requestToken);
+      const tmdbAuthResult = await authenticateTmdb(requestToken, tmdbBearerToken);
       
+      req.userConfig.tmdbBearerToken = tmdbBearerToken;
       req.userConfig.tmdbSessionId = tmdbAuthResult.sessionId;
       req.userConfig.tmdbAccountId = tmdbAuthResult.accountId;
       req.userConfig.lastUpdated = new Date().toISOString();
@@ -1375,6 +1460,7 @@ module.exports = function(router) {
 
   router.post('/:configHash/tmdb/disconnect', async (req, res) => {
     try {
+      req.userConfig.tmdbBearerToken = '';
       req.userConfig.tmdbSessionId = null;
       req.userConfig.tmdbAccountId = null;
       
@@ -1395,10 +1481,43 @@ module.exports = function(router) {
     }
   });
 
-  router.get('/tmdb/login', async (req, res) => {
+  router.post('/tmdb/validate', async (req, res) => {
     try {
+      const { tmdbBearerToken } = req.body;
+      if (!tmdbBearerToken) {
+        return res.status(400).json({ error: 'TMDB Bearer Token is required' });
+      }
+      
+      const { validateTMDBKey } = require('../integrations/tmdb');
+      const isValid = await validateTMDBKey(tmdbBearerToken);
+      res.json({ 
+        success: true, 
+        valid: isValid
+      });
+    } catch (error) {
+      console.error('Error in /tmdb/validate:', error);
+      res.status(500).json({ error: 'Failed to validate TMDB Bearer Token', details: error.message });
+    }
+  });
+
+  // Legacy GET endpoint for backwards compatibility
+  router.get('/tmdb/login', async (req, res) => {
+    res.status(400).json({ 
+      error: 'TMDB Bearer Token is required. Please use the updated interface to provide your TMDB Bearer Token.',
+      details: 'The TMDB connection flow now requires users to provide their own Bearer Token for security and API compliance reasons.'
+    });
+  });
+
+  // New POST endpoint that requires user's bearer token
+  router.post('/tmdb/login', async (req, res) => {
+    try {
+      const { tmdbBearerToken } = req.body;
+      if (!tmdbBearerToken) {
+        return res.status(400).json({ error: 'TMDB Bearer Token is required' });
+      }
+      
       const { getTmdbAuthUrl } = require('../integrations/tmdb');
-      const authData = await getTmdbAuthUrl();
+      const authData = await getTmdbAuthUrl(tmdbBearerToken);
       res.json({ 
         success: true, 
         requestToken: authData.requestToken,

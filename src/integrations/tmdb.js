@@ -20,19 +20,24 @@ const imdbToTmdbCache = new Cache({ defaultTTL: 7 * 24 * 3600 * 1000 }); // 7 da
 const TMDB_BASE_URL_V3 = 'https://api.themoviedb.org/3';
 const TMDB_REQUEST_TIMEOUT = 15000;
 
-// TMDB Bearer Token - this should be your Read Access Token from TMDB
-const TMDB_BEARER_TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIyZTFlZmM5MGEwMDE4ZDZmMWQ2OGViNmI5NjBhNzAyYiIsIm5iZiI6MTc0NDgzODQyNS45MTkwMDAxLCJzdWIiOiI2ODAwMWYxOTgzYzZlNTY3YzdkOTVkNGEiLCJzY29wZXMiOlsiYXBpX3JlYWQiXSwidmVyc2lvbiI6MX0.gywpUf_83gFb7df7vuaglWg7y2i7C4oCjrGzta2tMps';
+// TMDB Bearer Token - Read Access Token from environment variable (for server-side operations)
+const DEFAULT_TMDB_BEARER_TOKEN = process.env.TMDB_READ_ACCESS_TOKEN;
 
 /**
  * Create TMDB request token (Step 1)
+ * @param {string} userBearerToken - User's TMDB Read Access Token
  * @returns {Promise<Object>} Request token data
  */
-async function createTmdbRequestToken() {
+async function createTmdbRequestToken(userBearerToken) {
+  if (!userBearerToken) {
+    throw new Error('TMDB Bearer Token is required');
+  }
+  
   try {
     const response = await axios.get(`${TMDB_BASE_URL_V3}/authentication/token/new`, {
       headers: {
         'accept': 'application/json',
-        'Authorization': `Bearer ${TMDB_BEARER_TOKEN}`
+        'Authorization': `Bearer ${userBearerToken}`
       },
       timeout: TMDB_REQUEST_TIMEOUT
     });
@@ -55,9 +60,14 @@ async function createTmdbRequestToken() {
 /**
  * Create TMDB session ID from approved request token (Step 3)
  * @param {string} requestToken - Approved request token from TMDB
+ * @param {string} userBearerToken - User's TMDB Read Access Token
  * @returns {Promise<Object>} Session data
  */
-async function createTmdbSession(requestToken) {
+async function createTmdbSession(requestToken, userBearerToken) {
+  if (!userBearerToken) {
+    throw new Error('TMDB Bearer Token is required');
+  }
+  
   try {
     const response = await axios.post(`${TMDB_BASE_URL_V3}/authentication/session/new`, {
       request_token: requestToken
@@ -65,7 +75,7 @@ async function createTmdbSession(requestToken) {
       headers: {
         'accept': 'application/json',
         'content-type': 'application/json',
-        'Authorization': `Bearer ${TMDB_BEARER_TOKEN}`
+        'Authorization': `Bearer ${userBearerToken}`
       },
       timeout: TMDB_REQUEST_TIMEOUT
     });
@@ -86,9 +96,14 @@ async function createTmdbSession(requestToken) {
 /**
  * Get user account details using session ID
  * @param {string} sessionId - TMDB session ID
+ * @param {string} userBearerToken - User's TMDB Read Access Token
  * @returns {Promise<Object>} Account data
  */
-async function getTmdbAccountDetails(sessionId) {
+async function getTmdbAccountDetails(sessionId, userBearerToken) {
+  if (!userBearerToken) {
+    throw new Error('TMDB Bearer Token is required');
+  }
+  
   try {
     const response = await axios.get(`${TMDB_BASE_URL_V3}/account`, {
       params: {
@@ -96,7 +111,7 @@ async function getTmdbAccountDetails(sessionId) {
       },
       headers: {
         'accept': 'application/json',
-        'Authorization': `Bearer ${TMDB_BEARER_TOKEN}`
+        'Authorization': `Bearer ${userBearerToken}`
       },
       timeout: TMDB_REQUEST_TIMEOUT
     });
@@ -110,20 +125,22 @@ async function getTmdbAccountDetails(sessionId) {
 
 /**
  * Get TMDB OAuth authorization URL
+ * @param {string} userBearerToken - User's TMDB Read Access Token
  * @returns {Promise<Object>} Object with request token and auth URL
  */
-async function getTmdbAuthUrl() {
-  return await createTmdbRequestToken();
+async function getTmdbAuthUrl(userBearerToken) {
+  return await createTmdbRequestToken(userBearerToken);
 }
 
 /**
  * Authenticate with TMDB using request token
  * @param {string} requestToken - Request token from TMDB OAuth flow
+ * @param {string} userBearerToken - User's TMDB Read Access Token
  * @returns {Promise<Object>} Authentication result with session ID and account details
  */
-async function authenticateTmdb(requestToken) {
-  const sessionData = await createTmdbSession(requestToken);
-  const accountData = await getTmdbAccountDetails(sessionData.sessionId);
+async function authenticateTmdb(requestToken, userBearerToken) {
+  const sessionData = await createTmdbSession(requestToken, userBearerToken);
+  const accountData = await getTmdbAccountDetails(sessionData.sessionId, userBearerToken);
   
   return {
     sessionId: sessionData.sessionId,
@@ -157,7 +174,7 @@ async function fetchTmdbLists(userConfig) {
       },
       headers: {
         'accept': 'application/json',
-        'Authorization': `Bearer ${TMDB_BEARER_TOKEN}`
+        'Authorization': `Bearer ${userConfig.tmdbBearerToken || DEFAULT_TMDB_BEARER_TOKEN}`
       },
       timeout: TMDB_REQUEST_TIMEOUT
     });
@@ -238,7 +255,7 @@ async function fetchTmdbListItems(listId, userConfig, skip = 0, sortBy = 'create
 
     const headers = {
       'accept': 'application/json',
-      'Authorization': `Bearer ${TMDB_BEARER_TOKEN}`
+      'Authorization': `Bearer ${userConfig.tmdbBearerToken || DEFAULT_TMDB_BEARER_TOKEN}`
     };
 
     if (listId === 'tmdb_watchlist') {
@@ -386,7 +403,7 @@ async function processListItems(items, userConfig, genre) {
           const response = await axios.get(`${TMDB_BASE_URL_V3}/${endpoint}/${item.tmdb_id}/external_ids`, {
             headers: {
               'accept': 'application/json',
-              'Authorization': `Bearer ${TMDB_BEARER_TOKEN}`
+              'Authorization': `Bearer ${userConfig.tmdbBearerToken || DEFAULT_TMDB_BEARER_TOKEN}`
             },
             timeout: TMDB_REQUEST_TIMEOUT
           });
@@ -452,15 +469,20 @@ async function processListItems(items, userConfig, genre) {
 }
 
 /**
- * Test TMDB API connectivity using the built-in Bearer token
+ * Test TMDB API connectivity using user's Bearer token
+ * @param {string} userBearerToken - User's TMDB Read Access Token
  * @returns {Promise<boolean>} Whether the API is accessible
  */
-async function validateTMDBKey() {
+async function validateTMDBKey(userBearerToken) {
+  if (!userBearerToken) {
+    return false;
+  }
+  
   try {
     const response = await axios.get(`${TMDB_BASE_URL_V3}/configuration`, {
       headers: {
         'accept': 'application/json',
-        'Authorization': `Bearer ${TMDB_BEARER_TOKEN}`
+        'Authorization': `Bearer ${userBearerToken}`
       },
       timeout: 10000
     });
@@ -473,11 +495,12 @@ async function validateTMDBKey() {
 }
 
 /**
- * Convert IMDB ID to TMDB ID using TMDB's find endpoint with built-in Bearer token
+ * Convert IMDB ID to TMDB ID using TMDB's find endpoint with user Bearer token
  * @param {string} imdbId - IMDB ID (e.g., "tt1234567")
+ * @param {string} userBearerToken - User's TMDB Read Access Token
  * @returns {Promise<Object|null>} Object with tmdbId and type, or null if not found
  */
-async function convertImdbToTmdbId(imdbId) {
+async function convertImdbToTmdbId(imdbId, userBearerToken = DEFAULT_TMDB_BEARER_TOKEN) {
   if (!imdbId || !imdbId.match(/^tt\d+$/)) {
     return null;
   }
@@ -495,7 +518,7 @@ async function convertImdbToTmdbId(imdbId) {
       },
       headers: {
         'accept': 'application/json',
-        'Authorization': `Bearer ${TMDB_BEARER_TOKEN}`
+        'Authorization': `Bearer ${userBearerToken}`
       },
       timeout: TMDB_REQUEST_TIMEOUT
     });
@@ -529,11 +552,12 @@ async function convertImdbToTmdbId(imdbId) {
 }
 
 /**
- * Batch convert multiple IMDB IDs to TMDB IDs using built-in Bearer token
+ * Batch convert multiple IMDB IDs to TMDB IDs using user Bearer token
  * @param {string[]} imdbIds - Array of IMDB IDs
+ * @param {string} userBearerToken - User's TMDB Read Access Token
  * @returns {Promise<Object>} Map of IMDB ID to TMDB conversion result
  */
-async function batchConvertImdbToTmdbIds(imdbIds) {
+async function batchConvertImdbToTmdbIds(imdbIds, userBearerToken = DEFAULT_TMDB_BEARER_TOKEN) {
   if (!imdbIds?.length) return {};
   
   const results = {};
@@ -558,7 +582,7 @@ async function batchConvertImdbToTmdbIds(imdbIds) {
   const processChunk = async (chunk) => {
     const chunkPromises = chunk.map(async (imdbId) => {
       try {
-        const result = await convertImdbToTmdbId(imdbId);
+        const result = await convertImdbToTmdbId(imdbId, userBearerToken);
         return { imdbId, result };
       } catch (error) {
         console.error(`Error converting IMDB ID ${imdbId}:`, error.message);
@@ -591,13 +615,14 @@ async function batchConvertImdbToTmdbIds(imdbIds) {
 }
 
 /**
- * Fetch metadata from TMDB for a single item using built-in Bearer token
+ * Fetch metadata from TMDB for a single item using user Bearer token
  * @param {number} tmdbId - TMDB ID
  * @param {string} type - 'movie' or 'series'
  * @param {string} language - Language code (e.g., 'en-US')
+ * @param {string} userBearerToken - User's TMDB Read Access Token
  * @returns {Promise<Object|null>} TMDB metadata or null
  */
-async function fetchTmdbMetadata(tmdbId, type, language = 'en-US') {
+async function fetchTmdbMetadata(tmdbId, type, language = 'en-US', userBearerToken = DEFAULT_TMDB_BEARER_TOKEN) {
   if (!tmdbId) return null;
   
   const cacheKey = `tmdb_${type}_${tmdbId}_${language}`;
@@ -615,7 +640,7 @@ async function fetchTmdbMetadata(tmdbId, type, language = 'en-US') {
       },
       headers: {
         'accept': 'application/json',
-        'Authorization': `Bearer ${TMDB_BEARER_TOKEN}`
+        'Authorization': `Bearer ${userBearerToken || DEFAULT_TMDB_BEARER_TOKEN}`
       },
       timeout: TMDB_REQUEST_TIMEOUT
     });
@@ -691,9 +716,10 @@ function convertTmdbToStremioFormat(tmdbData, type) {
  * Batch fetch metadata from TMDB for multiple items
  * @param {Object[]} items - Array of items with tmdbId, type, and optionally imdbId
  * @param {string} language - Language code
+ * @param {string} userBearerToken - User's TMDB Read Access Token
  * @returns {Promise<Object>} Map of item identifier to metadata
  */
-async function batchFetchTmdbMetadata(items, language = 'en-US') {
+async function batchFetchTmdbMetadata(items, language = 'en-US', userBearerToken = DEFAULT_TMDB_BEARER_TOKEN) {
   if (!items?.length) return {};
   
   const CONCURRENCY_LIMIT = 8; // Process 8 requests at a time
@@ -703,7 +729,7 @@ async function batchFetchTmdbMetadata(items, language = 'en-US') {
     const chunkPromises = chunk.map(async (item) => {
       const identifier = item.imdbId || `tmdb:${item.tmdbId}`;
       try {
-        const metadata = await fetchTmdbMetadata(item.tmdbId, item.type, language);
+        const metadata = await fetchTmdbMetadata(item.tmdbId, item.type, language, userBearerToken);
         if (metadata) {
           // Ensure the ID is set to the IMDB ID if we have it
           if (item.imdbId) {
@@ -748,9 +774,10 @@ async function batchFetchTmdbMetadata(items, language = 'en-US') {
 /**
  * Fetch translated genres from TMDB
  * @param {string} language - Language code (e.g., 'en-US', 'fr-FR')
+ * @param {string} userBearerToken - User's TMDB Read Access Token
  * @returns {Promise<string[]>} Array of translated genre names
  */
-async function fetchTmdbGenres(language = 'en-US') {
+async function fetchTmdbGenres(language = 'en-US', userBearerToken = DEFAULT_TMDB_BEARER_TOKEN) {
   if (!language) return [];
   
   const cacheKey = `tmdb_genres_${language}`;
@@ -768,7 +795,7 @@ async function fetchTmdbGenres(language = 'en-US') {
         },
         headers: {
           'accept': 'application/json',
-          'Authorization': `Bearer ${TMDB_BEARER_TOKEN}`
+          'Authorization': `Bearer ${userBearerToken}`
         },
         timeout: TMDB_REQUEST_TIMEOUT
       }),
@@ -778,7 +805,7 @@ async function fetchTmdbGenres(language = 'en-US') {
         },
         headers: {
           'accept': 'application/json',
-          'Authorization': `Bearer ${TMDB_BEARER_TOKEN}`
+          'Authorization': `Bearer ${userBearerToken}`
         },
         timeout: TMDB_REQUEST_TIMEOUT
       })

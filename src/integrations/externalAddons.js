@@ -232,8 +232,9 @@ async function fetchExternalAddonItems(targetOriginalId, targetOriginalType, sou
         const metadataSource = userConfig?.metadataSource || 'cinemeta';
         const hasTmdbOAuth = !!(userConfig?.tmdbSessionId && userConfig?.tmdbAccountId);
         const tmdbLanguage = userConfig?.tmdbLanguage || 'en-US';
+        const tmdbBearerToken = userConfig?.tmdbBearerToken;
         
-        enrichedMetas = await enrichItemsWithMetadata(metasFromExternal, metadataSource, hasTmdbOAuth, tmdbLanguage);
+        enrichedMetas = await enrichItemsWithMetadata(metasFromExternal, metadataSource, hasTmdbOAuth, tmdbLanguage, tmdbBearerToken);
     }
     let finalMetas = enrichedMetas;
     if (genre && finalMetas.length > 0) {

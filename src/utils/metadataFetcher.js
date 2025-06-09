@@ -49,14 +49,15 @@ async function fetchCinemetaChunk(imdbIdChunk, type) {
  * @param {string} metadataSource - 'cinemeta' or 'tmdb'
  * @param {boolean} hasTmdbOAuth - Whether user has TMDB OAuth connected
  * @param {string} tmdbLanguage - TMDB language preference
+ * @param {string} tmdbBearerToken - User's TMDB Bearer Token
  * @returns {Promise<Array>} Enriched items
  */
-async function enrichItemsWithMetadata(items, metadataSource = 'cinemeta', hasTmdbOAuth = false, tmdbLanguage = 'en-US') {
+async function enrichItemsWithMetadata(items, metadataSource = 'cinemeta', hasTmdbOAuth = false, tmdbLanguage = 'en-US', tmdbBearerToken = null) {
   if (!items || items.length === 0) return [];
   
   // Use TMDB only if user has OAuth connected and explicitly chose TMDB
-  if (metadataSource === 'tmdb' && hasTmdbOAuth) {
-    return await enrichItemsWithTMDB(items, tmdbLanguage);
+  if (metadataSource === 'tmdb' && hasTmdbOAuth && tmdbBearerToken) {
+    return await enrichItemsWithTMDB(items, tmdbLanguage, tmdbBearerToken);
   }
   
   // Default to Cinemeta for all other cases
@@ -67,9 +68,10 @@ async function enrichItemsWithMetadata(items, metadataSource = 'cinemeta', hasTm
  * Enrich items with TMDB metadata (requires OAuth)
  * @param {Array} items - Items to enrich
  * @param {string} language - TMDB language preference
+ * @param {string} userBearerToken - User's TMDB Bearer Token
  * @returns {Promise<Array>} Enriched items
  */
-async function enrichItemsWithTMDB(items, language = 'en-US') {
+async function enrichItemsWithTMDB(items, language = 'en-US', userBearerToken = null) {
   if (!items || items.length === 0) return [];
 
   try {
@@ -81,7 +83,7 @@ async function enrichItemsWithTMDB(items, language = 'en-US') {
     let imdbToTmdbMap = {};
     if (itemsNeedingConversion.length > 0) {
       const imdbIds = itemsNeedingConversion.map(item => item.imdb_id);
-      imdbToTmdbMap = await batchConvertImdbToTmdbIds(imdbIds);
+      imdbToTmdbMap = await batchConvertImdbToTmdbIds(imdbIds, userBearerToken);
     }
 
     // Step 2: Prepare items for metadata fetching
@@ -106,7 +108,7 @@ async function enrichItemsWithTMDB(items, language = 'en-US') {
     // Step 3: Fetch metadata from TMDB
     let tmdbMetadataMap = {};
     if (tmdbItems.length > 0) {
-      tmdbMetadataMap = await batchFetchTmdbMetadata(tmdbItems, language);
+      tmdbMetadataMap = await batchFetchTmdbMetadata(tmdbItems, language, userBearerToken);
     }
 
     // Step 4: Merge metadata back into original items

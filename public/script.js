@@ -1715,17 +1715,48 @@ function startNameEditing(listItemElement, list) {
   // TMDB OAuth connection functions
   async function connectToTmdb() {
     try {
+      // Get the TMDB Bearer Token from the input field
+      const tmdbBearerTokenInput = document.getElementById('tmdbBearerToken');
+      const tmdbBearerToken = tmdbBearerTokenInput?.value?.trim();
+      
+      if (!tmdbBearerToken) {
+        showNotification('connections', 'Please enter your TMDB Bearer Token first.', 'error', true);
+        tmdbBearerTokenInput?.focus();
+        return;
+      }
+      
+      showNotification('connections', 'Validating TMDB Bearer Token...', 'info', true);
+      
+      // First validate the bearer token
+      const validateResponse = await fetch('/tmdb/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tmdbBearerToken })
+      });
+      
+      const validateData = await validateResponse.json();
+      if (!validateResponse.ok || !validateData.success || !validateData.valid) {
+        throw new Error('Invalid TMDB Bearer Token. Please check your token and try again.');
+      }
+      
       showNotification('connections', 'Getting TMDB authorization URL...', 'info', true);
       
-      const response = await fetch('/tmdb/login');
+      // Now get the auth URL using the validated bearer token
+      const response = await fetch('/tmdb/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tmdbBearerToken })
+      });
+      
       const data = await response.json();
       
       if (!response.ok || !data.success) {
         throw new Error(data.error || 'Failed to get TMDB auth URL');
       }
       
-      // Store request token for later use
+      // Store request token and bearer token for later use
       state.tmdbRequestToken = data.requestToken;
+      state.tmdbBearerToken = tmdbBearerToken;
       
       // Show TMDB auth container
       showTmdbAuthContainer(data.authUrl);
@@ -1760,12 +1791,19 @@ function startNameEditing(listItemElement, list) {
         throw new Error('No request token available');
       }
       
+      if (!state.tmdbBearerToken) {
+        throw new Error('No TMDB Bearer Token available');
+      }
+      
       showNotification('connections', 'Completing TMDB authentication...', 'info', true);
       
       const response = await fetch(`/${state.configHash}/tmdb/auth`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestToken: state.tmdbRequestToken })
+        body: JSON.stringify({ 
+          requestToken: state.tmdbRequestToken,
+          tmdbBearerToken: state.tmdbBearerToken
+        })
       });
       
       const data = await response.json();
@@ -1776,9 +1814,11 @@ function startNameEditing(listItemElement, list) {
       state.configHash = data.configHash;
       state.userConfig.tmdbSessionId = 'connected'; // Don't store actual session
       state.userConfig.tmdbAccountId = 'connected';
+      state.userConfig.tmdbBearerToken = state.tmdbBearerToken; // Store the bearer token
       
       // Clean up
       delete state.tmdbRequestToken;
+      delete state.tmdbBearerToken;
       
       updateURL();
       updateStremioButtonHref();
@@ -1800,10 +1840,14 @@ function startNameEditing(listItemElement, list) {
     const tmdbLoginBtn = document.getElementById('tmdbLoginBtn');
     const tmdbAuthContainer = document.getElementById('tmdbAuthContainer');
     const tmdbConnectedState = document.getElementById('tmdbConnectedState');
+    const tmdbBearerTokenGroup = document.getElementById('tmdbBearerTokenGroup');
     
-    // Only show login button if not actually connected
+    // Only show login button and bearer token input if not actually connected
     if (tmdbLoginBtn && !state.userConfig.tmdbSessionId) {
-      tmdbLoginBtn.style.display = 'block';
+      tmdbLoginBtn.style.display = 'inline-flex';
+    }
+    if (tmdbBearerTokenGroup && !state.userConfig.tmdbSessionId) {
+      tmdbBearerTokenGroup.style.display = 'block';
     }
     if (tmdbAuthContainer) {
       tmdbAuthContainer.style.display = 'none';
@@ -1811,16 +1855,19 @@ function startNameEditing(listItemElement, list) {
     
     // Clear any pending approval state
     state.tmdbRequestToken = null;
+    state.tmdbBearerToken = null;
   }
 
   function updateTmdbConnectionUI(isConnected, username = null) {
     const tmdbLoginBtn = document.getElementById('tmdbLoginBtn');
     const tmdbConnectedState = document.getElementById('tmdbConnectedState');
     const tmdbAuthContainer = document.getElementById('tmdbAuthContainer');
+    const tmdbBearerTokenGroup = document.getElementById('tmdbBearerTokenGroup');
     
     if (isConnected) {
-      // Connected state: hide connect button and auth container, show connected state
+      // Connected state: hide connect button, bearer token input, and auth container, show connected state
       if (tmdbLoginBtn) tmdbLoginBtn.style.setProperty('display', 'none', 'important');
+      if (tmdbBearerTokenGroup) tmdbBearerTokenGroup.style.setProperty('display', 'none', 'important');
       if (tmdbAuthContainer) tmdbAuthContainer.style.setProperty('display', 'none', 'important');
       if (tmdbConnectedState) {
         tmdbConnectedState.style.setProperty('display', 'flex', 'important');
@@ -1830,8 +1877,9 @@ function startNameEditing(listItemElement, list) {
         }
       }
     } else {
-      // Disconnected state: show connect button, hide connected state and auth container
+      // Disconnected state: show connect button and bearer token input, hide connected state and auth container
       if (tmdbLoginBtn) tmdbLoginBtn.style.setProperty('display', 'inline-flex', 'important');
+      if (tmdbBearerTokenGroup) tmdbBearerTokenGroup.style.setProperty('display', 'block', 'important');
       if (tmdbConnectedState) tmdbConnectedState.style.setProperty('display', 'none', 'important');
       if (tmdbAuthContainer) tmdbAuthContainer.style.setProperty('display', 'none', 'important');
     }
@@ -1855,6 +1903,13 @@ function startNameEditing(listItemElement, list) {
       state.configHash = data.configHash;
       state.userConfig.tmdbSessionId = null;
       state.userConfig.tmdbAccountId = null;
+      state.userConfig.tmdbBearerToken = null;
+      
+      // Clear the Bearer Token input field
+      const tmdbBearerTokenInput = document.getElementById('tmdbBearerToken');
+      if (tmdbBearerTokenInput) {
+        tmdbBearerTokenInput.value = '';
+      }
       
       // Reset metadata source to Cinemeta if it was set to TMDB
       if (state.userConfig.metadataSource === 'tmdb') {

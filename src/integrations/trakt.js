@@ -353,8 +353,9 @@ async function fetchTraktLists(userConfig) {
       const metadataSource = userConfig.metadataSource || 'cinemeta';
       const hasTmdbOAuth = !!(userConfig.tmdbSessionId && userConfig.tmdbAccountId);
       const tmdbLanguage = userConfig.tmdbLanguage || 'en-US';
+      const tmdbBearerToken = userConfig.tmdbBearerToken;
       
-      let enrichedAllItems = await enrichItemsWithMetadata(initialItems, metadataSource, hasTmdbOAuth, tmdbLanguage); 
+      let enrichedAllItems = await enrichItemsWithMetadata(initialItems, metadataSource, hasTmdbOAuth, tmdbLanguage, tmdbBearerToken); 
   
       if (genre && enrichedAllItems.length > 0 && !isMetadataCheck) {
           const lowerGenre = String(genre).toLowerCase();

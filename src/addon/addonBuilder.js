@@ -190,13 +190,13 @@ async function createAddon(userConfig) {
   const removedListsSet = new Set(removedLists.map(String));
   
   // Determine if we should use TMDB genres
-  const shouldUseTmdbGenres = userConfig.metadataSource === 'tmdb' && userConfig.tmdbLanguage;
+  const shouldUseTmdbGenres = userConfig.metadataSource === 'tmdb' && userConfig.tmdbLanguage && userConfig.tmdbBearerToken;
   let availableGenres = staticGenres;
   
   if (shouldUseTmdbGenres) {
     try {
       const { fetchTmdbGenres } = require('../integrations/tmdb');
-      const tmdbGenres = await fetchTmdbGenres(userConfig.tmdbLanguage);
+      const tmdbGenres = await fetchTmdbGenres(userConfig.tmdbLanguage, userConfig.tmdbBearerToken);
       if (tmdbGenres.length > 0) {
         availableGenres = tmdbGenres;
       }
@@ -634,10 +634,11 @@ async function createAddon(userConfig) {
       const metadataSource = userConfig.metadataSource || 'cinemeta';
       const hasTmdbOAuth = !!(userConfig.tmdbSessionId && userConfig.tmdbAccountId);
       const tmdbLanguage = userConfig.tmdbLanguage || 'en-US';
+      const tmdbBearerToken = userConfig.tmdbBearerToken;
       
       // Use the same enrichment as catalog items
       const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
-      const enrichedItems = await enrichItemsWithMetadata(itemForEnrichment, metadataSource, hasTmdbOAuth, tmdbLanguage);
+      const enrichedItems = await enrichItemsWithMetadata(itemForEnrichment, metadataSource, hasTmdbOAuth, tmdbLanguage, tmdbBearerToken);
       
       if (enrichedItems && enrichedItems.length > 0) {
         const enrichedItem = enrichedItems[0];

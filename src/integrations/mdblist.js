@@ -272,8 +272,9 @@ async function fetchListItems(
       const metadataSource = userConfig?.metadataSource || 'cinemeta';
       const hasTmdbOAuth = !!(userConfig?.tmdbSessionId && userConfig?.tmdbAccountId);
       const tmdbLanguage = userConfig?.tmdbLanguage || 'en-US';
+      const tmdbBearerToken = userConfig?.tmdbBearerToken;
       
-      const enrichedPageItems = await enrichItemsWithMetadata(initialItemsFlat, metadataSource, hasTmdbOAuth, tmdbLanguage);
+      const enrichedPageItems = await enrichItemsWithMetadata(initialItemsFlat, metadataSource, hasTmdbOAuth, tmdbLanguage, tmdbBearerToken);
       const genreItemsFromPage = enrichedPageItems.filter(item => item.genres && item.genres.map(g => String(g).toLowerCase()).includes(String(genre).toLowerCase()));
       allEnrichedGenreItems.push(...genreItemsFromPage);
       mdbListOffset += MDBLIST_PAGE_LIMIT;
@@ -367,8 +368,9 @@ async function fetchListItems(
     const metadataSource = userConfig?.metadataSource || 'cinemeta';
     const hasTmdbOAuth = !!(userConfig?.tmdbSessionId && userConfig?.tmdbAccountId);
     const tmdbLanguage = userConfig?.tmdbLanguage || 'en-US';
+    const tmdbBearerToken = userConfig?.tmdbBearerToken;
     
-    allItems = await enrichItemsWithMetadata(initialItemsFlat, metadataSource, hasTmdbOAuth, tmdbLanguage);
+    allItems = await enrichItemsWithMetadata(initialItemsFlat, metadataSource, hasTmdbOAuth, tmdbLanguage, tmdbBearerToken);
   }
 
   const finalResult = { allItems: allItems, hasMovies, hasShows };
