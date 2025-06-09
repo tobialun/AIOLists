@@ -267,13 +267,17 @@ async function createAddon(userConfig) {
 
     let sourceHasMovies, sourceHasShows;
     if (listSourceInfo.source === 'mdblist' || listSourceInfo.source === 'mdblist_url') {
-      sourceHasMovies = listSourceInfo.hasMovies;
-      sourceHasShows = listSourceInfo.hasShows;
+      // Check both the list info and stored metadata for MDBList lists
+      let metadata = userConfig.listsMetadata[currentListId] || userConfig.listsMetadata[listSourceInfo.originalId] || {};
+      sourceHasMovies = listSourceInfo.hasMovies || metadata.hasMovies === true;
+      sourceHasShows = listSourceInfo.hasShows || metadata.hasShows === true;
+      
+
   } else if (listSourceInfo.source === 'trakt_public') {
       sourceHasMovies = listSourceInfo.hasMovies;
       sourceHasShows = listSourceInfo.hasShows;
   } else if (listSourceInfo.source === 'trakt') { // This now only handles private trakt
-      let metadata = listsMetadata[currentListId] || listsMetadata[listSourceInfo.originalId] || {};
+      let metadata = userConfig.listsMetadata[currentListId] || userConfig.listsMetadata[listSourceInfo.originalId] || {};
       sourceHasMovies = metadata.hasMovies === true;
       sourceHasShows = metadata.hasShows === true;
 
@@ -384,19 +388,29 @@ async function createAddon(userConfig) {
             determinedHasMovies = true;
             determinedHasShows = true;
         } else {
-            const moviesCount = parseInt(listInfo.movies) || 0;
-            const showsCount = parseInt(listInfo.shows) || 0;
-            determinedHasMovies = moviesCount > 0;
-            determinedHasShows = showsCount > 0;
+            // First check if we have stored metadata for this list
+            const existingMetadata = userConfig.listsMetadata[fullManifestListId];
+            if (existingMetadata && typeof existingMetadata.hasMovies === 'boolean' && typeof existingMetadata.hasShows === 'boolean') {
+                determinedHasMovies = existingMetadata.hasMovies;
+                determinedHasShows = existingMetadata.hasShows;
+            } else {
+                // Fall back to API response data
+                const moviesCount = parseInt(listInfo.movies) || 0;
+                const showsCount = parseInt(listInfo.shows) || 0;
+                determinedHasMovies = moviesCount > 0;
+                determinedHasShows = showsCount > 0;
 
-            if (moviesCount === 0 && showsCount === 0) {
-                const mediatype = listInfo.mediatype;
-                if (mediatype === 'movie') {
-                    determinedHasMovies = true;
-                } else if (mediatype === 'show' || mediatype === 'series') {
-                    determinedHasShows = true;
+                if (moviesCount === 0 && showsCount === 0) {
+                    const mediatype = listInfo.mediatype;
+                    if (mediatype === 'movie') {
+                        determinedHasMovies = true;
+                    } else if (mediatype === 'show' || mediatype === 'series') {
+                        determinedHasShows = true;
+                    }
                 }
             }
+            
+
         }
 
         listDataForProcessing.hasMovies = determinedHasMovies;
