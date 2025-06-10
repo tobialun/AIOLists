@@ -160,6 +160,71 @@
         <div id="addonsList" class="addons-list"></div>
       </div>
     </div>
+
+    <!-- Search Section -->
+    <div class="search-section api-section">
+        <div class="section-header">
+            <h2>Search/Metadata</h2>
+            <span id="searchNotification" class="section-notification"></span>
+        </div>
+        <p class="info-text">Configure search providers and metadata source for your Stremio addon.</p>
+        
+        <div class="form-group">
+            <label for="searchSources">Search&nbsp;Providers</label>
+            <div class="checkbox-group search-options">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="searchCinemeta"> Cinemeta
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="searchTrakt"> Trakt
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="searchTmdb"> TMDB
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="searchMulti"> Merged (Trakt+TMDB)
+                </label>
+            </div>
+        </div>
+
+        <div class="metadata-search-settings">
+            <div class="metadata-row">
+                <div class="form-group metadata-source-group">
+                    <label for="metadataSourceSelect">Metadata Source:</label>
+                    <select id="metadataSourceSelect" class="metadata-select">
+                        <option value="cinemeta">Cinemeta (Default)</option>
+                        <option value="tmdb">TMDB</option>
+                    </select>
+                </div>
+                <div class="form-group language-group" id="tmdbLanguageGroup" style="display: none;">
+                    <label for="tmdbLanguageSelect">Language:</label>
+                    <select id="tmdbLanguageSelect" class="metadata-select">
+                        <option value="en-US">English (en-US)</option>
+                        <option value="fr-FR">French (fr-FR)</option>
+                        <option value="es-ES">Spanish (es-ES)</option>
+                        <option value="de-DE">German (de-DE)</option>
+                        <option value="it-IT">Italian (it-IT)</option>
+                        <option value="pt-BR">Portuguese Brazil (pt-BR)</option>
+                        <option value="ja-JP">Japanese (ja-JP)</option>
+                        <option value="ko-KR">Korean (ko-KR)</option>
+                        <option value="zh-CN">Chinese Simplified (zh-CN)</option>
+                        <option value="ru-RU">Russian (ru-RU)</option>
+                        <option value="hi-IN">Hindi (hi-IN)</option>
+                        <option value="ar-SA">Arabic (ar-SA)</option>
+                        <option value="nl-NL">Dutch (nl-NL)</option>
+                        <option value="sv-SE">Swedish (sv-SE)</option>
+                        <option value="da-DK">Danish (da-DK)</option>
+                        <option value="fi-FI">Finnish (fi-FI)</option>
+                        <option value="no-NO">Norwegian (no-NO)</option>
+                        <option value="pl-PL">Polish (pl-PL)</option>
+                        <option value="tr-TR">Turkish (tr-TR)</option>
+                        <option value="th-TH">Thai (th-TH)</option>
+                    </select>
+                </div>
+            </div>
+            <span id="metadataInfo" class="setting-info-text">Choose metadata source and language preferences.</span>
+        </div>
+    </div>
     
     <div class="settings-section api-section">
         <div class="collapsible-header" id="settingsHeader">
@@ -174,43 +239,6 @@
             </div>
             <div class="setting-item" id="randomListFeatureContainer"> <button type="button" id="toggleRandomListBtn" class="action-btn">Enable Random List</button>
                 <span id="randomListFeatureInfo" class="setting-info-text"></span>
-            </div>
-            <div class="setting-item" id="metadataSettingsContainer">
-                <div class="metadata-settings">
-                    <div class="form-group metadata-source-group">
-                        <label for="metadataSourceSelect">Metadata Source:</label>
-                        <select id="metadataSourceSelect" class="metadata-select">
-                            <option value="cinemeta">Cinemeta (Default)</option>
-                            <option value="tmdb">TMDB</option>
-                        </select>
-                    </div>
-                    <div class="form-group language-group" id="tmdbLanguageGroup" style="display: none;">
-                        <label for="tmdbLanguageSelect">TMDB Language:</label>
-                        <select id="tmdbLanguageSelect" class="metadata-select">
-                            <option value="en-US">English (en-US)</option>
-                            <option value="fr-FR">French (fr-FR)</option>
-                            <option value="es-ES">Spanish (es-ES)</option>
-                            <option value="de-DE">German (de-DE)</option>
-                            <option value="it-IT">Italian (it-IT)</option>
-                            <option value="pt-BR">Portuguese Brazil (pt-BR)</option>
-                            <option value="ja-JP">Japanese (ja-JP)</option>
-                            <option value="ko-KR">Korean (ko-KR)</option>
-                            <option value="zh-CN">Chinese Simplified (zh-CN)</option>
-                            <option value="ru-RU">Russian (ru-RU)</option>
-                            <option value="hi-IN">Hindi (hi-IN)</option>
-                            <option value="ar-SA">Arabic (ar-SA)</option>
-                            <option value="nl-NL">Dutch (nl-NL)</option>
-                            <option value="sv-SE">Swedish (sv-SE)</option>
-                            <option value="da-DK">Danish (da-DK)</option>
-                            <option value="fi-FI">Finnish (fi-FI)</option>
-                            <option value="no-NO">Norwegian (no-NO)</option>
-                            <option value="pl-PL">Polish (pl-PL)</option>
-                            <option value="tr-TR">Turkish (tr-TR)</option>
-                            <option value="th-TH">Thai (th-TH)</option>
-                        </select>
-                    </div>
-                    <span id="metadataInfo" class="setting-info-text">Choose metadata source and language preferences.</span>
-                </div>
             </div>
             <div class="setting-item" id="copyConfigHashContainer">
             </div>
@@ -247,7 +275,6 @@
       </div>
     </div>
   </div>
-
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
   <script src="/script.js"></script>
   <script async defer src="https://buttons.github.io/buttons.js"></script>

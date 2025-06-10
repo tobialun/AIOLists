@@ -16,9 +16,12 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null, metadataCo
         if (imdbId && !imdbId.startsWith('tt')) imdbId = `tt${imdbId}`;
         if (!imdbId) return null;
 
+        // Create base metadata, prioritizing enriched metadata fields over fallbacks
         const baseMeta = {
             id: imdbId,
             type: item.type,
+            // For enriched items, the name should already be in the preferred language/source
+            // Only use fallbacks if name is truly missing
             name: item.name || item.title || `Untitled ${item.type}`,
             poster: item.poster,
             background: item.background || item.backdrop,

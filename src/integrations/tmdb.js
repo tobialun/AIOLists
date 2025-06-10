@@ -11,7 +11,7 @@
 
 const axios = require('axios');
 const Cache = require('../utils/cache');
-const { ITEMS_PER_PAGE } = require('../config');
+const { ITEMS_PER_PAGE, TMDB_REDIRECT_URI, TMDB_BEARER_TOKEN } = require('../config');
 
 // Create a cache instance for TMDB data with 24 hour TTL
 const tmdbCache = new Cache({ defaultTTL: 24 * 3600 * 1000 }); // 24 hours
@@ -21,7 +21,7 @@ const TMDB_BASE_URL_V3 = 'https://api.themoviedb.org/3';
 const TMDB_REQUEST_TIMEOUT = 15000;
 
 // TMDB Bearer Token - Read Access Token from environment variable (for server-side operations)
-const DEFAULT_TMDB_BEARER_TOKEN = process.env.TMDB_READ_ACCESS_TOKEN;
+const DEFAULT_TMDB_BEARER_TOKEN = TMDB_BEARER_TOKEN;
 
 /**
  * Create TMDB request token (Step 1)
@@ -43,11 +43,16 @@ async function createTmdbRequestToken(userBearerToken) {
     });
 
     if (response.data && response.data.success) {
+      const baseAuthUrl = `https://www.themoviedb.org/authenticate/${response.data.request_token}`;
+      const authUrl = TMDB_REDIRECT_URI ? 
+        `${baseAuthUrl}?redirect_to=${encodeURIComponent(TMDB_REDIRECT_URI)}` : 
+        baseAuthUrl;
+      
       return {
         success: true,
         requestToken: response.data.request_token,
         expiresAt: response.data.expires_at,
-        authUrl: `https://www.themoviedb.org/authenticate/${response.data.request_token}`
+        authUrl: authUrl
       };
     }
     throw new Error('Failed to create TMDB request token');

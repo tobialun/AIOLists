@@ -1,8 +1,18 @@
+// Load environment variables first
+require('dotenv').config();
+
+// Debug environment variable loading
+console.log(`[DEBUG] Server startup - TMDB_BEARER_TOKEN env var exists: ${!!process.env.TMDB_BEARER_TOKEN}`);
+console.log(`[DEBUG] Server startup - TMDB_BEARER_TOKEN length: ${process.env.TMDB_BEARER_TOKEN ? process.env.TMDB_BEARER_TOKEN.length : 'null/undefined'}`);
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const { PORT, IS_PRODUCTION } = require('./config');
+const { PORT, IS_PRODUCTION, TMDB_BEARER_TOKEN } = require('./config');
 const configureRoutes = require('./routes');
+
+console.log(`[DEBUG] Server startup - Config TMDB_BEARER_TOKEN: ${TMDB_BEARER_TOKEN ? 'SET' : 'NULL/UNDEFINED'}`);
+console.log(`[DEBUG] Server startup - Config TMDB_BEARER_TOKEN length: ${TMDB_BEARER_TOKEN ? TMDB_BEARER_TOKEN.length : 'null/undefined'}`);
 
 async function initializeApp() {
   try {

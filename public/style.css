@@ -212,7 +212,7 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 .api-section h2 { margin-top: 0; margin-bottom: 0; color: #333; font-size: 1.15em; font-weight: 600; }
 #traktPinContainer { display: none; align-items: center; gap: 10px; }
 #traktPin { 
-  width: 100px; 
+  width: 110px; 
   padding: 9px 12px; 
   border: 1px solid #ddd; 
   border-radius: 4px;
@@ -287,11 +287,51 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
     color: #555;
 }
 
-.metadata-settings {
-    display: flex;
+.metadata-search-settings {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.metadata-row {
+  display: flex;
+  gap: 20px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.metadata-row .form-group {
+  margin-bottom: 10px;
+  min-width: 200px;
+}
+
+.metadata-row .form-group label {
+  width: auto;
+  margin-bottom: 5px;
+  display: block;
+}
+
+.metadata-row .metadata-select {
+  width: 100%;
+  min-width: 180px;
+}
+
+@media (max-width: 600px) {
+  .metadata-row {
     flex-direction: column;
-    gap: 15px;
+    gap: 10px;
+  }
+  
+  .metadata-row .form-group {
+    min-width: unset;
     width: 100%;
+  }
+}
+
+.metadata-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
 }
 
 .metadata-source-group,
@@ -1030,4 +1070,28 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 
 .persistence-action-link:hover {
   text-decoration: underline;
+}
+
+.search-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.search-options .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 14px;
+  color: #555;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.search-options .checkbox-label input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
 }

@@ -1,14 +1,14 @@
 // src/routes/api.js
 const path = require('path');
-const { defaultConfig, staticGenres } = require('../config');
+const { defaultConfig, staticGenres, TMDB_BEARER_TOKEN, TMDB_REDIRECT_URI, TRAKT_REDIRECT_URI } = require('../config');
 const { compressConfig, decompressConfig, compressShareableConfig, createShareableConfig } = require('../utils/urlConfig');
 const { createAddon, fetchListContent } = require('../addon/addonBuilder');
 const { convertToStremioFormat } = require('../addon/converters');
 const { setCacheHeaders, isWatchlist: commonIsWatchlist } = require('../utils/common');
 const Cache = require('../utils/cache');
 const { validateRPDBKey } = require('../utils/posters');
-const { validateTMDBKey } = require('../utils/tmdb');
-const { initTraktApi, authenticateTrakt, getTraktAuthUrl, fetchTraktLists, fetchPublicTraktListDetails } = require('../integrations/trakt');
+const { validateTMDBKey } = require('../integrations/tmdb');
+const { initTraktApi, authenticateTrakt, getTraktAuthUrl, fetchTraktLists, fetchPublicTraktListDetails, validateTraktApi } = require('../integrations/trakt');
 const { fetchAllLists: fetchAllMDBLists, validateMDBListKey, extractListFromUrl: extractMDBListFromUrl } = require('../integrations/mdblist');
 const { importExternalAddon: importExtAddon } = require('../integrations/externalAddons');
 const { saveTraktTokens } = require('../utils/remoteStorage');
@@ -195,12 +195,23 @@ module.exports = function(router) {
         });
       }
 
+      // Check if language is changing to clear TMDB cache
+      const currentLanguage = req.userConfig.tmdbLanguage;
+      const languageChanged = tmdbLanguage && currentLanguage && tmdbLanguage !== currentLanguage;
+
       if (metadataSource) {
         req.userConfig.metadataSource = metadataSource;
       }
       
       if (tmdbLanguage && typeof tmdbLanguage === 'string') {
         req.userConfig.tmdbLanguage = tmdbLanguage;
+      }
+
+      // Clear TMDB cache if language changed
+      if (languageChanged) {
+        const { clearTmdbCaches } = require('../integrations/tmdb');
+        clearTmdbCaches();
+        console.log(`Cleared TMDB cache due to language change from ${currentLanguage} to ${tmdbLanguage}`);
       }
 
       req.userConfig.lastUpdated = new Date().toISOString();
@@ -211,6 +222,27 @@ module.exports = function(router) {
     } catch (error) {
       console.error('Error updating metadata settings:', error);
       res.status(500).json({ success: false, error: 'Failed to update metadata settings' });
+    }
+  });
+
+  router.post('/:configHash/config', async (req, res) => {
+    try {
+      const { searchSources } = req.body;
+      
+      if (searchSources && Array.isArray(searchSources)) {
+        // Temporarily disable 'multi' search option
+        const validSources = searchSources.filter(s => ['cinemeta', 'trakt', 'tmdb'].includes(s));
+        req.userConfig.searchSources = validSources;
+      }
+
+      req.userConfig.lastUpdated = new Date().toISOString();
+
+      const newConfigHash = await compressConfig(req.userConfig);
+      manifestCache.clear();
+      res.json({ success: true, newConfigHash: newConfigHash });
+    } catch (error) {
+      console.error('Error updating config:', error);
+      res.status(500).json({ success: false, error: 'Failed to update config' });
     }
   });
 
@@ -257,6 +289,86 @@ module.exports = function(router) {
       skip = isNaN(skip) ? 0 : skip;
       genre = genre || null;
   
+      // Handle search catalog specially
+      if (catalogId === 'aiolists_search') {
+        let searchQuery = req.query.search;
+        
+        // Extract search query from extra params if not in query string
+        if (!searchQuery && extraParamsString) {
+          const searchMatch = extraParamsString.match(/search=([^&]+)/);
+          if (searchMatch) {
+            searchQuery = decodeURIComponent(searchMatch[1]);
+          }
+        }
+        
+        if (!searchQuery || searchQuery.trim().length < 2) {
+          return res.json({ metas: [] });
+        }
+
+        try {
+          // Determine search sources based on user configuration
+          const userSearchSources = req.userConfig.searchSources || ['cinemeta'];
+          let sources = [];
+          
+          // Individual search sources mode (multi search is disabled)
+          if (userSearchSources.includes('cinemeta')) {
+            sources.push('cinemeta');
+          }
+          if (userSearchSources.includes('trakt')) {
+            sources.push('trakt');
+          }
+          if (userSearchSources.includes('tmdb') && (req.userConfig.tmdbBearerToken || req.userConfig.tmdbSessionId)) {
+            sources.push('tmdb');
+          }
+          
+          // Default to Cinemeta if no valid sources
+          if (sources.length === 0) {
+            sources = ['cinemeta'];
+          }
+          
+          const { searchContent } = require('../utils/searchEngine');
+          
+          // Use the catalog type for search
+          const searchType = catalogType || 'all';
+          
+          const searchResults = await searchContent({
+            query: searchQuery.trim(),
+            type: searchType,
+            sources: sources,
+            limit: 50,
+            userConfig: req.userConfig
+          });
+
+          // Filter results by type and genre if specified
+          let filteredMetas = searchResults.results || [];
+          
+          // Filter by type if specified
+          if (catalogType && catalogType !== 'all') {
+            filteredMetas = filteredMetas.filter(result => result.type === catalogType);
+          }
+
+          // Filter by genre if specified
+          if (genre && genre !== 'All') {
+            filteredMetas = filteredMetas.filter(result => {
+              if (!result.genres) return false;
+              const itemGenres = Array.isArray(result.genres) ? result.genres : [result.genres];
+              return itemGenres.some(g => 
+                String(g).toLowerCase() === String(genre).toLowerCase()
+              );
+            });
+          }
+
+          return res.json({ 
+            metas: filteredMetas,
+            cacheMaxAge: 300 // 5 minutes cache for search results
+          });
+
+        } catch (error) {
+          console.error(`Error in search catalog for "${searchQuery}":`, error);
+          return res.json({ metas: [] });
+        }
+      }
+
       const listSource = catalogId === 'random_mdblist_catalog' ? 'random_mdblist' :
                          catalogId.startsWith('aiolists-') ? 'mdblist_native' :
                          catalogId.startsWith('trakt_') && !catalogId.startsWith('traktpublic_') ? 'trakt_native' :
@@ -269,11 +381,9 @@ module.exports = function(router) {
       }
 
       if ((listSource === 'mdblist_native' || listSource === 'mdblist_url' || listSource === 'random_mdblist') && !req.userConfig.apiKey) {
-          console.log(`[Shared Config] MDBList API key missing for ${catalogId}. Returning empty.`);
           return res.json({ metas: [] });
       }
       if (listSource === 'trakt_native' && !req.userConfig.traktAccessToken) {
-          console.log(`[Shared Config] Trakt Access Token missing for ${catalogId}. Returning empty.`);
           return res.json({ metas: [] });
       }
   
@@ -290,8 +400,32 @@ module.exports = function(router) {
       if (!itemsResult) {
         return res.json({ metas: [] });
       }
+
+      // Enrich items with metadata based on user's metadata source preference
+      let enrichedResult = itemsResult;
+      if (itemsResult.allItems && itemsResult.allItems.length > 0) {
+        const metadataSource = req.userConfig.metadataSource || 'cinemeta';
+        const hasTmdbOAuth = !!(req.userConfig.tmdbSessionId && req.userConfig.tmdbAccountId);
+        const tmdbLanguage = req.userConfig.tmdbLanguage || 'en-US';
+        const tmdbBearerToken = req.userConfig.tmdbBearerToken;
+        
+        const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
+        const enrichedItems = await enrichItemsWithMetadata(
+          itemsResult.allItems, 
+          metadataSource, 
+          hasTmdbOAuth, 
+          tmdbLanguage, 
+          tmdbBearerToken
+        );
+        
+        // Update the items result with enriched items
+        enrichedResult = {
+          ...itemsResult,
+          allItems: enrichedItems
+        };
+      }
   
-      let metas = await convertToStremioFormat(itemsResult, req.userConfig.rpdbApiKey);  
+      let metas = await convertToStremioFormat(enrichedResult, req.userConfig.rpdbApiKey);  
       if (catalogType === 'movie' || catalogType === 'series') {
           metas = metas.filter(meta => meta.type === catalogType);
       }
@@ -405,7 +539,12 @@ module.exports = function(router) {
       success: true, 
       config: configToSend, 
       isPotentiallySharedConfig: req.isPotentiallySharedConfig,
-      isDbConnected: false
+      isDbConnected: false,
+      env: {
+        hasTmdbBearerToken: !!TMDB_BEARER_TOKEN,
+        hasTmdbRedirectUri: !!TMDB_REDIRECT_URI,
+        hasTraktRedirectUri: !!TRAKT_REDIRECT_URI
+      }
     });
   });
 
@@ -425,7 +564,6 @@ module.exports = function(router) {
       if (req.userConfig.apiKey !== newApiKey) {
         configChanged = true;
         if (newApiKey === '') {
-            console.log('MDBList API key cleared. Purging aiolists- and mdblisturl_ entries. Disabling random list feature.');
             req.userConfig.apiKey = '';
             if (req.userConfig.mdblistUsername) delete req.userConfig.mdblistUsername;
             req.userConfig.enableRandomListFeature = false;
@@ -842,14 +980,11 @@ module.exports = function(router) {
         }
 
         if (isRandomCatalog) {
-            console.log(`Disabling Random MDBList Catalog feature due to removal from UI.`);
             req.userConfig.enableRandomListFeature = false;
         } else if (isUrlImport) {
-          console.log(`Purging URL import: ${idStr}`);
           if (req.userConfig.importedAddons) delete req.userConfig.importedAddons[idStr];
           purgeListConfigs(req.userConfig, idStr, true);
         } else if (isSubCatalog && parentAddonIdForSubCatalog) {
-          console.log(`Purging sub-catalog: ${idStr} from parent ${parentAddonIdForSubCatalog}`);
           purgeListConfigs(req.userConfig, idStr, true);
           if (subCatalogOriginalId && subCatalogOriginalId !== idStr && req.userConfig.sortPreferences?.[subCatalogOriginalId]) {
             delete req.userConfig.sortPreferences[subCatalogOriginalId];
@@ -859,7 +994,6 @@ module.exports = function(router) {
               req.userConfig.importedAddons[parentAddonIdForSubCatalog].catalogs.filter(cat => String(cat.id) !== idStr);
           }
         } else if (isNativeMDBList || isNativeTrakt) {
-          console.log(`Soft deleting native list: ${idStr}`);
           currentRemoved.add(idStr);
           if (req.userConfig.hiddenLists) {
             req.userConfig.hiddenLists = req.userConfig.hiddenLists.filter(id => String(id) !== idStr);
@@ -956,7 +1090,20 @@ module.exports = function(router) {
       
   router.post('/config/create', async (req, res) => {
     try {
-      let newConfig = { ...defaultConfig, listOrder: [], hiddenLists: [], removedLists: [], customListNames: {}, customMediaTypeNames: {}, mergedLists: {}, sortPreferences: {}, importedAddons: {}, listsMetadata: {}, enableRandomListFeature: false, lastUpdated: new Date().toISOString() };
+      let newConfig = { 
+        ...defaultConfig, 
+        listOrder: [], 
+        hiddenLists: [], 
+        removedLists: [], 
+        customListNames: {}, 
+        customMediaTypeNames: {}, 
+        mergedLists: {}, 
+        sortPreferences: {}, 
+        importedAddons: {}, 
+        listsMetadata: {}, 
+        enableRandomListFeature: false, 
+        lastUpdated: new Date().toISOString() 
+      };
 
       if (req.body.sharedConfig) {
         const sharedSettings = await decompressConfig(req.body.sharedConfig);
@@ -991,8 +1138,33 @@ module.exports = function(router) {
     }
   });
 
+  router.post('/trakt/validate', async (req, res) => {
+    try {
+      const isValid = await validateTraktApi();
+      res.json({ 
+        success: true, 
+        valid: isValid
+      });
+    } catch (error) {
+      console.error('Error in /trakt/validate:', error);
+      res.status(500).json({ error: 'Failed to validate Trakt API access', details: error.message });
+    }
+  });
+
   router.get('/trakt/login', (req, res) => {
-    try { res.redirect(getTraktAuthUrl()); }
+    try { 
+      // If both TMDB Bearer Token and redirect URIs are configured, 
+      // allow direct redirect, otherwise return JSON for frontend handling
+      if (TMDB_BEARER_TOKEN && TMDB_REDIRECT_URI && TRAKT_REDIRECT_URI) {
+        res.redirect(getTraktAuthUrl());
+      } else {
+        res.json({ 
+          success: true, 
+          authUrl: getTraktAuthUrl(),
+          requiresManualAuth: true
+        });
+      }
+    }
     catch (error) {
         console.error('Error in /trakt/login redirect:', error);
         res.status(500).json({ error: 'Internal server error for Trakt login' });
@@ -1009,7 +1181,6 @@ module.exports = function(router) {
         await initTraktApi(req.userConfig); // This is the key change
   
         if (req.userConfig.traktAccessToken !== initialTraktAccessToken) {
-            console.log("[AIOLists] Trakt access token was updated in-memory during list processing.");
             configChangedByThisRequest = true;
         }
     }
@@ -1362,7 +1533,6 @@ module.exports = function(router) {
       // Check if listsMetadata was changed during this request processing
       const finalListsMetadataJson = JSON.stringify(req.userConfig.listsMetadata || {});
       if (initialListsMetadataJson !== finalListsMetadataJson) {
-          console.log("[AIOLists] listsMetadata content changed during /lists processing.");
           configChangedByThisRequest = true; // Set if metadata content itself changed
       }
       
@@ -1379,7 +1549,6 @@ module.exports = function(router) {
       };
     
       if (configChangedByThisRequest) {
-        console.log("[AIOLists] Config changed (metadata or Trakt token), generating new config hash.");
         const configToSave = { ...req.userConfig };
         
         if (configToSave.upstashUrl) {
@@ -1410,10 +1579,10 @@ module.exports = function(router) {
       let genres = staticGenres;
       
       // Use TMDB genres if TMDB is selected and configured
-          if (req.userConfig.metadataSource === 'tmdb' && req.userConfig.tmdbSessionId && req.userConfig.tmdbLanguage && req.userConfig.tmdbBearerToken) {
-      try {
-        const { fetchTmdbGenres } = require('../integrations/tmdb');
-        const tmdbGenres = await fetchTmdbGenres(req.userConfig.tmdbLanguage, req.userConfig.tmdbBearerToken);
+      if (req.userConfig.metadataSource === 'tmdb' && req.userConfig.tmdbSessionId && req.userConfig.tmdbLanguage && req.userConfig.tmdbBearerToken) {
+        try {
+          const { fetchTmdbGenres } = require('../integrations/tmdb');
+          const tmdbGenres = await fetchTmdbGenres(req.userConfig.tmdbLanguage, req.userConfig.tmdbBearerToken);
           if (tmdbGenres.length > 0) {
             genres = tmdbGenres;
           }
@@ -1433,12 +1602,21 @@ module.exports = function(router) {
     try {
       const { requestToken, tmdbBearerToken } = req.body;
       if (!requestToken) return res.status(400).json({ error: 'Request token required' });
-      if (!tmdbBearerToken) return res.status(400).json({ error: 'TMDB Bearer Token required' });
+      
+      const bearerTokenToUse = tmdbBearerToken || TMDB_BEARER_TOKEN;
+      if (!bearerTokenToUse) return res.status(400).json({ error: 'TMDB Bearer Token required' });
 
       const { authenticateTmdb } = require('../integrations/tmdb');
-      const tmdbAuthResult = await authenticateTmdb(requestToken, tmdbBearerToken);
+      const tmdbAuthResult = await authenticateTmdb(requestToken, bearerTokenToUse);
       
-      req.userConfig.tmdbBearerToken = tmdbBearerToken;
+      // Only store bearer token in config if it's not from environment
+      if (!TMDB_BEARER_TOKEN) {
+        req.userConfig.tmdbBearerToken = bearerTokenToUse;
+      } else {
+        // Set to null (not empty string) so fallback logic works properly
+        req.userConfig.tmdbBearerToken = null;
+      }
+      
       req.userConfig.tmdbSessionId = tmdbAuthResult.sessionId;
       req.userConfig.tmdbAccountId = tmdbAuthResult.accountId;
       req.userConfig.lastUpdated = new Date().toISOString();
@@ -1450,7 +1628,8 @@ module.exports = function(router) {
         success: true,
         configHash: newConfigHash,
         message: 'Authenticated with TMDB',
-        username: tmdbAuthResult.username
+        username: tmdbAuthResult.username,
+        usingEnvToken: !!TMDB_BEARER_TOKEN
       });
     } catch (error) {
       console.error('Error in /tmdb/auth:', error);
@@ -1460,7 +1639,7 @@ module.exports = function(router) {
 
   router.post('/:configHash/tmdb/disconnect', async (req, res) => {
     try {
-      req.userConfig.tmdbBearerToken = '';
+      req.userConfig.tmdbBearerToken = null;
       req.userConfig.tmdbSessionId = null;
       req.userConfig.tmdbAccountId = null;
       
@@ -1484,12 +1663,14 @@ module.exports = function(router) {
   router.post('/tmdb/validate', async (req, res) => {
     try {
       const { tmdbBearerToken } = req.body;
-      if (!tmdbBearerToken) {
+      const bearerTokenToUse = tmdbBearerToken || TMDB_BEARER_TOKEN;
+      
+      if (!bearerTokenToUse) {
         return res.status(400).json({ error: 'TMDB Bearer Token is required' });
       }
       
       const { validateTMDBKey } = require('../integrations/tmdb');
-      const isValid = await validateTMDBKey(tmdbBearerToken);
+      const isValid = await validateTMDBKey(bearerTokenToUse);
       res.json({ 
         success: true, 
         valid: isValid
@@ -1512,20 +1693,99 @@ module.exports = function(router) {
   router.post('/tmdb/login', async (req, res) => {
     try {
       const { tmdbBearerToken } = req.body;
-      if (!tmdbBearerToken) {
+      const bearerTokenToUse = tmdbBearerToken || TMDB_BEARER_TOKEN;
+      
+      if (!bearerTokenToUse) {
         return res.status(400).json({ error: 'TMDB Bearer Token is required' });
       }
       
       const { getTmdbAuthUrl } = require('../integrations/tmdb');
-      const authData = await getTmdbAuthUrl(tmdbBearerToken);
+      const authData = await getTmdbAuthUrl(bearerTokenToUse);
+      
       res.json({ 
         success: true, 
         requestToken: authData.requestToken,
-        authUrl: authData.authUrl 
+        authUrl: authData.authUrl,
+        canDirectRedirect: !!(TMDB_BEARER_TOKEN && TMDB_REDIRECT_URI),
+        tmdbRedirectUri: TMDB_REDIRECT_URI // Add the redirect URI for frontend to construct full redirect URL
       });
     } catch (error) {
       console.error('Error in /tmdb/login:', error);
       res.status(500).json({ error: 'Failed to get TMDB auth URL', details: error.message });
+    }
+  });
+
+  router.post('/:configHash/search', async (req, res) => {
+    try {
+      const { query, type = 'all', sources = ['cinemeta'], limit = 50 } = req.body;
+      
+      if (!query || query.trim().length < 2) {
+        return res.status(400).json({ error: 'Search query must be at least 2 characters long' });
+      }
+
+      const trimmedQuery = query.trim();
+      const validSources = sources.filter(s => ['cinemeta', 'trakt', 'tmdb', 'multi'].includes(s));
+      
+      if (validSources.length === 0) {
+        return res.status(400).json({ error: 'At least one valid search source must be specified' });
+      }
+
+      // Check if TMDB search is requested but user doesn't have TMDB configured
+      if (validSources.includes('tmdb') && !req.userConfig.tmdbBearerToken && !TMDB_BEARER_TOKEN) {
+        return res.status(400).json({ 
+          error: 'TMDB search requires TMDB Bearer Token configuration' 
+        });
+      }
+
+      const { searchContent } = require('../utils/searchEngine');
+      
+      const searchResults = await searchContent({
+        query: trimmedQuery,
+        type: type,
+        sources: validSources,
+        limit: limit,
+        userConfig: req.userConfig
+      });
+
+      // Set cache headers - search results can be cached for a short time
+      res.setHeader('Cache-Control', 'public, max-age=300'); // 5 minutes cache
+      
+      res.json({
+        success: true,
+        query: trimmedQuery,
+        results: searchResults.results,
+        totalResults: searchResults.totalResults,
+        sources: searchResults.sources
+      });
+
+    } catch (error) {
+      console.error('Error in search endpoint:', error);
+      res.status(500).json({ 
+        error: 'Search failed', 
+        details: error.message 
+      });
+    }
+  });
+
+  // Debug endpoint to check user config values
+  router.get('/:configHash/debug/config', async (req, res) => {
+    try {
+      const debugInfo = {
+        hasTmdbSessionId: !!req.userConfig.tmdbSessionId,
+        hasTmdbAccountId: !!req.userConfig.tmdbAccountId,
+        hasTmdbBearerToken: !!req.userConfig.tmdbBearerToken,
+        hasEnvBearerToken: !!TMDB_BEARER_TOKEN,
+        metadataSource: req.userConfig.metadataSource,
+        tmdbLanguage: req.userConfig.tmdbLanguage,
+        tmdbSessionIdValue: req.userConfig.tmdbSessionId ? 'SET' : 'NOT_SET',
+        tmdbAccountIdValue: req.userConfig.tmdbAccountId ? 'SET' : 'NOT_SET',
+        effectiveBearerToken: req.userConfig.tmdbBearerToken || TMDB_BEARER_TOKEN ? 'AVAILABLE' : 'NOT_AVAILABLE'
+      };
+      
+      res.json({ success: true, debug: debugInfo });
+    } catch (error) {
+      console.error('Error in debug config endpoint:', error);
+      res.status(500).json({ error: 'Failed to get debug info', details: error.message });
     }
   });
 };

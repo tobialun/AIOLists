@@ -37,6 +37,39 @@ Your Trakt tokens are now stored in the redis db and will automatically refresh 
 If you find this project useful, the best way to support me is to **star this repository** on GitHub!
 
 
+# Environment Configuration
+
+AIOLists supports several environment variables for advanced configuration:
+
+## Environment Variables
+
+Create a `.env` file in the root directory with the following variables:
+
+```bash
+# Trakt Configuration
+TRAKT_CLIENT_ID=your_trakt_client_id_here
+TRAKT_REDIRECT_URI=your_redirect_uri_here
+
+# TMDB Configuration  
+TMDB_REDIRECT_URI=your_tmdb_redirect_uri_here
+TMDB_BEARER_TOKEN=your_tmdb_bearer_token_here
+
+# Server Configuration
+PORT=3000
+NODE_ENV=development
+```
+
+### Configuration Details
+
+- **TRAKT_CLIENT_ID**: Your Trakt API client ID. If not provided, defaults to the built-in client ID.
+- **TRAKT_REDIRECT_URI**: Redirect URI for Trakt OAuth. Defaults to `urn:ietf:wg:oauth:2.0:oob` for manual code entry.
+- **TMDB_REDIRECT_URI**: Redirect URI for TMDB OAuth. When set, users will be redirected after authentication.
+- **TMDB_BEARER_TOKEN**: Your TMDB Read Access Token. When set, the bearer token field is hidden in the UI and this token is used automatically.
+
+### Automatic Redirect Behavior
+
+When both `TMDB_BEARER_TOKEN` and redirect URIs are configured, the "Connect to Trakt" and "Connect to TMDB" buttons will redirect users directly to the authentication pages instead of showing manual steps.
+
 # Deployment
 
 The easiest way to host this project for free is through hugging face.

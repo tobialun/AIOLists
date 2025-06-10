@@ -5,9 +5,7 @@ const { batchFetchPosters } = require('./posters');
 // Import TMDB functions that use the built-in Bearer token
 const { 
   batchConvertImdbToTmdbIds, 
-  batchFetchTmdbMetadata,
-  convertImdbToTmdbId,
-  fetchTmdbMetadata 
+  batchFetchTmdbMetadata
 } = require('../integrations/tmdb');
 
 const CINEMETA_BASE = 'https://v3-cinemeta.strem.io';
@@ -55,12 +53,35 @@ async function fetchCinemetaChunk(imdbIdChunk, type) {
 async function enrichItemsWithMetadata(items, metadataSource = 'cinemeta', hasTmdbOAuth = false, tmdbLanguage = 'en-US', tmdbBearerToken = null) {
   if (!items || items.length === 0) return [];
   
-  // Use TMDB only if user has OAuth connected and explicitly chose TMDB
-  if (metadataSource === 'tmdb' && hasTmdbOAuth && tmdbBearerToken) {
-    return await enrichItemsWithTMDB(items, tmdbLanguage, tmdbBearerToken);
+  console.log(`[DEBUG] Metadata enrichment called with: source="${metadataSource}", language="${tmdbLanguage}", hasToken=${!!tmdbBearerToken}, hasTmdbOAuth=${hasTmdbOAuth}`);
+  console.log(`[DEBUG] tmdbBearerToken value: ${tmdbBearerToken ? 'SET' : 'NULL/UNDEFINED'}`);
+  
+  // Use TMDB enrichment if requested and we have either OAuth or bearer token
+  if (metadataSource === 'tmdb' && (hasTmdbOAuth || tmdbBearerToken)) {
+    try {
+      console.log(`[DEBUG] Using TMDB enrichment for ${items.length} items`);
+      return await enrichItemsWithTMDB(items, tmdbLanguage, tmdbBearerToken);
+    } catch (error) {
+      console.error('[DEBUG] TMDB enrichment failed:', error.message);
+      console.log(`[DEBUG] Using Cinemeta enrichment for ${items.length} items (fallback)`);
+      return await enrichItemsWithCinemeta(items);
+    }
   }
   
-  // Default to Cinemeta for all other cases
+  // Use Trakt enrichment if requested
+  if (metadataSource === 'trakt') {
+    try {
+      console.log(`[DEBUG] Using Trakt enrichment for ${items.length} items`);
+      return await enrichItemsWithTrakt(items);
+    } catch (error) {
+      console.error('[DEBUG] Trakt enrichment failed:', error.message);
+      console.log(`[DEBUG] Using Cinemeta enrichment for ${items.length} items (fallback)`);
+      return await enrichItemsWithCinemeta(items);
+    }
+  }
+  
+  // Default to Cinemeta enrichment
+  console.log(`[DEBUG] Using Cinemeta enrichment for ${items.length} items (default)`);
   return await enrichItemsWithCinemeta(items);
 }
 
@@ -73,69 +94,74 @@ async function enrichItemsWithMetadata(items, metadataSource = 'cinemeta', hasTm
  */
 async function enrichItemsWithTMDB(items, language = 'en-US', userBearerToken = null) {
   if (!items || items.length === 0) return [];
-
+  
+  console.log(`[DEBUG] Starting TMDB enrichment for ${items.length} items with language: ${language}`);
+  console.log(`[DEBUG] TMDB userBearerToken: ${userBearerToken ? 'PROVIDED' : 'NULL/UNDEFINED'}`);
+  
+  const { batchConvertImdbToTmdbIds, batchFetchTmdbMetadata } = require('../integrations/tmdb');
+  
+  // Step 1: Convert IMDB IDs to TMDB IDs
+  const imdbIds = items.map(item => item.imdb_id || item.id).filter(id => id && id.startsWith('tt'));
+  
+  if (imdbIds.length === 0) {
+    console.log('[DEBUG] No valid IMDB IDs found for TMDB enrichment');
+    return items;
+  }
+  
+  console.log(`[DEBUG] Converting ${imdbIds.length} IMDB IDs to TMDB IDs`);
+  
   try {
-    // Step 1: Convert IMDB IDs to TMDB IDs for items that need it
-    const itemsNeedingConversion = items.filter(item => 
-      item.imdb_id && item.imdb_id.startsWith('tt') && !item.tmdb_id
-    );
+    const imdbToTmdbMap = await batchConvertImdbToTmdbIds(imdbIds, userBearerToken);
+    console.log(`[DEBUG] IMDB to TMDB conversion completed, got ${Object.keys(imdbToTmdbMap).length} results`);
     
-    let imdbToTmdbMap = {};
-    if (itemsNeedingConversion.length > 0) {
-      const imdbIds = itemsNeedingConversion.map(item => item.imdb_id);
-      imdbToTmdbMap = await batchConvertImdbToTmdbIds(imdbIds, userBearerToken);
-    }
-
-    // Step 2: Prepare items for metadata fetching
-    const tmdbItems = items.map(item => {
-      let tmdbId = item.tmdb_id;
-      let type = item.type === 'series' ? 'series' : 'movie';
-      
-      // Try to get TMDB ID from conversion if we don't have one
-      if (!tmdbId && item.imdb_id && imdbToTmdbMap[item.imdb_id]) {
-        tmdbId = imdbToTmdbMap[item.imdb_id].tmdbId;
-        type = imdbToTmdbMap[item.imdb_id].type;
+    // Step 2: Prepare items for TMDB metadata fetch
+    const tmdbItems = [];
+    items.forEach(item => {
+      const imdbId = item.imdb_id || item.id;
+      if (imdbId && imdbToTmdbMap[imdbId]) {
+        tmdbItems.push({
+          imdbId: imdbId,
+          tmdbId: imdbToTmdbMap[imdbId].tmdbId,
+          type: imdbToTmdbMap[imdbId].type
+        });
       }
-      
-      return tmdbId ? {
-        tmdbId,
-        type,
-        imdbId: item.imdb_id,
-        originalItem: item
-      } : null;
-    }).filter(Boolean);
-
-    // Step 3: Fetch metadata from TMDB
-    let tmdbMetadataMap = {};
-    if (tmdbItems.length > 0) {
-      tmdbMetadataMap = await batchFetchTmdbMetadata(tmdbItems, language, userBearerToken);
+    });
+    
+    if (tmdbItems.length === 0) {
+      console.log('[DEBUG] No TMDB IDs found for items');
+      return items;
     }
-
-    // Step 4: Merge metadata back into original items
+    
+    console.log(`[DEBUG] Fetching TMDB metadata for ${tmdbItems.length} items`);
+    const tmdbMetadataMap = await batchFetchTmdbMetadata(tmdbItems, language, userBearerToken);
+    console.log(`[DEBUG] TMDB metadata fetch completed, got ${Object.keys(tmdbMetadataMap).length} results`);
+    
+    // Step 3: Merge TMDB metadata with original items
     const enrichedItems = items.map(item => {
-      const identifier = item.imdb_id || `tmdb:${item.tmdb_id}`;
-      const tmdbData = tmdbMetadataMap[identifier];
+      const imdbId = item.imdb_id || item.id;
+      const tmdbMetadata = tmdbMetadataMap[imdbId];
       
-      if (tmdbData) {
+      if (tmdbMetadata) {
         return {
           ...item,
-          ...tmdbData,
-          // Preserve original fields that might be important
-          imdb_id: item.imdb_id || tmdbData.imdb_id,
-          id: item.imdb_id || tmdbData.id,
-          type: item.type || tmdbData.type
+          ...tmdbMetadata,
+          // Preserve original ID and type
+          id: item.id,
+          imdb_id: item.imdb_id || item.id,
+          type: item.type
         };
       }
       
       return item;
     });
-
+    
+    console.log(`[DEBUG] TMDB enrichment completed successfully for ${enrichedItems.length} items`);
     return enrichedItems;
-
+    
   } catch (error) {
-    console.error('Error enriching items with TMDB:', error.message);
-    // Fallback to original items if enrichment fails
-    return items;
+    console.error(`[DEBUG] Error in TMDB enrichment process:`, error.message);
+    console.error(`[DEBUG] Error stack:`, error.stack);
+    throw error; // Re-throw to trigger fallback
   }
 }
 

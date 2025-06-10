@@ -155,6 +155,12 @@ async function createAddon(userConfig) {
 
   const allKnownTypes = new Set(['movie', 'series', 'all']);
 
+  // Add search type if multi search is enabled
+  const searchSources = userConfig.searchSources || ['cinemeta'];
+  if (searchSources.includes('multi')) {
+    allKnownTypes.add('search');
+  }
+
   // Add types from customMediaTypeNames (user overrides)
   Object.values(userConfig.customMediaTypeNames || {}).forEach(type => {
       if (type && typeof type === 'string') {
@@ -189,14 +195,17 @@ async function createAddon(userConfig) {
   const hiddenListsSet = new Set(hiddenLists.map(String));
   const removedListsSet = new Set(removedLists.map(String));
   
-  // Determine if we should use TMDB genres
+  // Determine which genres to use based on metadata source
   const shouldUseTmdbGenres = userConfig.metadataSource === 'tmdb' && userConfig.tmdbLanguage && userConfig.tmdbBearerToken;
   let availableGenres = staticGenres;
   
   if (shouldUseTmdbGenres) {
     try {
       const { fetchTmdbGenres } = require('../integrations/tmdb');
-      const tmdbGenres = await fetchTmdbGenres(userConfig.tmdbLanguage, userConfig.tmdbBearerToken);
+      const tmdbGenres = await Promise.race([
+        fetchTmdbGenres(userConfig.tmdbLanguage, userConfig.tmdbBearerToken),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('TMDB genres timeout')), 5000))
+      ]);
       if (tmdbGenres.length > 0) {
         availableGenres = tmdbGenres;
       }
@@ -237,10 +246,17 @@ async function createAddon(userConfig) {
   }
   
   if (userConfig.tmdbSessionId && userConfig.tmdbAccountId) {
-    const { fetchTmdbLists } = require('../integrations/tmdb');
-    const tmdbResult = await fetchTmdbLists(userConfig);
-    if (tmdbResult.isConnected && tmdbResult.lists && tmdbResult.lists.length > 0) {
-      activeListsInfo.push(...tmdbResult.lists.map(l => ({ ...l, source: 'tmdb', originalId: String(l.id) })));
+    try {
+      const { fetchTmdbLists } = require('../integrations/tmdb');
+      const tmdbResult = await Promise.race([
+        fetchTmdbLists(userConfig),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('TMDB lists timeout')), 5000))
+      ]);
+      if (tmdbResult.isConnected && tmdbResult.lists && tmdbResult.lists.length > 0) {
+        activeListsInfo.push(...tmdbResult.lists.map(l => ({ ...l, source: 'tmdb', originalId: String(l.id) })));
+      }
+    } catch (error) {
+      console.warn('Failed to fetch TMDB lists:', error.message);
     }
   }
   
@@ -403,6 +419,7 @@ async function createAddon(userConfig) {
     }
   };
   
+  console.log(`[AddonBuilder] Processing ${activeListsInfo.length} lists...`);
   for (const listInfo of activeListsInfo) {
     if (listInfo.source === 'mdblist') {
         const originalMdbListId = String(listInfo.id); 
@@ -518,8 +535,9 @@ async function createAddon(userConfig) {
     }
   }
 
+  console.log(`[AddonBuilder] Processing ${Object.keys(importedAddons || {}).length} imported addons...`);
   for (const addon of Object.values(importedAddons || {})) {
-    const addonGroupId = String(addon.id); 
+    const addonGroupId = String(addon.id);
     if (removedListsSet.has(addonGroupId) || hiddenListsSet.has(addonGroupId)) {
         continue;
     }
@@ -596,18 +614,149 @@ async function createAddon(userConfig) {
     });
   }
 
+  // Add search catalogs - create separate movie/series catalogs (multi search disabled)
+  const searchCatalogExtra = [
+    { name: "search", isRequired: true },
+    { name: "genre", isRequired: false, options: availableGenres }
+  ];
+  
+  // Create separate movie/series catalogs
+  tempGeneratedCatalogs.push({
+    id: 'aiolists_search',
+    type: 'movie',
+    name: 'Search Movies',
+    extra: searchCatalogExtra,
+    extraSupported: searchCatalogExtra.map(e => e.name)
+  });
+  
+  tempGeneratedCatalogs.push({
+    id: 'aiolists_search',
+    type: 'series', 
+    name: 'Search Series',
+    extra: searchCatalogExtra,
+    extraSupported: searchCatalogExtra.map(e => e.name)
+  });
+  
   manifest.catalogs = tempGeneratedCatalogs;
   const builder = new addonBuilder(manifest);
 
   builder.defineCatalogHandler(async ({ type, id, extra }) => {
     const skip = parseInt(extra?.skip) || 0;
     const genre = extra?.genre || null;
+    const searchQuery = extra?.search || null;
     
-    // Pass the 'type' from the Stremio request to fetchListContent as stremioCatalogType
+    // Handle search catalog
+    if (id === 'aiolists_search' && searchQuery) {      
+      if (!searchQuery || searchQuery.trim().length < 2) {
+        return Promise.resolve({ metas: [] });
+      }
+
+      try {
+        // Determine search sources based on user configuration
+        const userSearchSources = userConfig.searchSources || ['cinemeta'];
+        let sources = [];
+        
+        // Individual search sources mode (multi search is disabled)
+        if (userSearchSources.includes('cinemeta')) {
+          sources.push('cinemeta');
+        }
+        if (userSearchSources.includes('trakt')) {
+          sources.push('trakt');
+        }
+        if (userSearchSources.includes('tmdb') && (userConfig.tmdbBearerToken || userConfig.tmdbSessionId)) {
+          sources.push('tmdb');
+        }
+        
+        // Default to Cinemeta if no valid sources
+        if (sources.length === 0) {
+          sources = ['cinemeta'];
+        }
+
+        const { searchContent } = require('../utils/searchEngine');
+        
+        // Use the type for search
+        const searchType = type || 'all';
+        
+        const searchResults = await searchContent({
+          query: searchQuery.trim(),
+          type: searchType,
+          sources: sources,
+          limit: 50,
+          userConfig: userConfig
+        });
+
+        // Filter results by type and genre if specified
+        let filteredMetas = searchResults.results || [];
+        
+        // Filter by type if specified
+        if (type && type !== 'all' && type !== 'search') {
+          filteredMetas = filteredMetas.filter(result => result.type === type);
+        }
+
+        // Filter by genre if specified
+        if (genre && genre !== 'All') {
+          const beforeFilter = filteredMetas.length;
+          filteredMetas = filteredMetas.filter(result => {
+            if (!result.genres) return false;
+            const itemGenres = Array.isArray(result.genres) ? result.genres : [result.genres];
+            return itemGenres.some(g => 
+              String(g).toLowerCase() === String(genre).toLowerCase()
+            );
+          });
+        }
+
+        return Promise.resolve({ 
+          metas: filteredMetas,
+          cacheMaxAge: 300 // 5 minutes cache for search results
+        });
+
+      } catch (error) {
+        console.error(`[Search] Error in search catalog for "${searchQuery}":`, error);
+        return Promise.resolve({ metas: [] });
+      }
+    }
+    
+    // Handle regular list catalogs
     const itemsResult = await fetchListContent(id, userConfig, skip, genre, type); 
     if (!itemsResult || !itemsResult.allItems) return Promise.resolve({ metas: [] });
 
-    let metas = await convertToStremioFormat(itemsResult, userConfig.rpdbApiKey);
+    // Enrich items with metadata based on user's metadata source preference
+    const metadataSource = userConfig.metadataSource || 'cinemeta';
+    const hasTmdbOAuth = !!(userConfig.tmdbSessionId && userConfig.tmdbAccountId);
+    const tmdbLanguage = userConfig.tmdbLanguage || 'en-US';
+    
+    // Debug the environment variable loading
+    const envToken = require('../config').TMDB_BEARER_TOKEN;
+    console.log(`[DEBUG] AddonBuilder - Raw env TMDB_BEARER_TOKEN: "${envToken}"`);
+    console.log(`[DEBUG] AddonBuilder - Raw env TMDB_BEARER_TOKEN length: ${envToken ? envToken.length : 'null/undefined'}`);
+    console.log(`[DEBUG] AddonBuilder - process.env.TMDB_BEARER_TOKEN exists: ${!!process.env.TMDB_BEARER_TOKEN}`);
+    console.log(`[DEBUG] AddonBuilder - process.env.TMDB_BEARER_TOKEN length: ${process.env.TMDB_BEARER_TOKEN ? process.env.TMDB_BEARER_TOKEN.length : 'null/undefined'}`);
+    
+    const tmdbBearerToken = userConfig.tmdbBearerToken || envToken;
+    
+    console.log(`[DEBUG] AddonBuilder - metadataSource: ${metadataSource}, hasTmdbOAuth: ${hasTmdbOAuth}, tmdbBearerToken: ${tmdbBearerToken ? 'SET' : 'NULL/UNDEFINED'}`);
+    console.log(`[DEBUG] AddonBuilder - userConfig.tmdbBearerToken: ${userConfig.tmdbBearerToken ? 'SET' : 'NULL/UNDEFINED'}`);
+    console.log(`[DEBUG] AddonBuilder - userConfig.tmdbBearerToken exact value: "${userConfig.tmdbBearerToken}"`);
+    console.log(`[DEBUG] AddonBuilder - environment TMDB_BEARER_TOKEN: ${envToken ? 'SET' : 'NULL/UNDEFINED'}`);
+    console.log(`[DEBUG] AddonBuilder - final tmdbBearerToken: ${tmdbBearerToken ? 'SET' : 'NULL/UNDEFINED'}`);
+    console.log(`[DEBUG] AddonBuilder - final tmdbBearerToken length: ${tmdbBearerToken ? tmdbBearerToken.length : 'null/undefined'}`);
+    
+    const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
+    const enrichedItems = await enrichItemsWithMetadata(
+      itemsResult.allItems, 
+      metadataSource, 
+      hasTmdbOAuth, 
+      tmdbLanguage, 
+      tmdbBearerToken
+    );
+    
+    // Update the items result with enriched items
+    const enrichedResult = {
+      ...itemsResult,
+      allItems: enrichedItems
+    };
+
+    let metas = await convertToStremioFormat(enrichedResult, userConfig.rpdbApiKey);
 
     if (type === 'movie' || type === 'series') {
         metas = metas.filter(meta => meta.type === type);
@@ -634,7 +783,7 @@ async function createAddon(userConfig) {
       const metadataSource = userConfig.metadataSource || 'cinemeta';
       const hasTmdbOAuth = !!(userConfig.tmdbSessionId && userConfig.tmdbAccountId);
       const tmdbLanguage = userConfig.tmdbLanguage || 'en-US';
-      const tmdbBearerToken = userConfig.tmdbBearerToken;
+      const tmdbBearerToken = userConfig.tmdbBearerToken || require('../config').TMDB_BEARER_TOKEN;
       
       // Use the same enrichment as catalog items
       const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');

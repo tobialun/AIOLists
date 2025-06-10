@@ -38,7 +38,6 @@ document.addEventListener('DOMContentLoaded', function() {
     userConfig: {
         apiKey: '',
         rpdbApiKey: '',
-    
         metadataSource: 'cinemeta',
         tmdbLanguage: 'en-US',
         traktAccessToken: null,
@@ -60,7 +59,8 @@ document.addEventListener('DOMContentLoaded', function() {
         mergedLists: {},
         sortPreferences: {},
         disableGenreFilter: false,
-        listOrder: []
+        listOrder: [],
+        searchSources: ['cinemeta']
     },
     currentLists: [],
     validationTimeout: null,
@@ -72,6 +72,9 @@ document.addEventListener('DOMContentLoaded', function() {
     isDbConnected: false,
     isLoadingFromUrl: false
   };
+
+  // Loading state tracker
+  const loadingState = new Map();
 
   const elements = {
     apiKeyInput: document.getElementById('apiKey'),
@@ -117,7 +120,7 @@ document.addEventListener('DOMContentLoaded', function() {
     randomListFeatureInfo: document.getElementById('randomListFeatureInfo'),
     randomListFeatureContainer: document.getElementById('randomListFeatureContainer'),
     listsNotification: document.getElementById('listsNotification'),
-    copyConfigHashBtn: null,
+    copyConfigHashBtn: document.getElementById('copyConfigHashBtn'),
     copyBlankCharBtn: null,
     copyBlankCharContainer: null,
     copyConfigHashContainer: document.getElementById('copyConfigHashContainer'),
@@ -133,7 +136,14 @@ document.addEventListener('DOMContentLoaded', function() {
     metadataSourceSelect: document.getElementById('metadataSourceSelect'),
     tmdbLanguageSelect: document.getElementById('tmdbLanguageSelect'),
     tmdbLanguageGroup: document.getElementById('tmdbLanguageGroup'),
-    metadataInfo: document.getElementById('metadataInfo')
+    metadataInfo: document.getElementById('metadataInfo'),
+    configHashDisplay: document.getElementById('configHashDisplay'),
+    // Search provider elements
+    searchCinemeta: document.getElementById('searchCinemeta'),
+    searchTrakt: document.getElementById('searchTrakt'),
+    searchTmdb: document.getElementById('searchTmdb'),
+    searchMulti: document.getElementById('searchMulti'),
+    searchNotification: document.getElementById('searchNotification')
   };
 
   async function init() {
@@ -142,7 +152,16 @@ document.addEventListener('DOMContentLoaded', function() {
     let initialConfigHash = null;
     let action = null;
 
-    if (pathParts.length === 0 || (pathParts.length === 1 && pathParts[0] === 'configure')) {
+    // Check for TMDB callback (request_token parameter)
+    const urlParams = new URLSearchParams(window.location.search);
+    const requestToken = urlParams.get('request_token');
+    const isApproved = urlParams.get('approved');
+    
+    if (requestToken && pathParts.length >= 2 && pathParts[1] === 'configure') {
+      // This is a TMDB callback - extract config hash from URL
+      initialConfigHash = pathParts[0];
+      action = 'tmdb-callback';
+    } else if (pathParts.length === 0 || (pathParts.length === 1 && pathParts[0] === 'configure')) {
         // Fresh page, no config hash
     } else if (pathParts.length >= 1 && pathParts[0] === 'import-shared' && pathParts[1]) {
         action = 'import-shared';
@@ -156,7 +175,11 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    if (action === 'import-shared' && initialConfigHash) {
+    if (action === 'tmdb-callback' && initialConfigHash && requestToken) {
+      // Handle TMDB callback
+      state.configHash = initialConfigHash;
+      await handleTmdbCallback(requestToken, isApproved);
+    } else if (action === 'import-shared' && initialConfigHash) {
         try {
             const response = await fetch('/api/config/create', {
                 method: 'POST',
@@ -387,6 +410,12 @@ document.addEventListener('DOMContentLoaded', function() {
     elements.toggleGenreFilterBtn?.addEventListener('click', handleToggleGenreFilter);
     elements.toggleRandomListBtn?.addEventListener('click', handleToggleRandomListFeature);
     elements.settingsHeader?.addEventListener('click', toggleSettingsSection);
+    
+    // Search provider event listeners
+    elements.searchCinemeta?.addEventListener('change', saveSearchPreferences);
+    elements.searchTrakt?.addEventListener('change', saveSearchPreferences);
+    elements.searchTmdb?.addEventListener('change', saveSearchPreferences);
+    elements.searchMulti?.addEventListener('change', handleMultiSearchToggle);
     
     // TMDB OAuth event listeners (handled in showTmdbAuthContainer when needed)
     // elements.tmdbApproveBtn?.addEventListener('click', handleTmdbApproval) - set dynamically
@@ -678,6 +707,7 @@ document.addEventListener('DOMContentLoaded', function() {
       if (!response.ok) throw new Error(data.error || `Failed to load config data. Status: ${response.status}`);
 
       state.isDbConnected = data.isDbConnected;
+      state.env = data.env || {};
       state.userConfig = {
         ...state.userConfig,
         ...data.config,
@@ -699,6 +729,20 @@ document.addEventListener('DOMContentLoaded', function() {
       updateApiKeyUI(elements.apiKeyInput, mdblistApiKey, 'mdblist', state.userConfig.mdblistUsername);
       updateApiKeyUI(elements.rpdbApiKeyInput, rpdbApiKey, 'rpdb');
       
+      // Handle TMDB Bearer Token input field
+      const tmdbBearerTokenInput = document.getElementById('tmdbBearerToken');
+      const tmdbBearerTokenGroup = document.getElementById('tmdbBearerTokenGroup');
+      if (tmdbBearerTokenInput && tmdbBearerTokenGroup) {
+        if (state.env.hasTmdbBearerToken) {
+          // Environment variable is set, hide the input field
+          tmdbBearerTokenGroup.style.display = 'none';
+        } else {
+          // Environment variable not set, show the input field and populate it if config has a value
+          tmdbBearerTokenGroup.style.display = 'block';
+          tmdbBearerTokenInput.value = state.userConfig.tmdbBearerToken || '';
+        }
+      }
+      
       // Update metadata settings
       if (elements.metadataSourceSelect) {
         elements.metadataSourceSelect.value = state.userConfig.metadataSource || 'cinemeta';
@@ -709,6 +753,7 @@ document.addEventListener('DOMContentLoaded', function() {
       updateMetadataSourceUI();
       updateGenreFilterButtonText();
       updateRandomListButtonState();
+      updateSearchSourcesUI();
 
       if (mdblistApiKey || rpdbApiKey) {
         await validateAndSaveApiKeys(mdblistApiKey, rpdbApiKey, '', true);
@@ -920,6 +965,9 @@ document.addEventListener('DOMContentLoaded', function() {
         elements.traktPin.value = '';
         elements.upstashContainer.classList.add('hidden');
     }
+    
+    // Update search sources UI when Trakt connection changes
+    updateSearchSourcesUI();
   }
 
   function updatePersistenceStatus(isPersistent) {
@@ -1715,19 +1763,26 @@ function startNameEditing(listItemElement, list) {
   // TMDB OAuth connection functions
   async function connectToTmdb() {
     try {
-      // Get the TMDB Bearer Token from the input field
+      // Get the TMDB Bearer Token from the input field or use environment variable
       const tmdbBearerTokenInput = document.getElementById('tmdbBearerToken');
-      const tmdbBearerToken = tmdbBearerTokenInput?.value?.trim();
+      let tmdbBearerToken;
       
-      if (!tmdbBearerToken) {
-        showNotification('connections', 'Please enter your TMDB Bearer Token first.', 'error', true);
-        tmdbBearerTokenInput?.focus();
-        return;
+      if (state.env?.hasTmdbBearerToken) {
+        // Environment variable is set, no need for user input
+        tmdbBearerToken = null; // Backend will use environment variable
+      } else {
+        // Get token from input field
+        tmdbBearerToken = tmdbBearerTokenInput?.value?.trim();
+        if (!tmdbBearerToken) {
+          showNotification('connections', 'Please enter your TMDB Bearer Token first.', 'error', true);
+          tmdbBearerTokenInput?.focus();
+          return;
+        }
       }
       
       showNotification('connections', 'Validating TMDB Bearer Token...', 'info', true);
       
-      // First validate the bearer token
+      // First validate the bearer token (null means use environment variable)
       const validateResponse = await fetch('/tmdb/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1754,9 +1809,23 @@ function startNameEditing(listItemElement, list) {
         throw new Error(data.error || 'Failed to get TMDB auth URL');
       }
       
-      // Store request token and bearer token for later use
+      // Check if both environment variables are set for direct redirect
+      if (state.env?.hasTmdbBearerToken && state.env?.hasTmdbRedirectUri && data.canDirectRedirect) {
+        // Direct redirect flow - construct the redirect URL and go directly to TMDB
+        const cleanRedirectUri = data.tmdbRedirectUri.replace(/\/+$/, ''); // Remove trailing slashes
+        const redirectUrl = `${cleanRedirectUri}/${state.configHash}/configure`;
+        const fullAuthUrl = `https://www.themoviedb.org/authenticate/${data.requestToken}?redirect_to=${encodeURIComponent(redirectUrl)}`;
+        
+        showNotification('connections', 'Redirecting to TMDB for authorization...', 'info', true);
+        
+        // Redirect to TMDB for authorization
+        window.location.href = fullAuthUrl;
+        return;
+      }
+      
+      // Manual flow - store request token and show manual authorization steps
       state.tmdbRequestToken = data.requestToken;
-      state.tmdbBearerToken = tmdbBearerToken;
+      state.tmdbBearerToken = tmdbBearerToken; // This will be null if using env var
       
       // Show TMDB auth container
       showTmdbAuthContainer(data.authUrl);
@@ -1791,7 +1860,7 @@ function startNameEditing(listItemElement, list) {
         throw new Error('No request token available');
       }
       
-      if (!state.tmdbBearerToken) {
+      if (!state.tmdbBearerToken && !state.env?.hasTmdbBearerToken) {
         throw new Error('No TMDB Bearer Token available');
       }
       
@@ -1802,7 +1871,7 @@ function startNameEditing(listItemElement, list) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           requestToken: state.tmdbRequestToken,
-          tmdbBearerToken: state.tmdbBearerToken
+          tmdbBearerToken: state.tmdbBearerToken // null if using env var
         })
       });
       
@@ -1812,9 +1881,11 @@ function startNameEditing(listItemElement, list) {
       }
       
       state.configHash = data.configHash;
-      state.userConfig.tmdbSessionId = 'connected'; // Don't store actual session
-      state.userConfig.tmdbAccountId = 'connected';
-      state.userConfig.tmdbBearerToken = state.tmdbBearerToken; // Store the bearer token
+      // Don't override the backend values - let them persist from the backend response
+      // Only set bearer token if user provided one (not using environment variable)
+      if (state.tmdbBearerToken) {
+        state.userConfig.tmdbBearerToken = state.tmdbBearerToken;
+      }
       
       // Clean up
       delete state.tmdbRequestToken;
@@ -1822,6 +1893,10 @@ function startNameEditing(listItemElement, list) {
       
       updateURL();
       updateStremioButtonHref();
+      
+      // Reload configuration to get the actual session values from backend
+      await loadConfig();
+      
       updateTmdbConnectionUI(true, data.username);
       
       // Reset auth container to ensure clean state
@@ -1846,7 +1921,7 @@ function startNameEditing(listItemElement, list) {
     if (tmdbLoginBtn && !state.userConfig.tmdbSessionId) {
       tmdbLoginBtn.style.display = 'inline-flex';
     }
-    if (tmdbBearerTokenGroup && !state.userConfig.tmdbSessionId) {
+    if (tmdbBearerTokenGroup && !state.userConfig.tmdbSessionId && !state.env?.hasTmdbBearerToken) {
       tmdbBearerTokenGroup.style.display = 'block';
     }
     if (tmdbAuthContainer) {
@@ -1877,15 +1952,21 @@ function startNameEditing(listItemElement, list) {
         }
       }
     } else {
-      // Disconnected state: show connect button and bearer token input, hide connected state and auth container
+      // Disconnected state: show connect button and conditionally show bearer token input, hide connected state and auth container
       if (tmdbLoginBtn) tmdbLoginBtn.style.setProperty('display', 'inline-flex', 'important');
-      if (tmdbBearerTokenGroup) tmdbBearerTokenGroup.style.setProperty('display', 'block', 'important');
+      // Only show bearer token input if environment variable is not set
+      if (tmdbBearerTokenGroup && !state.env?.hasTmdbBearerToken) {
+        tmdbBearerTokenGroup.style.setProperty('display', 'block', 'important');
+      }
       if (tmdbConnectedState) tmdbConnectedState.style.setProperty('display', 'none', 'important');
       if (tmdbAuthContainer) tmdbAuthContainer.style.setProperty('display', 'none', 'important');
     }
     
     // Update metadata source UI when TMDB connection changes
     updateMetadataSourceUI();
+    
+    // Update search sources UI when TMDB connection changes
+    updateSearchSourcesUI();
   }
 
   window.disconnectTMDB = async function() {
@@ -1907,7 +1988,7 @@ function startNameEditing(listItemElement, list) {
       
       // Clear the Bearer Token input field
       const tmdbBearerTokenInput = document.getElementById('tmdbBearerToken');
-      if (tmdbBearerTokenInput) {
+      if (tmdbBearerTokenInput && !state.env?.hasTmdbBearerToken) {
         tmdbBearerTokenInput.value = '';
       }
       
@@ -2010,7 +2091,7 @@ function startNameEditing(listItemElement, list) {
       if (tmdbLanguage) state.userConfig.tmdbLanguage = tmdbLanguage;
       
       updateMetadataSourceUI();
-      showNotification('settings', 'Metadata settings updated.', 'success');
+      showNotification('search', 'Metadata settings updated.', 'success');
     } catch (error) {
       console.error('Error updating metadata settings:', error);
       showNotification('settings', `Error: ${error.message}`, 'error', true);
@@ -2043,11 +2124,376 @@ function startNameEditing(listItemElement, list) {
     }
     
     if (elements.metadataInfo) {
-      const currentSource = state.userConfig.metadataSource === 'tmdb' ? 'TMDB' : 'Cinemeta';
+      let currentSource = 'Cinemeta';
+      if (state.userConfig.metadataSource === 'tmdb') {
+        currentSource = 'TMDB';
+      }
       const currentLang = state.userConfig.metadataSource === 'tmdb' ? ` (${state.userConfig.tmdbLanguage})` : '';
       elements.metadataInfo.textContent = `Currently using ${currentSource}${currentLang} for metadata.`;
     }
   }
 
-    init();
+  // Event handlers
+  document.addEventListener('DOMContentLoaded', function() {
+    // ... existing DOMContentLoaded code ...
+    
+    if (elements.metadataSourceSelect) {
+      elements.metadataSourceSelect.addEventListener('change', handleMetadataSourceChange);
+    }
+    if (elements.tmdbLanguageSelect) {
+      elements.tmdbLanguageSelect.addEventListener('change', handleTmdbLanguageChange);
+    }
+
+    // Search provider event listeners
+    if (elements.searchTrakt) {
+      elements.searchTrakt.addEventListener('change', saveSearchPreferences);
+    }
+    if (elements.searchTmdb) {
+      elements.searchTmdb.addEventListener('change', saveSearchPreferences);
+    }
+  });
+
+  // Search Functions
+  async function performSearch() {
+    if (!elements.searchQuery || !elements.searchQuery.value.trim()) {
+      showNotification('search', 'Please enter a search query', 'error');
+      return;
+    }
+
+    const query = elements.searchQuery.value.trim();
+    const type = elements.searchType.value;
+    const sources = [];
+
+    if (elements.searchCinemeta.checked) sources.push('cinemeta');
+    if (elements.searchTrakt.checked && !elements.searchTrakt.disabled) sources.push('trakt');
+    if (elements.searchTmdb.checked && !elements.searchTmdb.disabled) sources.push('tmdb');
+
+    if (sources.length === 0) {
+      showNotification('search', 'Please select at least one search source', 'error');
+      return;
+    }
+
+    // Disable search button during search
+    elements.searchButton.disabled = true;
+    elements.searchButton.textContent = 'Searching...';
+
+    try {
+      const response = await fetch(`/api/${state.configHash}/search`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          query: query,
+          type: type,
+          sources: sources,
+          limit: 20
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        displaySearchResults(data);
+        showNotification('search', `Found ${data.totalResults} results for "${query}"`, 'success');
+      } else {
+        showNotification('search', data.error || 'Search failed', 'error');
+        elements.searchResults.style.display = 'none';
+      }
+    } catch (error) {
+      console.error('Search error:', error);
+      showNotification('search', 'Search failed: ' + error.message, 'error');
+      elements.searchResults.style.display = 'none';
+    } finally {
+      elements.searchButton.disabled = false;
+      elements.searchButton.textContent = 'Search';
+    }
+  }
+
+  function clearSearch() {
+    if (elements.searchQuery) elements.searchQuery.value = '';
+    if (elements.searchType) elements.searchType.value = 'all';
+    if (elements.searchResults) elements.searchResults.style.display = 'none';
+    if (elements.searchResultsContent) elements.searchResultsContent.innerHTML = '';
+  }
+
+  function handleMultiSearchToggle() {
+    // Multi search is temporarily disabled
+    if (elements.searchMulti) {
+      elements.searchMulti.checked = false;
+      showNotification('search', 'Multi search is temporarily disabled', 'info');
+    }
+  }
+
+  function updateSearchSourcesUI() {
+    // Load saved search preferences
+    if (state.userConfig.searchSources) {
+      // Remove any multi search from saved preferences (migration)
+      if (state.userConfig.searchSources.includes('multi')) {
+        state.userConfig.searchSources = state.userConfig.searchSources.filter(s => s !== 'multi');
+        // If multi was the only option, default to cinemeta
+        if (state.userConfig.searchSources.length === 0) {
+          state.userConfig.searchSources = ['cinemeta'];
+        }
+      }
+      
+      // Set individual search sources
+      if (elements.searchMulti) elements.searchMulti.checked = false;
+      if (elements.searchCinemeta) {
+        elements.searchCinemeta.checked = state.userConfig.searchSources.includes('cinemeta');
+      }
+      if (elements.searchTrakt) {
+        elements.searchTrakt.checked = state.userConfig.searchSources.includes('trakt');
+      }
+      if (elements.searchTmdb) {
+        elements.searchTmdb.checked = state.userConfig.searchSources.includes('tmdb');
+      }
+    } else {
+      // Default to Cinemeta if no preferences saved
+      if (elements.searchCinemeta) {
+        elements.searchCinemeta.checked = true;
+      }
+      if (elements.searchMulti) elements.searchMulti.checked = false;
+    }
+
+    // Trakt search is always available (no connection required)
+    if (elements.searchTrakt) {
+      elements.searchTrakt.disabled = false;
+      const label = elements.searchTrakt.parentElement;
+      if (label) {
+        label.title = '';
+        label.style.opacity = '1';
+      }
+    }
+
+    // Enable/disable TMDB search based on connection
+    // Check for TMDB connection: either has sessionId and bearerToken in config, or has sessionId and env has bearerToken
+    const hasTmdbConnection = state.userConfig.tmdbSessionId && 
+                              (state.userConfig.tmdbBearerToken || state.env?.hasTmdbBearerToken);
+    
+    if (elements.searchTmdb) {
+      if (!hasTmdbConnection) {
+        elements.searchTmdb.disabled = true;
+        elements.searchTmdb.checked = false;
+        const label = elements.searchTmdb.parentElement;
+        if (label) {
+          label.title = 'Connect to TMDB first to enable TMDB search';
+          label.style.opacity = '0.6';
+        }
+      } else {
+        elements.searchTmdb.disabled = false;
+        const label = elements.searchTmdb.parentElement;
+        if (label) {
+          label.title = '';
+          label.style.opacity = '1';
+        }
+      }
+    }
+
+    // Disable Multi search (temporarily disabled)
+    if (elements.searchMulti) {
+      elements.searchMulti.disabled = true;
+      elements.searchMulti.checked = false;
+      const label = elements.searchMulti.parentElement;
+      if (label) {
+        label.title = 'Multi search is temporarily disabled';
+        label.style.opacity = '0.6';
+      }
+    }
+  }
+
+  async function saveSearchPreferences() {
+    if (!state.configHash) return;
+
+    // If any individual search source is selected, disable multi search
+    if ((elements.searchCinemeta && elements.searchCinemeta.checked) ||
+        (elements.searchTrakt && elements.searchTrakt.checked) ||
+        (elements.searchTmdb && elements.searchTmdb.checked)) {
+      if (elements.searchMulti) elements.searchMulti.checked = false;
+    }
+
+    const searchSources = [];
+    if (elements.searchCinemeta && elements.searchCinemeta.checked) searchSources.push('cinemeta');
+    if (elements.searchTrakt && elements.searchTrakt.checked && !elements.searchTrakt.disabled) searchSources.push('trakt');
+    if (elements.searchTmdb && elements.searchTmdb.checked && !elements.searchTmdb.disabled) searchSources.push('tmdb');
+    // Multi search is temporarily disabled
+    // if (elements.searchMulti && elements.searchMulti.checked) searchSources.push('multi');
+
+    try {
+      const response = await fetch(`/api/${state.configHash}/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          searchSources: searchSources
+        })
+      });
+
+      const data = await response.json();
+      if (data.success && data.newConfigHash) {
+        state.configHash = data.newConfigHash;
+        state.userConfig.searchSources = searchSources; // Update local state
+        updateURL();
+        updateStremioButtonHref();
+        showNotification('search', 'Search preferences saved.', 'success');
+      }
+    } catch (error) {
+      console.error('Error saving search preferences:', error);
+      showNotification('search', 'Error saving search preferences: ' + error.message, 'error');
+    }
+  }
+
+
+
+  function displaySearchResults(data) {
+    if (!elements.searchResults || !elements.searchResultsContent) return;
+
+    elements.searchResults.style.display = 'block';
+    elements.searchResultsContent.innerHTML = '';
+
+    if (!data.results || data.results.length === 0) {
+      elements.searchResultsContent.innerHTML = '<p class="no-results">No results found</p>';
+      return;
+    }
+
+    const resultsGrid = document.createElement('div');
+    resultsGrid.className = 'search-results-grid';
+
+    data.results.forEach(item => {
+      const resultCard = createSearchResultCard(item);
+      resultsGrid.appendChild(resultCard);
+    });
+
+    elements.searchResultsContent.appendChild(resultsGrid);
+
+    // Show source information
+    if (data.sources && data.sources.length > 0) {
+      const sourcesInfo = document.createElement('p');
+      sourcesInfo.className = 'search-sources-info';
+      sourcesInfo.textContent = `Sources: ${data.sources.join(', ')}`;
+      elements.searchResultsContent.appendChild(sourcesInfo);
+    }
+  }
+
+  function createSearchResultCard(item) {
+    const card = document.createElement('div');
+    card.className = 'search-result-card';
+
+    const poster = item.poster || 'https://via.placeholder.com/300x450/333/fff?text=No+Poster';
+    const title = item.name || 'Unknown Title';
+    const year = item.releaseInfo ? ` (${item.releaseInfo})` : '';
+    const type = item.type === 'series' ? 'TV Series' : 'Movie';
+    const rating = item.imdbRating ? `⭐ ${item.imdbRating}` : '';
+    const source = item.source ? item.source.toUpperCase() : '';
+    const foundVia = item.foundVia ? ` • ${item.foundVia}` : '';
+
+    card.innerHTML = `
+      <div class="search-result-poster">
+        <img src="${poster}" alt="${title}" onerror="this.src='https://via.placeholder.com/300x450/333/fff?text=No+Poster'">
+        <div class="search-result-overlay">
+          <span class="search-result-type">${type}</span>
+          ${source ? `<span class="search-result-source">${source}</span>` : ''}
+        </div>
+      </div>
+      <div class="search-result-info">
+        <h4 class="search-result-title">${title}${year}</h4>
+        ${rating ? `<div class="search-result-rating">${rating}</div>` : ''}
+        ${foundVia ? `<div class="search-result-found-via">${foundVia}</div>` : ''}
+        ${item.description ? `<p class="search-result-description">${item.description.substring(0, 150)}${item.description.length > 150 ? '...' : ''}</p>` : ''}
+        ${item.genres && item.genres.length > 0 ? `<div class="search-result-genres">${item.genres.slice(0, 3).join(', ')}</div>` : ''}
+      </div>
+    `;
+
+    // Add click handler to copy IMDB ID
+    card.addEventListener('click', () => {
+      if (item.id) {
+        navigator.clipboard.writeText(item.id).then(() => {
+          showNotification('search', `Copied ID: ${item.id}`, 'success');
+        }).catch(() => {
+          showNotification('search', `ID: ${item.id}`, 'info');
+        });
+      }
+    });
+
+    return card;
+  }
+
+  async function loadConfig() {
+    try {
+      loadingState.set('config', true);
+      const response = await fetch(`/api/${state.configHash}/config`);
+      const data = await response.json();
+      
+      if (data.success) {
+        state.userConfig = data.config;
+        updateAllUIFromConfig();
+        updateConnectionStatusFromConfig();
+        updateSearchSourcesUI(); // Add this line
+        
+        // Check for potential shared config
+        if (data.isPotentiallySharedConfig) {
+          showSharedConfigNotice();
+        }
+      } else {
+        showNotification('config', 'Failed to load configuration', 'error');
+      }
+    } catch (error) {
+      console.error('Error loading config:', error);
+      showNotification('config', 'Failed to load configuration', 'error');
+    } finally {
+      loadingState.set('config', false);
+    }
+  }
+
+  async function handleTmdbCallback(requestToken, isApproved) {
+    try {
+      // Clean up URL by removing TMDB parameters
+      const url = new URL(window.location);
+      url.searchParams.delete('request_token');
+      url.searchParams.delete('approved');
+      window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+      
+      if (isApproved === 'false') {
+        showNotification('connections', 'TMDB authorization was denied.', 'error', true);
+        return;
+      }
+      
+      showNotification('connections', 'Completing TMDB authentication...', 'info', true);
+      
+      // Complete the authentication using the request token
+      const response = await fetch(`/${state.configHash}/tmdb/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          requestToken: requestToken,
+          tmdbBearerToken: null // Environment variable will be used
+        })
+      });
+      
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to authenticate with TMDB');
+      }
+      
+      // Update state
+      state.configHash = data.configHash;
+      // Don't override the backend values - let them persist from the backend response
+      
+      updateURL();
+      updateStremioButtonHref();
+      
+      // Reload configuration to get the actual session values from backend
+      await loadConfig();
+      
+      updateTmdbConnectionUI(true, data.username);
+      
+      showNotification('connections', `Successfully connected to TMDB as ${data.username || 'user'}!`, 'success');
+      await loadUserListsAndAddons();
+      
+    } catch (error) {
+      console.error('TMDB Callback Error:', error);
+      showNotification('connections', `TMDB Authentication Error: ${error.message}`, 'error', true);
+    }
+  }
+
+  init();
 });

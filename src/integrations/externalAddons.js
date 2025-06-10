@@ -118,8 +118,6 @@ class ExternalAddon {
         // No logo URL provided or it's not a string
         if (this.manifest.hasOwnProperty('logo') && this.manifest.logo !== null && typeof this.manifest.logo !== 'undefined') { // if 'logo' key exists but value is weird
           console.warn(`[ExternalAddon] Invalid logo value specified for addon ${this.manifest.id}: ${this.manifest.logo}. Using default logo.`);
-        } else { // 'logo' key might be missing or null/undefined
-          console.log(`[ExternalAddon] No logo specified for addon ${this.manifest.id}. Using default logo.`);
         }
         tentativeLogo = defaultLogoUrl;
       }

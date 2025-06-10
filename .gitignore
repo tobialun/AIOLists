@@ -1,6 +1,13 @@
 # Logs
 *.log
 npm-debug.log*
+debug.log
+
+# Test files
+test_*.js
+*_test.js
+test.js
+
 # Database files
 /aiolists.sqlite
 /data/

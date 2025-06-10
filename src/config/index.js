@@ -2,7 +2,12 @@
 const ITEMS_PER_PAGE = 100;
 const PORT = process.env.PORT || 7000;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
-const TRAKT_CLIENT_ID = '490414ec03fe9a33b2d0c16d58261ebbbd9cf0eee23f213fa0e3eb1d6126d05c';
+
+// Environment variable configuration with defaults
+const TRAKT_CLIENT_ID = process.env.TRAKT_CLIENT_ID || '490414ec03fe9a33b2d0c16d58261ebbbd9cf0eee23f213fa0e3eb1d6126d05c';
+const TRAKT_REDIRECT_URI = process.env.TRAKT_REDIRECT_URI || 'urn:ietf:wg:oauth:2.0:oob';
+const TMDB_REDIRECT_URI = process.env.TMDB_REDIRECT_URI || '';
+const TMDB_BEARER_TOKEN = process.env.TMDB_BEARER_TOKEN || '';
 
 const staticGenres = [
   "All","Action", "Adventure", "Animation", "Anime", "Biography", "Comedy", "Crime",
@@ -14,7 +19,7 @@ const staticGenres = [
 const defaultConfig = {
   apiKey: '',
   rpdbApiKey: '',
-  tmdbBearerToken: '',
+  tmdbBearerToken: TMDB_BEARER_TOKEN, // Use env var if set
   tmdbSessionId: '',
   tmdbAccountId: '',
   metadataSource: 'cinemeta',
@@ -34,7 +39,8 @@ const defaultConfig = {
   sortPreferences: {},
   disableGenreFilter: false,
   enableRandomListFeature: false,
-  randomMDBListUsernames: ['showtime416', 'garycrawfordgc', 'linaspurinis', 'hdlists'], 
+  randomMDBListUsernames: ['showtime416', 'garycrawfordgc', 'linaspurinis', 'hdlists'],
+  searchSources: ['cinemeta'], 
   availableSortOptions: [
     { value: 'default', label: 'Default' },
     { value: 'rank', label: 'Rank' },
@@ -79,6 +85,9 @@ module.exports = {
   defaultConfig,
   ITEMS_PER_PAGE,
   TRAKT_CLIENT_ID,
+  TRAKT_REDIRECT_URI,
+  TMDB_REDIRECT_URI,
+  TMDB_BEARER_TOKEN,
   PORT,
   IS_PRODUCTION,
   staticGenres

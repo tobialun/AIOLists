@@ -1,7 +1,6 @@
 // src/integrations/trakt.js
 const axios = require('axios');
-const { ITEMS_PER_PAGE, TRAKT_CLIENT_ID } = require('../config');
-const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
+const { ITEMS_PER_PAGE, TRAKT_CLIENT_ID, TRAKT_REDIRECT_URI } = require('../config');
 const { getTraktTokens, saveTraktTokens } = require('../utils/remoteStorage');
 
 const TRAKT_API_URL = 'https://api.trakt.tv';
@@ -26,7 +25,7 @@ async function refreshTraktToken(userConfig) {
     const response = await axios.post(`${TRAKT_API_URL}/oauth/token`, {
       refresh_token: refreshToken,
       client_id: TRAKT_CLIENT_ID,
-      redirect_uri: 'urn:ietf:wg:oauth:2.0:oob',
+      redirect_uri: TRAKT_REDIRECT_URI,
       grant_type: 'refresh_token'
     });
 
@@ -89,7 +88,7 @@ async function initTraktApi(userConfig) {
 }
 
 function getTraktAuthUrl() {
-  const url = `${TRAKT_API_URL}/oauth/authorize?response_type=code&client_id=${TRAKT_CLIENT_ID}&redirect_uri=urn:ietf:wg:oauth:2.0:oob`;
+  const url = `${TRAKT_API_URL}/oauth/authorize?response_type=code&client_id=${TRAKT_CLIENT_ID}&redirect_uri=${encodeURIComponent(TRAKT_REDIRECT_URI)}`;
   return url;
 }
 
@@ -98,7 +97,7 @@ async function authenticateTrakt(code, userConfig) {
     code,
     client_id: TRAKT_CLIENT_ID,
     grant_type: 'authorization_code',
-    redirect_uri: 'urn:ietf:wg:oauth:2.0:oob'
+    redirect_uri: TRAKT_REDIRECT_URI
   });
 
   if (response.status === 200 && response.data) {
@@ -349,27 +348,8 @@ async function fetchTraktLists(userConfig) {
           });
       }
   
-      // Extract metadata config from userConfig
-      const metadataSource = userConfig.metadataSource || 'cinemeta';
-      const hasTmdbOAuth = !!(userConfig.tmdbSessionId && userConfig.tmdbAccountId);
-      const tmdbLanguage = userConfig.tmdbLanguage || 'en-US';
-      const tmdbBearerToken = userConfig.tmdbBearerToken;
-      
-      let enrichedAllItems = await enrichItemsWithMetadata(initialItems, metadataSource, hasTmdbOAuth, tmdbLanguage, tmdbBearerToken); 
-  
-      if (genre && enrichedAllItems.length > 0 && !isMetadataCheck) {
-          const lowerGenre = String(genre).toLowerCase();
-          const needsServerSideGenreFiltering = !(
-              listId.startsWith('trakt_recommendations_') || listId.startsWith('trakt_trending_') ||
-              listId.startsWith('trakt_popular_') || (isPublicImport && itemTypeHint) 
-          );
-          if (needsServerSideGenreFiltering) {
-              enrichedAllItems = enrichedAllItems.filter(item => item.genres && item.genres.map(g => String(g).toLowerCase()).includes(lowerGenre));
-          }
-      }
-  
-      const finalResult = { allItems: enrichedAllItems, hasMovies: false, hasShows: false };
-      enrichedAllItems.forEach(item => {
+      const finalResult = { allItems: initialItems, hasMovies: false, hasShows: false };
+      initialItems.forEach(item => {
         if (item.type === 'movie') finalResult.hasMovies = true;
         else if (item.type === 'series') finalResult.hasShows = true;
       });
@@ -384,12 +364,223 @@ async function fetchTraktLists(userConfig) {
       return null;
     }
   }
+
+/**
+ * Fetch metadata for a single item from Trakt
+ * @param {string} imdbId - IMDb ID (with or without 'tt' prefix)
+ * @param {string} type - 'movie' or 'series'
+ * @returns {Object|null} Trakt metadata object or null if not found
+ */
+async function fetchTraktMetadata(imdbId, type) {
+  try {
+    const cleanImdbId = imdbId.startsWith('tt') ? imdbId : `tt${imdbId}`;
+    const traktType = type === 'series' ? 'shows' : 'movies';
+    
+    const headers = {
+      'Content-Type': 'application/json',
+      'trakt-api-version': '2',
+      'trakt-api-key': TRAKT_CLIENT_ID
+    };
+
+    const response = await axios.get(`${TRAKT_API_URL}/${traktType}/${cleanImdbId}?extended=full`, {
+      headers,
+      timeout: 10000
+    });
+
+    if (response.data) {
+      return convertTraktToStremioFormat(response.data, type);
+    }
+    return null;
+  } catch (error) {
+    console.warn(`Failed to fetch Trakt metadata for ${imdbId}:`, error.message);
+    return null;
+  }
+}
+
+/**
+ * Convert Trakt API response to Stremio format
+ * @param {Object} traktData - Raw data from Trakt API
+ * @param {string} type - 'movie' or 'series'
+ * @returns {Object} Converted metadata object
+ */
+function convertTraktToStremioFormat(traktData, type) {
+  const baseData = {
+    id: traktData.ids?.imdb || null,
+    type: type,
+    name: traktData.title || 'Unknown Title',
+    description: traktData.overview || undefined,
+    year: traktData.year || undefined,
+    released: traktData.released || undefined,
+    genres: traktData.genres || undefined,
+    runtime: traktData.runtime ? `${traktData.runtime} min` : undefined,
+    country: traktData.country || undefined,
+    language: traktData.language || undefined,
+    certification: traktData.certification || undefined,
+    rating: traktData.rating || undefined,
+    votes: traktData.votes || undefined,
+    comment_count: traktData.comment_count || undefined,
+    popularity: traktData.popularity || undefined,
+    updated_at: traktData.updated_at || undefined,
+    available_translations: traktData.available_translations || undefined
+  };
+
+  // Add type-specific data
+  if (type === 'series') {
+    baseData.status = traktData.status;
+    baseData.first_aired = traktData.first_aired;
+    baseData.airs = traktData.airs;
+    baseData.network = traktData.network;
+    baseData.aired_episodes = traktData.aired_episodes;
+  } else if (type === 'movie') {
+    baseData.tagline = traktData.tagline;
+    baseData.homepage = traktData.homepage;
+  }
+
+  // Clean up undefined values
+  Object.keys(baseData).forEach(key => baseData[key] === undefined && delete baseData[key]);
+
+  return baseData;
+}
+
+/**
+ * Batch fetch metadata for multiple items from Trakt
+ * @param {Array} items - Array of items with imdb_id and type
+ * @returns {Array} Array of enriched items
+ */
+async function batchFetchTraktMetadata(items) {
+  if (!items || items.length === 0) return [];
+
+  // More conservative settings for Trakt API to avoid rate limiting
+  const BATCH_SIZE = 5; // Reduced from 10 to 5
+  const DELAY_BETWEEN_BATCHES = 2500; // Increased from 1000ms to 2.5 seconds
+  const DELAY_BETWEEN_REQUESTS = 500; // 500ms delay between individual requests in a batch
+
+  const results = [];
+  
+  for (let i = 0; i < items.length; i += BATCH_SIZE) {
+    const batch = items.slice(i, i + BATCH_SIZE);
+    
+    // Process batch items sequentially instead of in parallel to be more gentle on the API
+    const batchResults = [];
+    for (const item of batch) {
+      if (!item.imdb_id || !item.type) {
+        batchResults.push(item);
+        continue;
+      }
+      
+      try {
+        const traktMetadata = await fetchTraktMetadata(item.imdb_id, item.type);
+        if (traktMetadata) {
+          batchResults.push({ ...item, ...traktMetadata });
+        } else {
+          batchResults.push(item);
+        }
+      } catch (error) {
+        if (error.response && error.response.status === 429) {
+          console.warn(`Rate limited by Trakt API for ${item.imdb_id}, waiting longer before retry...`);
+          await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds on rate limit
+          // Try once more
+          try {
+            const traktMetadata = await fetchTraktMetadata(item.imdb_id, item.type);
+            if (traktMetadata) {
+              batchResults.push({ ...item, ...traktMetadata });
+            } else {
+              batchResults.push(item);
+            }
+          } catch (retryError) {
+            console.warn(`Failed to enrich item ${item.imdb_id} with Trakt metadata after retry:`, retryError.message);
+            batchResults.push(item);
+          }
+        } else {
+          console.warn(`Failed to enrich item ${item.imdb_id} with Trakt metadata:`, error.message);
+          batchResults.push(item);
+        }
+      }
+      
+      // Add delay between individual requests within the batch
+      if (batch.indexOf(item) < batch.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_REQUESTS));
+      }
+    }
+
+    results.push(...batchResults);
+
+    // Add delay between batches to respect rate limits
+    if (i + BATCH_SIZE < items.length) {
+      await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
+    }
+  }
+
+  return results;
+}
+  
+  /**
+ * Fetch available genres from Trakt API
+ * @returns {Array} Array of genre names
+ */
+async function fetchTraktGenres() {
+  try {
+    const headers = {
+      'Content-Type': 'application/json',
+      'trakt-api-version': '2',
+      'trakt-api-key': TRAKT_CLIENT_ID
+    };
+
+    // Fetch movie and show genres
+    const [movieGenresResponse, showGenresResponse] = await Promise.all([
+      axios.get(`${TRAKT_API_URL}/genres/movies`, { headers, timeout: 10000 }),
+      axios.get(`${TRAKT_API_URL}/genres/shows`, { headers, timeout: 10000 })
+    ]);
+
+    // Combine and deduplicate genres
+    const movieGenres = movieGenresResponse.data?.map(g => g.name) || [];
+    const showGenres = showGenresResponse.data?.map(g => g.name) || [];
+    const allGenres = [...new Set([...movieGenres, ...showGenres])];
+    
+    // Sort alphabetically and add "All" at the beginning
+    allGenres.sort();
+    return ['All', ...allGenres];
+  } catch (error) {
+    console.error('Failed to fetch Trakt genres:', error.message);
+    // Return default genres if API fails
+    return [
+      'All', 'Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary',
+      'Drama', 'Family', 'Fantasy', 'History', 'Horror', 'Music', 'Mystery',
+      'Romance', 'Science Fiction', 'Thriller', 'War', 'Western'
+    ];
+  }
+}
+
+/**
+ * Validate Trakt API access (no authentication required for basic access)
+ * @returns {boolean} True if Trakt API is accessible
+ */
+async function validateTraktApi() {
+  try {
+    const response = await axios.get(`${TRAKT_API_URL}/stats`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'trakt-api-version': '2',
+        'trakt-api-key': TRAKT_CLIENT_ID
+      },
+      timeout: 5000
+    });
+    return response.status === 200;
+  } catch (error) {
+    console.error('Failed to validate Trakt API access:', error.message);
+    return false;
+  }
+}
   
   module.exports = {
-    initTraktApi,
-    getTraktAuthUrl,
-    authenticateTrakt,
-    fetchTraktLists,
-    fetchTraktListItems,
-    fetchPublicTraktListDetails
-  };
+  initTraktApi,
+  getTraktAuthUrl,
+  authenticateTrakt,
+  fetchTraktLists,
+  fetchTraktListItems,
+  fetchPublicTraktListDetails,
+  fetchTraktMetadata,
+  batchFetchTraktMetadata,
+  fetchTraktGenres,
+  validateTraktApi
+};
