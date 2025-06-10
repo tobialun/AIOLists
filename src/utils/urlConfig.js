@@ -76,7 +76,16 @@ async function decompressConfig(compressed) {
       // Fallback to default config on error
       return { ...defaultConfig };
     }
-    return { ...defaultConfig, ...parsedConfig };
+    
+    // Merge configs, but preserve environment variables when user config has null/undefined values
+    const mergedConfig = { ...defaultConfig, ...parsedConfig };
+    
+    // If tmdbBearerToken is null/undefined in user config but we have it in environment, use environment value
+    if (!parsedConfig.tmdbBearerToken && defaultConfig.tmdbBearerToken) {
+      mergedConfig.tmdbBearerToken = defaultConfig.tmdbBearerToken;
+    }
+    
+    return mergedConfig;
 
   } catch (error) {
     console.error('Unexpected error in decompressConfig:', error);

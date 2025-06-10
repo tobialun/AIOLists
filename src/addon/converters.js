@@ -1,7 +1,8 @@
 // src/addon/converters.js
 const { batchFetchPosters } = require('../utils/posters');
+const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
 
-async function convertToStremioFormat(listContent, rpdbApiKey = null) {
+async function convertToStremioFormat(listContent, rpdbApiKey = null, metadataConfig = {}) {
   let metas = [];
   if (!listContent) return metas;
 
@@ -11,18 +12,32 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null) {
 
   if (listContent.allItems && Array.isArray(listContent.allItems)) {
     itemsToProcess = listContent.allItems.map(item => {
+        // Support both IMDB IDs (tt) and TMDB IDs (tmdb:)
+        let itemId = item.id;
         let imdbId = item.imdb_id || item.imdbid;
-        if (imdbId && !imdbId.startsWith('tt')) imdbId = `tt${imdbId}`;
-        if (!imdbId) return null;
+        
+        // If we have a specific ID (could be tmdb: format), use it
+        if (itemId && (itemId.startsWith('tt') || itemId.startsWith('tmdb:'))) {
+          // ID is already in correct format
+        } else {
+          // Fallback to IMDB ID processing
+          if (imdbId && !imdbId.startsWith('tt')) imdbId = `tt${imdbId}`;
+          if (!imdbId) return null;
+          itemId = imdbId;
+        }
 
+        // Create base metadata, prioritizing enriched metadata fields over fallbacks
         const baseMeta = {
-            id: imdbId,
+            id: itemId,
+            imdb_id: imdbId, // Always preserve IMDB ID for cross-referencing
             type: item.type,
-            name: item.title || item.name || `Untitled ${item.type}`,
+            // For enriched items, the name should already be in the preferred language/source
+            // Only use fallbacks if name is truly missing
+            name: item.name || item.title || `Untitled ${item.type}`,
             poster: item.poster,
-            background: item.backdrop || item.background,
-            description: item.overview || item.description,
-            releaseInfo: item.year || item.release_year || 
+            background: item.background || item.backdrop,
+            description: item.description || item.overview,
+            releaseInfo: item.releaseInfo || item.year || item.release_year || 
                          (item.release_date ? item.release_date.split('-')[0] : 
                          (item.first_air_date ? item.first_air_date.split('-')[0] : undefined)),
             imdbRating: item.imdbRating || (item.imdbrating ? (typeof item.imdbrating === 'number' ? item.imdbrating.toFixed(1) : item.imdbrating) : undefined),
@@ -61,11 +76,11 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null) {
       itemsToProcess.push({
         id: imdbId,
         type: 'movie',
-        name: movie.title || movie.name || 'Untitled Movie',
+        name: movie.name || movie.title || 'Untitled Movie',
         poster: movie.poster,
-        background: movie.backdrop || movie.background,
-        description: movie.overview || movie.description,
-        releaseInfo: movie.year || movie.release_year || (movie.release_date ? movie.release_date.split('-')[0] : undefined),
+        background: movie.background || movie.backdrop,
+        description: movie.description || movie.overview,
+        releaseInfo: movie.releaseInfo || movie.year || movie.release_year || (movie.release_date ? movie.release_date.split('-')[0] : undefined),
         imdbRating: movie.imdbRating || (movie.imdbrating ? (typeof movie.imdbrating === 'number' ? movie.imdbrating.toFixed(1) : movie.imdbrating) : undefined),
         runtime: movie.runtime ? `${movie.runtime}`.includes(' min') ? movie.runtime : `${movie.runtime} min` : undefined,
         genres: movie.genres || movie.genre,
@@ -94,11 +109,11 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null) {
       itemsToProcess.push({
         id: imdbId,
         type: 'series',
-        name: show.title || show.name || 'Untitled Series',
+        name: show.name || show.title || 'Untitled Series',
         poster: show.poster,
-        background: show.backdrop || show.background,
-        description: show.overview || show.description,
-        releaseInfo: show.year || show.release_year || (show.first_air_date ? show.first_air_date.split('-')[0] : undefined),
+        background: show.background || show.backdrop,
+        description: show.description || show.overview,
+        releaseInfo: show.releaseInfo || show.year || show.release_year || (show.first_air_date ? show.first_air_date.split('-')[0] : undefined),
         imdbRating: show.imdbRating || (show.imdbrating ? (typeof show.imdbrating === 'number' ? show.imdbrating.toFixed(1) : show.imdbrating) : undefined),
         runtime: show.runtime ? `${show.runtime}`.includes(' min') ? show.runtime : `${show.runtime} min` : undefined,
         genres: show.genres || show.genre,
@@ -128,19 +143,66 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null) {
     }
   });
 
+  // Apply RPDB posters if API key is provided - RPDB posters take priority
   if (useRPDB && itemsToProcess.length > 0) {
-    const imdbIds = itemsToProcess.map(item => item.id).filter(id => id && id.startsWith('tt'));
-    if (imdbIds.length > 0) {
-      const posterMap = await batchFetchPosters(imdbIds, rpdbApiKey);
-      metas = itemsToProcess.map(item => {
-        if (item.id && posterMap[item.id]) {
-          return { ...item, poster: posterMap[item.id] };
+    // Extract IMDB IDs for RPDB poster fetching
+    // Handle both direct IMDB IDs and items with separate imdb_id field
+    const imdbIds = [];
+    const itemImdbIdMap = new Map(); // Map to track which IMDB ID belongs to which item
+    
+    itemsToProcess.forEach((item, index) => {
+      let imdbId = null;
+      
+      // Priority 1: Direct IMDB ID in item.id
+      if (item.id && item.id.startsWith('tt')) {
+        imdbId = item.id;
+      }
+      // Priority 2: IMDB ID in imdb_id field (common with TMDB metadata)
+      else if (item.imdb_id && item.imdb_id.startsWith('tt')) {
+        imdbId = item.imdb_id;
+      }
+      
+      if (imdbId) {
+        imdbIds.push(imdbId);
+        // Map this IMDB ID to the item index for later reference
+        if (!itemImdbIdMap.has(imdbId)) {
+          itemImdbIdMap.set(imdbId, []);
         }
-        return item;
+        itemImdbIdMap.get(imdbId).push(index);
+      }
+    });
+    
+    if (imdbIds.length > 0) {
+      // Extract language from metadata config for RPDB posters
+      let rpdbLanguage = null;
+      if (metadataConfig.tmdbLanguage) {
+        // Convert TMDB language format (e.g., 'en-US') to RPDB language format (e.g., 'en')
+        rpdbLanguage = metadataConfig.tmdbLanguage.split('-')[0];
+      }
+      
+      console.log(`[RPDB] Fetching posters for ${imdbIds.length} items with language: ${rpdbLanguage || 'default'}`);
+      
+      const posterMap = await batchFetchPosters(imdbIds, rpdbApiKey, rpdbLanguage);
+      
+      // Apply RPDB posters to items (RPDB takes priority over metadata source posters)
+      Object.entries(posterMap).forEach(([imdbId, posterUrl]) => {
+        if (posterUrl && itemImdbIdMap.has(imdbId)) {
+          const itemIndices = itemImdbIdMap.get(imdbId);
+          itemIndices.forEach(index => {
+            if (itemsToProcess[index]) {
+              console.log(`[RPDB] Applying poster for ${imdbId}: ${posterUrl}`);
+              itemsToProcess[index].poster = posterUrl;
+            }
+          });
+        }
       });
+      
+      console.log(`[RPDB] Applied ${Object.keys(posterMap).filter(k => posterMap[k]).length} posters out of ${imdbIds.length} requested`);
     } else {
-       metas = itemsToProcess;
+      console.log(`[RPDB] No valid IMDB IDs found for poster fetching from ${itemsToProcess.length} items`);
     }
+    
+    metas = itemsToProcess;
   } else {
     metas = itemsToProcess;
   }

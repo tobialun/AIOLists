@@ -54,7 +54,7 @@
       </div>
       <div class="form-group">
         <label for="rpdbApiKey">RPDB:
-          <a href="https://ratingposterdb.com/" target="_blank" rel="noopener noreferrer" class="label-link-icon" title="Go to RatingPosterDB">Link</a>
+          <a href="https://ratingposterdb.com/api" target="_blank" rel="noopener noreferrer" class="label-link-icon" title="Go to RPDB API">Link</a>
         </label>
         <div class="input-container">
           <input type="password" id="rpdbApiKey" placeholder="Enter your RPDB API key">
@@ -71,47 +71,73 @@
           <h2>Connections</h2>
           <span id="connectionsNotification" class="section-notification"></span>
       </div>
-      <div class="connections-row">
-          <div id="traktConnection">
-              <a href="/api/trakt/login" id="traktLoginBtn" class="trakt-login-btn" target="_blank">
-                  Connect to Trakt
-                  <img src="https://walter.trakt.tv/hotlink-ok/public/favicon.ico" alt="Trakt.tv">
-              </a>
-              <div id="traktConnectedState" class="connected-state" style="display: none;">
-                  <b>Connected to Trakt.tv</b>
-                  <button onclick="window.disconnectTrakt()" class="disconnect-btn">Disconnect</button>
+      <div class="connections-column">
+          <div id="traktConnection" class="connection-item">
+              <div class="trakt-connection-row">
+                  <a href="#" id="traktLoginBtn" class="connection-btn trakt-btn" target="_blank">
+                      <img src="https://trakt.tv/assets/logos/logomark.circle.white-8541834d655f22f06c0e1707bf263e8d5be59657dba152298297dffffb1f0a11.svg" alt="Trakt.tv" class="connection-logo">
+                      Connect to Trakt
+                  </a>
+                                <div id="traktConnectedState" class="connected-state" style="display: none !important;">
+                      <b>Connected to Trakt</b>
+                      <button onclick="window.disconnectTrakt()" class="disconnect-btn">Disconnect</button>
               </div>
-              <div id="traktPinContainer" style="display: none;">
-                  <input type="text" id="traktPin" placeholder="Enter PIN" maxlength="8">
-                  <button id="submitTraktPin" class="trakt-login-btn action-btn">Submit PIN</button>
-              </div>
-          </div>
-      </div>
-      <div id="traktPersistenceContainer" style="display: none;">
-          <div id="traktStatus" class="persistence-status">
-              </div>
-      </div>
-      <div id="upstashContainer" class="hidden">
-          <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
-          <div class="upstash-header">
-              <p class="info-text">
-                  For a persistent Trakt connection provide keys from a free Upstash Redis database.
-                  <a href="https://upstash.com/" target="_blank" rel="noopener noreferrer" class="label-link-icon">Get Keys Here</a>
-              </p>
-              <button id="closeUpstashBtn" class="remove-list-button action-icon" title="Close">❌</button>
-          </div>
-          <div id="upstashForm">
-              <div class="form-group">
-                  <label for="upstashUrl">Upstash URL:</label>
-                  <div class="input-container">
-                      <input type="text" id="upstashUrl" placeholder="Enter your Upstash REST URL">
+                  <div id="traktPinContainer" style="display: none;">
+                      <input type="text" id="traktPin" placeholder="Enter PIN" maxlength="8">
+                      <button id="submitTraktPin" class="connection-btn trakt-btn action-btn"><b>Submit PIN</b></button>
+                      <button id="cancelTraktPin" class="disconnect-btn action-btn">Cancel</button>
                   </div>
               </div>
-              <div class="form-group">
-                  <label for="upstashToken">Upstash Token:</label>
-                  <div class="input-container">
-                      <input type="password" id="upstashToken" placeholder="Enter your Upstash REST Token">
+              <div id="traktPersistenceContainer" style="display: none;">
+                  <div id="traktStatus" class="persistence-status"></div>
+              </div>
+              <div id="upstashContainer" class="hidden">
+                  <div class="upstash-header">
+                      <p class="info-text">
+                          For a persistent Trakt connection provide keys from a free Upstash Redis database.
+                          <a href="https://upstash.com/" target="_blank" rel="noopener noreferrer" class="label-link-icon">Get Keys Here</a>
+                      </p>
+                      <button id="closeUpstashBtn" class="remove-list-button action-icon" title="Close">❌</button>
                   </div>
+                  <div id="upstashForm">
+                      <div class="form-group">
+                          <label for="upstashUrl">Upstash URL:</label>
+                          <div class="input-container">
+                              <input type="text" id="upstashUrl" placeholder="Enter your Upstash REST URL">
+                          </div>
+                      </div>
+                      <div class="form-group">
+                          <label for="upstashToken">Upstash Token:</label>
+                          <div class="input-container">
+                              <input type="password" id="upstashToken" placeholder="Enter your Upstash REST Token">
+                          </div>
+                      </div>
+                  </div>
+              </div>
+          </div>
+          <hr style="border: 0; border-top: 1px solid #eee; margin: 8px 0;">
+          <div id="tmdbConnection" class="connection-item">
+              <div class="form-group" id="tmdbBearerTokenGroup">
+                  <label for="tmdbBearerToken">TMDB Bearer Token:
+                      <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener noreferrer" class="label-link-icon" title="Get your TMDB Bearer Token">Link</a>
+                  </label>
+                  <div class="input-container">
+                      <input type="password" id="tmdbBearerToken" placeholder="Enter your TMDB Bearer Token">
+                  </div>
+              </div>
+              <button onclick="connectToTmdb()" id="tmdbLoginBtn" class="connection-btn tmdb-btn" type="button">
+                  <img src="https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_2-d537fb228cf3ded904ef09b136fe3fec72548ebc1fea3fbbd1ad9e36364db38b.svg" alt="TMDB" class="connection-logo">
+                  <b>Connect to TMDB</b>
+              </button>
+              <div id="tmdbConnectedState" class="connected-state" style="display: none !important;">
+                  <b>Connected to TMDB</b>
+                  <button onclick="window.disconnectTMDB()" class="disconnect-btn">Disconnect</button>
+              </div>
+              <div id="tmdbAuthContainer" style="display: none;">
+                  <p>1. Click to authorize with TMDB</p>
+                  <a id="tmdbAuthLink" href="#" target="_blank" class="connection-btn tmdb-btn">Authorize with TMDB</a>
+                  <p>2. After authorizing, click Approve:</p>
+                  <button id="tmdbApproveBtn" class="connection-btn tmdb-btn action-btn">Approve</button>
               </div>
           </div>
       </div>
@@ -134,6 +160,55 @@
         <h3>Imported Addon from Manifest URLs</h3>
         <div id="addonsList" class="addons-list"></div>
       </div>
+    </div>
+
+    <!-- Search Section -->
+    <div class="search-section api-section">
+        <div class="section-header">
+            <h2>Search/Metadata</h2>
+            <span id="searchNotification" class="section-notification"></span>
+        </div>
+        <p class="info-text">Configure search providers and metadata source for your Stremio addon.</p>
+        
+        <div class="form-group">
+            <label for="searchSources">Search&nbsp;Providers</label>
+            <div class="checkbox-group search-options">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="searchCinemeta"> Cinemeta
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="searchTrakt"> Trakt
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="searchTmdb"> TMDB
+                </label>
+            </div>
+        </div>
+
+        <div class="metadata-search-settings">
+            <div class="metadata-row">
+                <div class="form-group metadata-source-group">
+                    <label for="metadataSourceSelect">Metadata Source:</label>
+                    <select id="metadataSourceSelect" class="metadata-select">
+                        <option value="cinemeta">Cinemeta (Default)</option>
+                        <option value="tmdb">TMDB</option>
+                    </select>
+                </div>
+                <div class="form-group language-group" id="tmdbLanguageGroup" style="display: none;">
+                    <label for="tmdbLanguageSelect">Language:</label>
+                    <div class="searchable-select-container">
+                        <input type="text" id="tmdbLanguageSelect" class="searchable-select" placeholder="Search and select language..." readonly>
+                        <div class="searchable-select-arrow">▼</div>
+                        <div id="tmdbLanguageDropdown" class="searchable-select-dropdown" style="display: none;">
+                            <input type="text" id="tmdbLanguageSearch" class="searchable-select-search" placeholder="Type to search languages...">
+                            <div id="tmdbLanguageOptions" class="searchable-select-options">
+                                <!-- Options will be populated by JavaScript -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
     
     <div class="settings-section api-section">
@@ -185,7 +260,6 @@
       </div>
     </div>
   </div>
-
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
   <script src="/script.js"></script>
   <script async defer src="https://buttons.github.io/buttons.js"></script>

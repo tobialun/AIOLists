@@ -1,13 +1,14 @@
 // src/routes/api.js
 const path = require('path');
-const { defaultConfig } = require('../config');
+const { defaultConfig, staticGenres, TMDB_BEARER_TOKEN, TMDB_REDIRECT_URI, TRAKT_REDIRECT_URI } = require('../config');
 const { compressConfig, decompressConfig, compressShareableConfig, createShareableConfig } = require('../utils/urlConfig');
 const { createAddon, fetchListContent } = require('../addon/addonBuilder');
 const { convertToStremioFormat } = require('../addon/converters');
 const { setCacheHeaders, isWatchlist: commonIsWatchlist } = require('../utils/common');
 const Cache = require('../utils/cache');
 const { validateRPDBKey } = require('../utils/posters');
-const { initTraktApi, authenticateTrakt, getTraktAuthUrl, fetchTraktLists, fetchPublicTraktListDetails } = require('../integrations/trakt');
+const { validateTMDBKey } = require('../integrations/tmdb');
+const { initTraktApi, authenticateTrakt, getTraktAuthUrl, fetchTraktLists, fetchPublicTraktListDetails, validateTraktApi } = require('../integrations/trakt');
 const { fetchAllLists: fetchAllMDBLists, validateMDBListKey, extractListFromUrl: extractMDBListFromUrl } = require('../integrations/mdblist');
 const { importExternalAddon: importExtAddon } = require('../integrations/externalAddons');
 const { saveTraktTokens } = require('../utils/remoteStorage');
@@ -180,6 +181,71 @@ module.exports = function(router) {
     }
   });
 
+  router.post('/:configHash/config/metadata', async (req, res) => {
+    try {
+      const { metadataSource, tmdbLanguage } = req.body;
+      
+      if (metadataSource && !['cinemeta', 'tmdb'].includes(metadataSource)) {
+        return res.status(400).json({ success: false, error: 'Invalid metadata source. Must be "cinemeta" or "tmdb".' });
+      }
+      
+      if (metadataSource === 'tmdb' && !req.userConfig.tmdbSessionId && !req.userConfig.tmdbBearerToken && !process.env.TMDB_BEARER_TOKEN) {
+        return res.status(400).json({ 
+          error: 'TMDB metadata source requires either OAuth connection or a TMDB Bearer Token. Please connect your TMDB account or provide a Bearer Token.' 
+        });
+      }
+
+      // Check if language is changing to clear TMDB cache
+      const currentLanguage = req.userConfig.tmdbLanguage;
+      const languageChanged = tmdbLanguage && currentLanguage && tmdbLanguage !== currentLanguage;
+
+      if (metadataSource) {
+        req.userConfig.metadataSource = metadataSource;
+      }
+      
+      if (tmdbLanguage && typeof tmdbLanguage === 'string') {
+        req.userConfig.tmdbLanguage = tmdbLanguage;
+      }
+
+      // Clear TMDB cache if language changed
+      if (languageChanged) {
+        const { clearTmdbCaches } = require('../integrations/tmdb');
+        clearTmdbCaches();
+        console.log(`Cleared TMDB cache due to language change from ${currentLanguage} to ${tmdbLanguage}`);
+      }
+
+      req.userConfig.lastUpdated = new Date().toISOString();
+
+      const newConfigHash = await compressConfig(req.userConfig);
+      manifestCache.clear();
+      res.json({ success: true, configHash: newConfigHash });
+    } catch (error) {
+      console.error('Error updating metadata settings:', error);
+      res.status(500).json({ success: false, error: 'Failed to update metadata settings' });
+    }
+  });
+
+  router.post('/:configHash/config', async (req, res) => {
+    try {
+      const { searchSources } = req.body;
+      
+      if (searchSources && Array.isArray(searchSources)) {
+        // Temporarily disable 'multi' search option
+        const validSources = searchSources.filter(s => ['cinemeta', 'trakt', 'tmdb'].includes(s));
+        req.userConfig.searchSources = validSources;
+      }
+
+      req.userConfig.lastUpdated = new Date().toISOString();
+
+      const newConfigHash = await compressConfig(req.userConfig);
+      manifestCache.clear();
+      res.json({ success: true, newConfigHash: newConfigHash });
+    } catch (error) {
+      console.error('Error updating config:', error);
+      res.status(500).json({ success: false, error: 'Failed to update config' });
+    }
+  });
+
   router.get('/:configHash/configure', (req, res) => {
     res.sendFile(path.join(__dirname, '..', '..', 'public', 'index.html'));
   });
@@ -223,6 +289,86 @@ module.exports = function(router) {
       skip = isNaN(skip) ? 0 : skip;
       genre = genre || null;
   
+      // Handle search catalog specially
+      if (catalogId === 'aiolists_search') {
+        let searchQuery = req.query.search;
+        
+        // Extract search query from extra params if not in query string
+        if (!searchQuery && extraParamsString) {
+          const searchMatch = extraParamsString.match(/search=([^&]+)/);
+          if (searchMatch) {
+            searchQuery = decodeURIComponent(searchMatch[1]);
+          }
+        }
+        
+        if (!searchQuery || searchQuery.trim().length < 2) {
+          return res.json({ metas: [] });
+        }
+
+        try {
+          // Determine search sources based on user configuration
+          const userSearchSources = req.userConfig.searchSources || ['cinemeta'];
+          let sources = [];
+          
+          // Individual search sources mode (multi search is disabled)
+          if (userSearchSources.includes('cinemeta')) {
+            sources.push('cinemeta');
+          }
+          if (userSearchSources.includes('trakt')) {
+            sources.push('trakt');
+          }
+          if (userSearchSources.includes('tmdb') && (req.userConfig.tmdbBearerToken || req.userConfig.tmdbSessionId)) {
+            sources.push('tmdb');
+          }
+          
+          // Default to Cinemeta if no valid sources
+          if (sources.length === 0) {
+            sources = ['cinemeta'];
+          }
+          
+          const { searchContent } = require('../utils/searchEngine');
+          
+          // Use the catalog type for search
+          const searchType = catalogType || 'all';
+          
+          const searchResults = await searchContent({
+            query: searchQuery.trim(),
+            type: searchType,
+            sources: sources,
+            limit: 50,
+            userConfig: req.userConfig
+          });
+
+          // Filter results by type and genre if specified
+          let filteredMetas = searchResults.results || [];
+          
+          // Filter by type if specified
+          if (catalogType && catalogType !== 'all') {
+            filteredMetas = filteredMetas.filter(result => result.type === catalogType);
+          }
+
+          // Filter by genre if specified
+          if (genre && genre !== 'All') {
+            filteredMetas = filteredMetas.filter(result => {
+              if (!result.genres) return false;
+              const itemGenres = Array.isArray(result.genres) ? result.genres : [result.genres];
+              return itemGenres.some(g => 
+                String(g).toLowerCase() === String(genre).toLowerCase()
+              );
+            });
+          }
+
+          return res.json({ 
+            metas: filteredMetas,
+            cacheMaxAge: 300 // 5 minutes cache for search results
+          });
+
+        } catch (error) {
+          console.error(`Error in search catalog for "${searchQuery}":`, error);
+          return res.json({ metas: [] });
+        }
+      }
+
       const listSource = catalogId === 'random_mdblist_catalog' ? 'random_mdblist' :
                          catalogId.startsWith('aiolists-') ? 'mdblist_native' :
                          catalogId.startsWith('trakt_') && !catalogId.startsWith('traktpublic_') ? 'trakt_native' :
@@ -234,12 +380,20 @@ module.exports = function(router) {
         await initTraktApi(req.userConfig);
       }
 
-      if ((listSource === 'mdblist_native' || listSource === 'mdblist_url' || listSource === 'random_mdblist') && !req.userConfig.apiKey) {
-          console.log(`[Shared Config] MDBList API key missing for ${catalogId}. Returning empty.`);
+      // Check for MDBList API key requirements
+      if ((listSource === 'mdblist_native' || listSource === 'random_mdblist') && !req.userConfig.apiKey) {
           return res.json({ metas: [] });
       }
+      
+      // Special handling for MDBList URL imports - allow if they have public access info
+      if (listSource === 'mdblist_url' && !req.userConfig.apiKey) {
+          const addonConfig = req.userConfig.importedAddons?.[catalogId];
+          const hasPublicAccess = addonConfig && addonConfig.mdblistUsername && addonConfig.mdblistSlug;
+          if (!hasPublicAccess) {
+              return res.json({ metas: [] });
+          }
+      }
       if (listSource === 'trakt_native' && !req.userConfig.traktAccessToken) {
-          console.log(`[Shared Config] Trakt Access Token missing for ${catalogId}. Returning empty.`);
           return res.json({ metas: [] });
       }
   
@@ -256,24 +410,181 @@ module.exports = function(router) {
       if (!itemsResult) {
         return res.json({ metas: [] });
       }
+
+      // Enrich items with metadata based on user's metadata source preference
+      let enrichedResult = itemsResult;
+      if (itemsResult.allItems && itemsResult.allItems.length > 0) {
+        const metadataSource = req.userConfig.metadataSource || 'cinemeta';
+        const hasTmdbOAuth = !!(req.userConfig.tmdbSessionId && req.userConfig.tmdbAccountId);
+        const tmdbLanguage = req.userConfig.tmdbLanguage || 'en-US';
+        const tmdbBearerToken = req.userConfig.tmdbBearerToken;
+        
+        const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
+        const enrichedItems = await enrichItemsWithMetadata(
+          itemsResult.allItems, 
+          metadataSource, 
+          hasTmdbOAuth, 
+          tmdbLanguage, 
+          tmdbBearerToken
+        );
+        
+        // Update the items result with enriched items
+        enrichedResult = {
+          ...itemsResult,
+          allItems: enrichedItems
+        };
+      }
   
-      let metas = await convertToStremioFormat(itemsResult, req.userConfig.rpdbApiKey);  
+      // Create metadata config for converter
+      const metadataConfig = {
+        metadataSource: req.userConfig.metadataSource || 'cinemeta',
+        tmdbLanguage: req.userConfig.tmdbLanguage || 'en-US'
+      };
+
+      let metas = await convertToStremioFormat(enrichedResult, req.userConfig.rpdbApiKey, metadataConfig);  
+      
+      // Apply type filtering
       if (catalogType === 'movie' || catalogType === 'series') {
           metas = metas.filter(meta => meta.type === catalogType);
       }
       
-      if (genre && metas.length > 0) {
-          metas = metas.filter(meta => 
-              meta.genres && 
-              Array.isArray(meta.genres) && 
-              meta.genres.map(g => String(g).toLowerCase()).includes(String(genre).toLowerCase())
-          );
+      // Apply genre filtering after enrichment (since we removed it from integration layer)
+      if (genre && genre !== 'All' && metas.length > 0) {
+          const beforeFilterCount = metas.length;
+          metas = metas.filter(meta => {
+              if (!meta.genres) return false;
+              const itemGenres = Array.isArray(meta.genres) ? meta.genres : [meta.genres];
+              return itemGenres.some(g => 
+                  String(g).toLowerCase() === String(genre).toLowerCase()
+              );
+          });
+          console.log(`[API] Genre filter "${genre}": ${beforeFilterCount} -> ${metas.length} items after enrichment`);
       }
       
       res.json({ metas });
     } catch (error) {
       console.error(`Error in catalog endpoint (/catalog/${req.params.type}/${req.params.id}):`, error);
       res.status(500).json({ error: 'Internal server error in catalog handler' });
+    }
+  });
+
+  router.get('/:configHash/meta/:type/:id.json', async (req, res) => {
+    try {
+      const { type, id } = req.params;
+      
+      // Support both IMDB IDs (tt) and TMDB IDs (tmdb:)
+      if (!id.startsWith('tt') && !id.startsWith('tmdb:')) {
+        return res.status(404).json({ meta: null });
+      }
+
+      // Set cache headers - meta data can be cached longer since it doesn't change often
+      res.setHeader('Cache-Control', 'public, max-age=3600'); // 1 hour cache
+      
+      // Handle TMDB IDs with enhanced metadata fetching
+      if (id.startsWith('tmdb:')) {
+        const tmdbId = id.replace('tmdb:', '');
+        const metadataSource = req.userConfig.metadataSource || 'cinemeta';
+        const hasTmdbOAuth = !!(req.userConfig.tmdbSessionId && req.userConfig.tmdbAccountId);
+        const tmdbLanguage = req.userConfig.tmdbLanguage || 'en-US';
+        const tmdbBearerToken = req.userConfig.tmdbBearerToken || require('../config').TMDB_BEARER_TOKEN;
+        
+        if (metadataSource === 'tmdb' && tmdbBearerToken) {
+          try {
+            const { fetchTmdbMetadata } = require('../integrations/tmdb');
+            const tmdbMeta = await fetchTmdbMetadata(tmdbId, type, tmdbLanguage, tmdbBearerToken);
+            
+            if (tmdbMeta) {
+              // Ensure the ID matches the request
+              tmdbMeta.id = id;
+              return res.json({ meta: tmdbMeta });
+            }
+          } catch (tmdbError) {
+            console.error(`TMDB metadata fetch failed for ${id}:`, tmdbError.message);
+          }
+        }
+        
+        // Fallback for TMDB IDs - try to convert to IMDB and use that
+        try {
+          const { convertImdbToTmdbId } = require('../integrations/tmdb');
+          // This is a bit backwards, but we need to find the IMDB ID for this TMDB ID
+          // For now, return a basic meta object
+          return res.json({ 
+            meta: { 
+              id, 
+              type, 
+              name: `TMDB ID ${tmdbId}`,
+              description: "TMDB metadata temporarily unavailable"
+            } 
+          });
+        } catch (error) {
+          console.error(`Error handling TMDB ID ${id}:`, error.message);
+        }
+      }
+      
+      // Handle IMDB IDs with existing enrichment
+      if (id.startsWith('tt')) {
+        const itemForEnrichment = [{
+          id: id,
+          imdb_id: id,
+          type: type,
+          title: "Loading...",
+          name: "Loading..."
+        }];
+        
+        const metadataSource = req.userConfig.metadataSource || 'cinemeta';
+        const hasTmdbOAuth = !!(req.userConfig.tmdbSessionId && req.userConfig.tmdbAccountId);
+        const tmdbLanguage = req.userConfig.tmdbLanguage || 'en-US';
+        const tmdbBearerToken = req.userConfig.tmdbBearerToken;
+        
+        const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
+        const enrichedItems = await enrichItemsWithMetadata(itemForEnrichment, metadataSource, hasTmdbOAuth, tmdbLanguage, tmdbBearerToken);
+        
+        if (enrichedItems && enrichedItems.length > 0) {
+          const enrichedItem = enrichedItems[0];
+          
+          const meta = {
+            id: id,
+            type: type,
+            name: enrichedItem.name || enrichedItem.title || "Unknown Title",
+            poster: enrichedItem.poster,
+            background: enrichedItem.background || enrichedItem.backdrop,
+            description: enrichedItem.description || enrichedItem.overview,
+            releaseInfo: enrichedItem.releaseInfo || enrichedItem.year,
+            imdbRating: enrichedItem.imdbRating,
+            runtime: enrichedItem.runtime,
+            genres: enrichedItem.genres,
+            cast: enrichedItem.cast,
+            director: enrichedItem.director,
+            writer: enrichedItem.writer,
+            country: enrichedItem.country,
+            trailers: enrichedItem.trailers,
+            status: type === 'series' ? enrichedItem.status : undefined,
+            videos: enrichedItem.videos
+          };
+          
+          Object.keys(meta).forEach(key => meta[key] === undefined && delete meta[key]);
+          return res.json({ meta });
+        }
+      }
+      
+      // Fallback if addon meta handler fails
+      return res.json({ 
+        meta: { 
+          id, 
+          type, 
+          name: "Details unavailable" 
+        } 
+      });
+      
+    } catch (error) {
+      console.error(`Error in meta endpoint for ${req.params.id}:`, error);
+      return res.status(500).json({ 
+        meta: { 
+          id: req.params.id, 
+          type: req.params.type, 
+          name: "Error loading details" 
+        } 
+      });
     }
   });
   
@@ -284,31 +595,41 @@ module.exports = function(router) {
     configToSend.hiddenLists = Array.from(new Set(configToSend.hiddenLists || []));
     configToSend.removedLists = Array.from(new Set(configToSend.removedLists || []));
     configToSend.customMediaTypeNames = configToSend.customMediaTypeNames || {};
+    
+    // Don't expose environment TMDB Bearer Token in config
+    if (configToSend.tmdbBearerToken === TMDB_BEARER_TOKEN) {
+      configToSend.tmdbBearerToken = '';
+    }
+    
     res.json({ 
       success: true, 
-      config: configToSend, 
-      isPotentiallySharedConfig: req.isPotentiallySharedConfig,
-      isDbConnected: false
+      config: configToSend,
+      isPotentiallySharedConfig: req.isPotentiallySharedConfig || false,
+      isDbConnected: false,
+      env: {
+        hasTmdbBearerToken: !!TMDB_BEARER_TOKEN,
+        hasTmdbRedirectUri: !!TMDB_REDIRECT_URI,
+        hasTraktRedirectUri: !!TRAKT_REDIRECT_URI
+      }
     });
   });
 
   router.post('/:configHash/apikey', async (req, res) => {
     try {
-      const { apiKey, rpdbApiKey } = req.body;
-      let configChanged = false;
+          const { apiKey, rpdbApiKey } = req.body;
+    let configChanged = false;
 
-      const newApiKey = apiKey || '';
-      const newRpdbApiKey = rpdbApiKey || '';
+    const newApiKey = apiKey || '';
+    const newRpdbApiKey = rpdbApiKey || '';
 
-      if (req.userConfig.rpdbApiKey !== newRpdbApiKey) {
-        req.userConfig.rpdbApiKey = newRpdbApiKey;
-        configChanged = true;
-      }
+    if (req.userConfig.rpdbApiKey !== newRpdbApiKey) {
+      req.userConfig.rpdbApiKey = newRpdbApiKey;
+      configChanged = true;
+    }
 
       if (req.userConfig.apiKey !== newApiKey) {
         configChanged = true;
         if (newApiKey === '') {
-            console.log('MDBList API key cleared. Purging aiolists- and mdblisturl_ entries. Disabling random list feature.');
             req.userConfig.apiKey = '';
             if (req.userConfig.mdblistUsername) delete req.userConfig.mdblistUsername;
             req.userConfig.enableRandomListFeature = false;
@@ -316,9 +637,14 @@ module.exports = function(router) {
             purgeListConfigs(req.userConfig, 'random_mdblist_catalog', true);
             if (req.userConfig.importedAddons) {
                 for (const addonKey in req.userConfig.importedAddons) {
-                    if (req.userConfig.importedAddons[addonKey]?.isMDBListUrlImport) {
-                        purgeListConfigs(req.userConfig, addonKey, true);
-                        delete req.userConfig.importedAddons[addonKey];
+                    const addon = req.userConfig.importedAddons[addonKey];
+                    if (addon?.isMDBListUrlImport) {
+                        // Only remove URL imports that don't have public access information
+                        const hasPublicAccess = addon.mdblistUsername && addon.mdblistSlug;
+                        if (!hasPublicAccess) {
+                            purgeListConfigs(req.userConfig, addonKey, true);
+                            delete req.userConfig.importedAddons[addonKey];
+                        }
                     }
                 }
             }
@@ -371,57 +697,106 @@ module.exports = function(router) {
 
   router.post('/:configHash/trakt/auth', async (req, res) => {
     try {
-        const { code } = req.body;
-        if (!code) return res.status(400).json({ error: 'Authorization code required' });
-
-        // Step 1: Authenticate and get all token information back.
-        const traktAuthResult = await authenticateTrakt(code, req.userConfig);
-        
-        // Step 2: Check if Upstash is configured and handle the logic here.
-        if (req.userConfig.upstashUrl && req.userConfig.upstashToken) {
-            // Logic for persistent storage in Redis
-            
-            // a) Update the user config in memory with the new UUID.
-            req.userConfig.traktUuid = traktAuthResult.uuid;
-
-            // b) Prepare the token object that will be saved to Redis.
-            const tokensToSave = {
-                accessToken: traktAuthResult.accessToken,
-                refreshToken: traktAuthResult.refreshToken,
-                expiresAt: traktAuthResult.expiresAt
-            };
-
-            // c) Save to Redis using the now-complete userConfig.
-            await saveTraktTokens(req.userConfig, tokensToSave);
-
-            // d) Clear the local tokens from the config that gets hashed into the URL.
-            req.userConfig.traktAccessToken = null;
-            req.userConfig.traktRefreshToken = null;
-            req.userConfig.traktExpiresAt = null;
-
-        } else {
-            // Logic for non-persistent storage (tokens in URL hash).
-            req.userConfig.traktUuid = traktAuthResult.uuid;
-            req.userConfig.traktAccessToken = traktAuthResult.accessToken;
-            req.userConfig.traktRefreshToken = traktAuthResult.refreshToken;
-            req.userConfig.traktExpiresAt = traktAuthResult.expiresAt;
-        }
-
-        // Step 3: Generate the new config hash and send the response.
-        req.userConfig.lastUpdated = new Date().toISOString();
-        const newConfigHash = await compressConfig(req.userConfig);
-        manifestCache.clear();
-        
-        res.json({
-            success: true,
-            configHash: newConfigHash,
-            message: 'Authenticated with Trakt'
-        });
+      const configHash = req.params.configHash;
+      const { code } = req.body;
+      
+      console.log(`[Trakt Auth] Attempting authentication with code: ${code ? 'present' : 'missing'}`);
+      
+      if (!configHash) {
+        return res.status(400).json({ error: 'Config hash is required' });
+      }
+      
+      if (!code) {
+        return res.status(400).json({ error: 'Authorization code is required' });
+      }
+      
+      // Decompress and get user config
+      const userConfig = await decompressConfig(configHash);
+      if (!userConfig) {
+        return res.status(400).json({ error: 'Invalid config hash' });
+      }
+      
+      console.log(`[Trakt Auth] Config decompressed successfully`);
+      
+      // Complete Trakt authentication
+      const authResult = await authenticateTrakt(code, userConfig);
+      
+      console.log(`[Trakt Auth] Authentication result:`, {
+        hasAccessToken: !!authResult?.accessToken,
+        hasRefreshToken: !!authResult?.refreshToken,
+        hasUuid: !!authResult?.uuid,
+        expiresAt: authResult?.expiresAt
+      });
+      
+      // authenticateTrakt returns the auth data directly or throws an error
+      if (!authResult || !authResult.accessToken) {
+        console.error(`[Trakt Auth] Authentication failed - no access token received`);
+        return res.status(400).json({ error: 'Trakt authentication failed - no access token received' });
+      }
+      
+      // Update userConfig with new tokens
+      userConfig.traktAccessToken = authResult.accessToken;
+      userConfig.traktRefreshToken = authResult.refreshToken;
+      userConfig.traktExpiresAt = authResult.expiresAt;
+      if (authResult.uuid) {
+        userConfig.traktUuid = authResult.uuid;
+      }
+      
+      console.log(`[Trakt Auth] User config updated with tokens`);
+      
+      // Compress and return new config hash
+      const newConfigHash = await compressConfig(userConfig);
+      
+      console.log(`[Trakt Auth] New config hash generated: ${newConfigHash ? 'success' : 'failed'}`);
+      
+      res.json({
+        success: true,
+        configHash: newConfigHash,
+        message: 'Successfully connected to Trakt!',
+        uuid: authResult.uuid
+      });
+      
     } catch (error) {
-        console.error('Error in /trakt/auth:', error);
-        res.status(500).json({ error: 'Failed to authenticate with Trakt', details: error.message });
+      console.error('Error in Trakt OAuth callback:', error);
+      res.status(500).json({ error: `Internal server error during Trakt authentication: ${error.message}` });
     }
-});
+  });
+  
+  // Trakt callback redirect handler (for when user is redirected back from Trakt)
+  router.get('/trakt/callback', async (req, res) => {
+    try {
+      const { code, state } = req.query;
+      
+      if (!code) {
+        return res.status(400).send('Authorization code not provided');
+      }
+      
+      if (!state) {
+        return res.status(400).send('State parameter not provided');
+      }
+      
+      // Decode state to get config hash
+      let stateObject;
+      try {
+        stateObject = JSON.parse(Buffer.from(state, 'base64').toString());
+      } catch (error) {
+        return res.status(400).send('Invalid state parameter');
+      }
+      
+      const configHash = stateObject.configHash;
+      if (!configHash) {
+        return res.status(400).send('Config hash not found in state');
+      }
+      
+      // Redirect back to configure page with the code and state
+      const redirectUrl = `/${configHash}/configure?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+      res.redirect(redirectUrl);
+      
+    } catch (error) {
+      console.error('Error in Trakt callback redirect:', error);
+      res.status(500).send('Internal server error during Trakt callback');
+    }
+  });
 
   router.post('/:configHash/trakt/disconnect', async (req, res) => {
     try {
@@ -465,6 +840,8 @@ module.exports = function(router) {
                 hasShows: importedListDetails.hasShows,
                 isMDBListUrlImport: true,
                 mdblistId: importedListDetails.listId,
+                mdblistUsername: importedListDetails.username,
+                mdblistSlug: importedListDetails.listSlug,
                 dynamic: importedListDetails.dynamic,
                 mediatype: importedListDetails.mediatype,
                 types: [
@@ -725,14 +1102,11 @@ module.exports = function(router) {
         }
 
         if (isRandomCatalog) {
-            console.log(`Disabling Random MDBList Catalog feature due to removal from UI.`);
             req.userConfig.enableRandomListFeature = false;
         } else if (isUrlImport) {
-          console.log(`Purging URL import: ${idStr}`);
           if (req.userConfig.importedAddons) delete req.userConfig.importedAddons[idStr];
           purgeListConfigs(req.userConfig, idStr, true);
         } else if (isSubCatalog && parentAddonIdForSubCatalog) {
-          console.log(`Purging sub-catalog: ${idStr} from parent ${parentAddonIdForSubCatalog}`);
           purgeListConfigs(req.userConfig, idStr, true);
           if (subCatalogOriginalId && subCatalogOriginalId !== idStr && req.userConfig.sortPreferences?.[subCatalogOriginalId]) {
             delete req.userConfig.sortPreferences[subCatalogOriginalId];
@@ -742,7 +1116,6 @@ module.exports = function(router) {
               req.userConfig.importedAddons[parentAddonIdForSubCatalog].catalogs.filter(cat => String(cat.id) !== idStr);
           }
         } else if (isNativeMDBList || isNativeTrakt) {
-          console.log(`Soft deleting native list: ${idStr}`);
           currentRemoved.add(idStr);
           if (req.userConfig.hiddenLists) {
             req.userConfig.hiddenLists = req.userConfig.hiddenLists.filter(id => String(id) !== idStr);
@@ -798,7 +1171,7 @@ module.exports = function(router) {
     
       let canBeMerged = false;
       const listInfoFromMetadata = req.userConfig.listsMetadata?.[String(listId)];
-      if (listInfoFromMetadata && listInfoFromMetadata.hasMovies && listInfoFromMetadata.hasShows && listInfoFromMetadata.canBeMerged !== false) {
+      if (listInfoFromMetadata && listInfoFromMetadata.hasMovies && listInfoFromMetadata.hasShows) {
           canBeMerged = true;
       } else {
           const listInfoFromImported = req.userConfig.importedAddons?.[String(listId)];
@@ -839,7 +1212,20 @@ module.exports = function(router) {
       
   router.post('/config/create', async (req, res) => {
     try {
-      let newConfig = { ...defaultConfig, listOrder: [], hiddenLists: [], removedLists: [], customListNames: {}, customMediaTypeNames: {}, mergedLists: {}, sortPreferences: {}, importedAddons: {}, listsMetadata: {}, enableRandomListFeature: false, lastUpdated: new Date().toISOString() };
+      let newConfig = { 
+        ...defaultConfig, 
+        listOrder: [], 
+        hiddenLists: [], 
+        removedLists: [], 
+        customListNames: {}, 
+        customMediaTypeNames: {}, 
+        mergedLists: {}, 
+        sortPreferences: {}, 
+        importedAddons: {}, 
+        listsMetadata: {}, 
+        enableRandomListFeature: false, 
+        lastUpdated: new Date().toISOString() 
+      };
 
       if (req.body.sharedConfig) {
         const sharedSettings = await decompressConfig(req.body.sharedConfig);
@@ -857,16 +1243,16 @@ module.exports = function(router) {
 
   router.post('/validate-keys', async (req, res) => {
     try {
-      const { apiKey, rpdbApiKey } = req.body;
-      const results = { mdblist: null, rpdb: null };
+          const { apiKey, rpdbApiKey } = req.body;
+    const results = { mdblist: null, rpdb: null };
 
-      if (apiKey) {
-        const mdblistResult = await validateMDBListKey(apiKey);
-        results.mdblist = (mdblistResult && mdblistResult.username) ? { valid: true, username: mdblistResult.username } : { valid: false };
-      }
-      if (rpdbApiKey) {
-        results.rpdb = { valid: await validateRPDBKey(rpdbApiKey) };
-      }
+    if (apiKey) {
+      const mdblistResult = await validateMDBListKey(apiKey);
+      results.mdblist = (mdblistResult && mdblistResult.username) ? { valid: true, username: mdblistResult.username } : { valid: false };
+    }
+    if (rpdbApiKey) {
+      results.rpdb = { valid: await validateRPDBKey(rpdbApiKey) };
+    }
       res.json(results);
     } catch (error) {
         console.error('Error in /validate-keys:', error);
@@ -874,10 +1260,81 @@ module.exports = function(router) {
     }
   });
 
+  router.post('/trakt/validate', async (req, res) => {
+    try {
+      const isValid = await validateTraktApi();
+      res.json({ 
+        success: true, 
+        valid: isValid
+      });
+    } catch (error) {
+      console.error('Error in /trakt/validate:', error);
+      res.status(500).json({ error: 'Failed to validate Trakt API access', details: error.message });
+    }
+  });
+
   router.get('/trakt/login', (req, res) => {
-    try { res.redirect(getTraktAuthUrl()); }
+    try { 
+      // Check if this is a request that expects JSON response
+      const acceptsJson = req.headers.accept && req.headers.accept.includes('application/json');
+      
+      if (acceptsJson) {
+        // Return JSON for AJAX requests
+        res.json({ 
+          success: true, 
+          authUrl: getTraktAuthUrl(),
+          requiresManualAuth: true,
+          message: 'Please authorize in the opened window'
+        });
+      } else {
+        // Direct redirect for page navigation
+        res.redirect(getTraktAuthUrl());
+      }
+    }
     catch (error) {
         console.error('Error in /trakt/login redirect:', error);
+        res.status(500).json({ error: 'Internal server error for Trakt login' });
+    }
+  });
+
+  // Config-specific Trakt login endpoint that includes config hash as state
+  router.get('/:configHash/trakt/login', (req, res) => {
+    try { 
+      const configHash = req.params.configHash;
+      const acceptsJson = req.headers.accept && req.headers.accept.includes('application/json');
+      
+      if (!configHash) {
+        return res.status(400).json({ error: 'Config hash is required' });
+      }
+      
+      // Create state object with config hash for the callback
+      const stateObject = {
+        configHash: configHash,
+        timestamp: Date.now()
+      };
+      
+      // Convert state to base64 string
+      const stateString = Buffer.from(JSON.stringify(stateObject)).toString('base64');
+      const authUrl = getTraktAuthUrl(stateString);
+      
+      if (acceptsJson) {
+        // Check if we're using PIN flow (out-of-band) or proper redirect
+        const isPinFlow = !TRAKT_REDIRECT_URI || TRAKT_REDIRECT_URI === 'urn:ietf:wg:oauth:2.0:oob';
+        
+        // Return JSON for AJAX requests  
+        res.json({ 
+          success: true, 
+          authUrl: authUrl,
+          requiresManualAuth: isPinFlow, // Manual auth needed for PIN flow
+          message: isPinFlow ? 'Please authorize in the opened window' : 'Redirecting to Trakt...'
+        });
+      } else {
+        // Direct redirect for page navigation
+        res.redirect(authUrl);
+      }
+    }
+    catch (error) {
+        console.error('Error in config-specific /trakt/login:', error);
         res.status(500).json({ error: 'Internal server error for Trakt login' });
     }
   });
@@ -892,7 +1349,6 @@ module.exports = function(router) {
         await initTraktApi(req.userConfig); // This is the key change
   
         if (req.userConfig.traktAccessToken !== initialTraktAccessToken) {
-            console.log("[AIOLists] Trakt access token was updated in-memory during list processing.");
             configChangedByThisRequest = true;
         }
     }
@@ -907,6 +1363,15 @@ module.exports = function(router) {
       const traktLists = await fetchTraktLists(req.userConfig); 
       allUserLists.push(...traktLists.map(l => ({...l, source: 'trakt'})));
   }
+
+    // Fetch from TMDB
+    const { fetchTmdbLists } = require('../integrations/tmdb');
+    const tmdbResult = await fetchTmdbLists(req.userConfig);
+    
+    // Add TMDB lists to the main lists if OAuth is connected
+    if (tmdbResult.isConnected && tmdbResult.lists && tmdbResult.lists.length > 0) {
+      allUserLists.push(...tmdbResult.lists.map(l => ({...l, source: 'tmdb'})));
+    }
 
 
   
@@ -931,7 +1396,6 @@ module.exports = function(router) {
             isHidden: (req.userConfig.hiddenLists || []).includes(manifestListId),
             hasMovies: true,
             hasShows: true,
-            canBeMerged: false,
             isRandomCatalog: true, 
             tag: '🎲', 
             tagImage: null,
@@ -948,39 +1412,26 @@ module.exports = function(router) {
         const originalListIdStr = String(list.id);
         let manifestListId = originalListIdStr;
         let tagType = 'L'; 
-        let determinedHasMovies, determinedHasShows, determinedCanBeMergedFromSource;
+        let determinedHasMovies, determinedHasShows;
     
         if (list.source === 'mdblist') {
           const listTypeSuffix = list.listType || 'L';
           manifestListId = list.id === 'watchlist' ? `aiolists-watchlist-W` : `aiolists-${list.id}-${listTypeSuffix}`;
           tagType = listTypeSuffix;
-  
-          if (list.id === 'watchlist') {
-              determinedHasMovies = true;
-              determinedHasShows = true;
-              determinedCanBeMergedFromSource = true; 
-          } else {
-              const moviesCount = parseInt(list.movies) || 0;
-              const showsCount = parseInt(list.shows) || 0;
-              determinedHasMovies = moviesCount > 0;
-              determinedHasShows = showsCount > 0;
-              const itemsCount = parseInt(list.items) || 0;
-              if (itemsCount > 0 && !determinedHasMovies && !determinedHasShows) {
-                  const mediatype = list.mediatype;
-                  if (mediatype === 'movie') { determinedHasMovies = true; determinedHasShows = false; }
-                  else if (mediatype === 'show' || mediatype === 'series') { determinedHasMovies = false; determinedHasShows = true; }
-                  else if (!mediatype || mediatype === '') { determinedHasMovies = true; determinedHasShows = true; }
-              } else if (!determinedHasMovies && !determinedHasShows && (!list.mediatype || list.mediatype === '')) {
-                  determinedHasMovies = true;
-                  determinedHasShows = true;
-              }
-              determinedCanBeMergedFromSource = (list.dynamic === false || !list.mediatype || list.mediatype === '');
+          
+          let metadata = req.userConfig.listsMetadata[manifestListId] || {};
+          determinedHasMovies = metadata.hasMovies;
+          determinedHasShows = metadata.hasShows;
+
+          if (typeof determinedHasMovies !== 'boolean' || typeof determinedHasShows !== 'boolean') {
+            const tempContent = await fetchListContent(manifestListId, req.userConfig, 0, null, 'all');
+            determinedHasMovies = tempContent?.hasMovies || false;
+            determinedHasShows = tempContent?.hasShows || false;
           }
+
           req.userConfig.listsMetadata[manifestListId] = {
-              ...(req.userConfig.listsMetadata[manifestListId] || {}),
               hasMovies: determinedHasMovies,
               hasShows: determinedHasShows,
-              canBeMerged: determinedCanBeMergedFromSource && determinedHasMovies && determinedHasShows,
               lastChecked: new Date().toISOString()
           };
   
@@ -990,7 +1441,6 @@ module.exports = function(router) {
           let metadata = req.userConfig.listsMetadata[manifestListId] || {};
           determinedHasMovies = metadata.hasMovies === true;
           determinedHasShows = metadata.hasShows === true;
-          determinedCanBeMergedFromSource = true; 
   
           if ((typeof metadata.hasMovies !== 'boolean' || typeof metadata.hasShows !== 'boolean' || metadata.errorFetching) && req.userConfig.traktAccessToken) {
                 const tempUserConfigForFetch = { ...req.userConfig, rpdbApiKey: null };
@@ -1010,7 +1460,6 @@ module.exports = function(router) {
                     ...metadata, 
                     hasMovies: determinedHasMovies, 
                     hasShows: determinedHasShows, 
-                    canBeMerged: determinedCanBeMergedFromSource && determinedHasMovies && determinedHasShows, 
                     lastChecked: new Date().toISOString(),
                     errorFetching: false
                 };
@@ -1019,28 +1468,79 @@ module.exports = function(router) {
                   ...metadata, 
                   hasMovies: determinedHasMovies, 
                   hasShows: determinedHasShows,
-                  canBeMerged: determinedCanBeMergedFromSource && determinedHasMovies && determinedHasShows, 
                   lastChecked: new Date().toISOString() 
+              };
+          }
+      } else if (list.source === 'tmdb') {
+          manifestListId = list.id;
+          tagType = 'M'; // M for TMDB
+          let metadata = req.userConfig.listsMetadata[manifestListId] || {};
+          determinedHasMovies = metadata.hasMovies;
+          determinedHasShows = metadata.hasShows;
+
+          // If we don't have metadata, try to fetch or use default assumptions
+          if (typeof determinedHasMovies !== 'boolean' || typeof determinedHasShows !== 'boolean') {
+              if (req.userConfig.tmdbSessionId) {
+                  try {
+                      const tempUserConfigForFetch = { ...req.userConfig, rpdbApiKey: null };
+                      const tempContent = await fetchListContent(manifestListId, tempUserConfigForFetch, 0, null, 'all');
+                      determinedHasMovies = tempContent?.hasMovies || false;
+                      determinedHasShows = tempContent?.hasShows || false;
+                  } catch (error) {
+                      console.error(`Error fetching TMDB list metadata for ${manifestListId}:`, error.message);
+                      // Default assumptions for TMDB lists
+                      if (manifestListId === 'tmdb_watchlist' || manifestListId === 'tmdb_favorites') {
+                          determinedHasMovies = true;
+                          determinedHasShows = true;
+                      } else {
+                          determinedHasMovies = true;
+                          determinedHasShows = true;
+                      }
+                  }
+              } else {
+                  // Default for TMDB lists when not connected
+                  determinedHasMovies = true;
+                  determinedHasShows = true;
+              }
+              
+              req.userConfig.listsMetadata[manifestListId] = {
+                  ...metadata,
+                  hasMovies: determinedHasMovies,
+                  hasShows: determinedHasShows,
+                  lastChecked: new Date().toISOString()
               };
           }
       } else { 
           determinedHasMovies = false;
           determinedHasShows = false;
-          determinedCanBeMergedFromSource = false;
       }
   
       if (list.isWatchlist && list.source === 'mdblist') tagType = 'W';
       if (list.isTraktWatchlist) tagType = 'W';
       if (removedListsSet.has(manifestListId)) return null;
-      const actualCanBeMerged = determinedCanBeMergedFromSource && determinedHasMovies && determinedHasShows;
+      const actualCanBeMerged = determinedHasMovies && determinedHasShows;
       const isUserMerged = actualCanBeMerged ? (req.userConfig.mergedLists?.[manifestListId] !== false) : false;
       let defaultSort = { sort: (list.source === 'trakt') ? 'rank' : 'default', order: (list.source === 'trakt') ? 'asc' : 'desc' };
       if (list.source === 'trakt' && list.isTraktWatchlist) { defaultSort = { sort: 'added', order: 'desc' }; }
       const customTypeName = req.userConfig.customMediaTypeNames?.[manifestListId];
       let effectiveMediaTypeDisplay;
-      if (customTypeName) { effectiveMediaTypeDisplay = customTypeName; }
-      else { if (determinedHasMovies && determinedHasShows) effectiveMediaTypeDisplay = 'All'; else if (determinedHasMovies) effectiveMediaTypeDisplay = 'Movie'; else if (determinedHasShows) effectiveMediaTypeDisplay = 'Series'; else effectiveMediaTypeDisplay = 'N/A';}
-      return { id: manifestListId, originalId: originalListIdStr, name: list.name, customName: req.userConfig.customListNames?.[manifestListId] || null, effectiveMediaTypeDisplay: effectiveMediaTypeDisplay, isHidden: (req.userConfig.hiddenLists || []).includes(manifestListId), hasMovies: determinedHasMovies, hasShows: determinedHasShows, canBeMerged: actualCanBeMerged, isMerged: isUserMerged, isTraktList: list.source === 'trakt' && list.isTraktList, isTraktWatchlist: list.source === 'trakt' && list.isTraktWatchlist, isTraktRecommendations: list.isTraktRecommendations, isTraktTrending: list.isTraktTrending, isTraktPopular: list.isTraktPopular, isWatchlist: !!list.isWatchlist || !!list.isTraktWatchlist, tag: tagType, listType: list.listType, tagImage: list.source === 'trakt' ? 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico' : null, sortPreferences: req.userConfig.sortPreferences?.[originalListIdStr] || defaultSort, source: list.source, dynamic: list.dynamic, mediatype: list.mediatype };
+      if (customTypeName) {
+          effectiveMediaTypeDisplay = customTypeName;
+      } else {
+          if (determinedHasMovies && determinedHasShows) effectiveMediaTypeDisplay = 'All';
+          else if (determinedHasMovies) effectiveMediaTypeDisplay = 'Movie';
+          else if (determinedHasShows) effectiveMediaTypeDisplay = 'Series';
+          else effectiveMediaTypeDisplay = 'N/A';
+      }
+      // Set tag image based on source
+      let tagImage = null;
+      if (list.source === 'trakt') {
+          tagImage = 'https://walter.trakt.tv/hotlink-ok/public/favicon.ico';
+      } else if (list.source === 'tmdb') {
+          tagImage = 'https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_2-d537fb228cf3ded904ef09b136fe3fec72548ebc1fea3fbbd1ad9e36364db38b.svg';
+      }
+
+      return { id: manifestListId, originalId: originalListIdStr, name: list.name, customName: req.userConfig.customListNames?.[manifestListId] || null, effectiveMediaTypeDisplay: effectiveMediaTypeDisplay, isHidden: (req.userConfig.hiddenLists || []).includes(manifestListId), hasMovies: determinedHasMovies, hasShows: determinedHasShows, canBeMerged: actualCanBeMerged, isMerged: isUserMerged, isTraktList: list.source === 'trakt' && list.isTraktList, isTraktWatchlist: list.source === 'trakt' && list.isTraktWatchlist, isTraktRecommendations: list.isTraktRecommendations, isTraktTrending: list.isTraktTrending, isTraktPopular: list.isTraktPopular, isWatchlist: !!list.isWatchlist || !!list.isTraktWatchlist || (list.source === 'tmdb' && (list.isTmdbWatchlist || list.id === 'tmdb_watchlist')), tag: tagType, listType: list.listType, tagImage: tagImage, sortPreferences: req.userConfig.sortPreferences?.[originalListIdStr] || defaultSort, source: list.source, dynamic: list.dynamic, mediatype: list.mediatype };
       });
       const activeListsResults = (await Promise.all(activeListsProcessingPromises)).filter(p => p !== null);
       processedLists.push(...activeListsResults);
@@ -1061,11 +1561,7 @@ module.exports = function(router) {
 
                 let urlImportHasMovies = addon.hasMovies;
                 let urlImportHasShows = addon.hasShows;
-                let urlImportCanBeMergedFromSource = true; // Default for URL imports
-                if (isMDBListUrlImport && typeof addon.dynamic === 'boolean' && typeof addon.mediatype !== 'undefined') {
-                    urlImportCanBeMergedFromSource = (addon.dynamic === false || !addon.mediatype || addon.mediatype === '');
-                }
-                const actualCanBeMergedForUrl = urlImportCanBeMergedFromSource && urlImportHasMovies && urlImportHasShows;
+                let actualCanBeMergedForUrl = urlImportHasMovies && urlImportHasShows;
                 const isUserMergedForUrl = actualCanBeMergedForUrl ? (req.userConfig.mergedLists?.[addonGroupId] !== false) : false;
                 
                 let tagType = 'A'; // Default for addon
@@ -1205,7 +1701,6 @@ module.exports = function(router) {
       // Check if listsMetadata was changed during this request processing
       const finalListsMetadataJson = JSON.stringify(req.userConfig.listsMetadata || {});
       if (initialListsMetadataJson !== finalListsMetadataJson) {
-          console.log("[AIOLists] listsMetadata content changed during /lists processing.");
           configChangedByThisRequest = true; // Set if metadata content itself changed
       }
       
@@ -1217,11 +1712,11 @@ module.exports = function(router) {
         isPotentiallySharedConfig: req.isPotentiallySharedConfig,
         randomMDBListUsernames: (req.userConfig.randomMDBListUsernames && req.userConfig.randomMDBListUsernames.length > 0) 
                                 ? req.userConfig.randomMDBListUsernames 
-                                : defaultConfig.randomMDBListUsernames 
+                                : defaultConfig.randomMDBListUsernames,
+        tmdbStatus: tmdbResult
       };
     
       if (configChangedByThisRequest) {
-        console.log("[AIOLists] Config changed (metadata or Trakt token), generating new config hash.");
         const configToSave = { ...req.userConfig };
         
         if (configToSave.upstashUrl) {
@@ -1246,4 +1741,222 @@ module.exports = function(router) {
         res.status(500).json({ error: 'Failed to fetch lists', details: error.message });
     }
     });
+
+  router.get('/:configHash/genres', async (req, res) => {
+    try {
+      let genres = staticGenres;
+      
+      // Use TMDB genres if TMDB is selected and Bearer Token is available
+      if (req.userConfig.metadataSource === 'tmdb' && req.userConfig.tmdbLanguage) {
+        const tmdbBearerToken = req.userConfig.tmdbBearerToken || TMDB_BEARER_TOKEN;
+        if (tmdbBearerToken) {
+          try {
+            const { fetchTmdbGenres } = require('../integrations/tmdb');
+            const tmdbGenres = await fetchTmdbGenres(req.userConfig.tmdbLanguage, tmdbBearerToken);
+            if (tmdbGenres.length > 0) {
+              genres = tmdbGenres;
+            }
+          } catch (error) {
+            console.warn('Failed to fetch TMDB genres for API response:', error.message);
+          }
+        }
+      }
+      
+      res.json({ success: true, genres });
+    } catch (error) {
+      console.error('Error fetching genres:', error);
+      res.status(500).json({ success: false, error: 'Failed to fetch genres' });
+    }
+  });
+
+  router.post('/:configHash/tmdb/auth', async (req, res) => {
+    try {
+      const { requestToken, tmdbBearerToken } = req.body;
+      if (!requestToken) return res.status(400).json({ error: 'Request token required' });
+      
+      const bearerTokenToUse = tmdbBearerToken || TMDB_BEARER_TOKEN;
+      if (!bearerTokenToUse) return res.status(400).json({ error: 'TMDB Bearer Token required' });
+
+      const { authenticateTmdb } = require('../integrations/tmdb');
+      const tmdbAuthResult = await authenticateTmdb(requestToken, bearerTokenToUse);
+      
+      // Only store bearer token in config if it's not from environment
+      if (!TMDB_BEARER_TOKEN) {
+        req.userConfig.tmdbBearerToken = bearerTokenToUse;
+      } else {
+        // Set to null (not empty string) so fallback logic works properly
+        req.userConfig.tmdbBearerToken = null;
+      }
+      
+      req.userConfig.tmdbSessionId = tmdbAuthResult.sessionId;
+      req.userConfig.tmdbAccountId = tmdbAuthResult.accountId;
+      req.userConfig.lastUpdated = new Date().toISOString();
+      
+      const newConfigHash = await compressConfig(req.userConfig);
+      manifestCache.clear();
+      
+      res.json({
+        success: true,
+        configHash: newConfigHash,
+        message: 'Authenticated with TMDB',
+        username: tmdbAuthResult.username,
+        usingEnvToken: !!TMDB_BEARER_TOKEN
+      });
+    } catch (error) {
+      console.error('Error in /tmdb/auth:', error);
+      res.status(500).json({ error: 'Failed to authenticate with TMDB', details: error.message });
+    }
+  });
+
+  router.post('/:configHash/tmdb/disconnect', async (req, res) => {
+    try {
+      req.userConfig.tmdbBearerToken = null;
+      req.userConfig.tmdbSessionId = null;
+      req.userConfig.tmdbAccountId = null;
+      
+      // Only revert to default metadata source if no environment Bearer Token is available
+      if (req.userConfig.metadataSource === 'tmdb' && !TMDB_BEARER_TOKEN) {
+        req.userConfig.metadataSource = 'cinemeta';
+      }
+      
+      req.userConfig.lastUpdated = new Date().toISOString();
+      
+      const newConfigHash = await compressConfig(req.userConfig);
+      manifestCache.clear();
+      
+      res.json({ success: true, configHash: newConfigHash, message: 'Disconnected from TMDB' });
+    } catch (error) {
+      console.error('Error in /tmdb/disconnect:', error);
+      res.status(500).json({ error: 'Failed to disconnect from TMDB', details: error.message });
+    }
+  });
+
+  router.post('/tmdb/validate', async (req, res) => {
+    try {
+      const { tmdbBearerToken } = req.body;
+      const bearerTokenToUse = tmdbBearerToken || TMDB_BEARER_TOKEN;
+      
+      if (!bearerTokenToUse) {
+        return res.status(400).json({ error: 'TMDB Bearer Token is required' });
+      }
+      
+      const { validateTMDBKey } = require('../integrations/tmdb');
+      const isValid = await validateTMDBKey(bearerTokenToUse);
+      res.json({ 
+        success: true, 
+        valid: isValid
+      });
+    } catch (error) {
+      console.error('Error in /tmdb/validate:', error);
+      res.status(500).json({ error: 'Failed to validate TMDB Bearer Token', details: error.message });
+    }
+  });
+
+  // Legacy GET endpoint for backwards compatibility
+  router.get('/tmdb/login', async (req, res) => {
+    res.status(400).json({ 
+      error: 'TMDB Bearer Token is required. Please use the updated interface to provide your TMDB Bearer Token.',
+      details: 'The TMDB connection flow now requires users to provide their own Bearer Token for security and API compliance reasons.'
+    });
+  });
+
+  // New POST endpoint that requires user's bearer token
+  router.post('/tmdb/login', async (req, res) => {
+    try {
+      const { tmdbBearerToken } = req.body;
+      const bearerTokenToUse = tmdbBearerToken || TMDB_BEARER_TOKEN;
+      
+      if (!bearerTokenToUse) {
+        return res.status(400).json({ error: 'TMDB Bearer Token is required' });
+      }
+      
+      const { getTmdbAuthUrl } = require('../integrations/tmdb');
+      const authData = await getTmdbAuthUrl(bearerTokenToUse);
+      
+      res.json({ 
+        success: true, 
+        requestToken: authData.requestToken,
+        authUrl: authData.authUrl,
+        canDirectRedirect: !!(TMDB_BEARER_TOKEN && TMDB_REDIRECT_URI),
+        tmdbRedirectUri: TMDB_REDIRECT_URI // Add the redirect URI for frontend to construct full redirect URL
+      });
+    } catch (error) {
+      console.error('Error in /tmdb/login:', error);
+      res.status(500).json({ error: 'Failed to get TMDB auth URL', details: error.message });
+    }
+  });
+
+  router.post('/:configHash/search', async (req, res) => {
+    try {
+      const { query, type = 'all', sources = ['cinemeta'], limit = 50 } = req.body;
+      
+      if (!query || query.trim().length < 2) {
+        return res.status(400).json({ error: 'Search query must be at least 2 characters long' });
+      }
+
+      const trimmedQuery = query.trim();
+      const validSources = sources.filter(s => ['cinemeta', 'trakt', 'tmdb'].includes(s));
+      
+      if (validSources.length === 0) {
+        return res.status(400).json({ error: 'At least one valid search source must be specified' });
+      }
+
+      // Check if TMDB search is requested but user doesn't have TMDB configured
+      if (validSources.includes('tmdb') && !req.userConfig.tmdbBearerToken && !TMDB_BEARER_TOKEN) {
+        return res.status(400).json({ 
+          error: 'TMDB search requires TMDB Bearer Token configuration' 
+        });
+      }
+
+      const { searchContent } = require('../utils/searchEngine');
+      
+      const searchResults = await searchContent({
+        query: trimmedQuery,
+        type: type,
+        sources: validSources,
+        limit: limit,
+        userConfig: req.userConfig
+      });
+
+      // Set cache headers - search results can be cached for a short time
+      res.setHeader('Cache-Control', 'public, max-age=300'); // 5 minutes cache
+      
+      res.json({
+        success: true,
+        query: trimmedQuery,
+        results: searchResults.results,
+        totalResults: searchResults.totalResults,
+        sources: searchResults.sources
+      });
+
+    } catch (error) {
+      console.error('Error in search endpoint:', error);
+      res.status(500).json({ 
+        error: 'Search failed', 
+        details: error.message 
+      });
+    }
+  });
+
+  // Debug endpoint to check user config values
+  router.get('/:configHash/debug/config', async (req, res) => {
+    try {
+      const debugInfo = {
+        hasTmdbSessionId: !!req.userConfig.tmdbSessionId,
+        hasTmdbAccountId: !!req.userConfig.tmdbAccountId,
+        hasTmdbBearerToken: !!req.userConfig.tmdbBearerToken,
+        hasEnvBearerToken: !!TMDB_BEARER_TOKEN,
+        metadataSource: req.userConfig.metadataSource,
+        tmdbLanguage: req.userConfig.tmdbLanguage,
+        tmdbSessionIdValue: req.userConfig.tmdbSessionId ? 'SET' : 'NOT_SET',
+        tmdbAccountIdValue: req.userConfig.tmdbAccountId ? 'SET' : 'NOT_SET',
+        effectiveBearerToken: req.userConfig.tmdbBearerToken || TMDB_BEARER_TOKEN ? 'AVAILABLE' : 'NOT_AVAILABLE'
+      };
+      
+      res.json({ success: true, debug: debugInfo });
+    } catch (error) {
+      console.error('Error in debug config endpoint:', error);
+      res.status(500).json({ error: 'Failed to get debug info', details: error.message });
+    }
+  });
 };

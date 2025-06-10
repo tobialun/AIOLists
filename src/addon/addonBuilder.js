@@ -1,3 +1,4 @@
+// src/addon/addonBuilder.js
 const { addonBuilder } = require('stremio-addon-sdk');
 const { fetchTraktListItems, fetchTraktLists, initTraktApi } = require('../integrations/trakt');
 const { fetchListItems: fetchMDBListItems, fetchAllLists: fetchAllMDBLists, fetchAllListsForUser } = require('../integrations/mdblist');
@@ -5,6 +6,7 @@ const { fetchExternalAddonItems } = require('../integrations/externalAddons');
 const { convertToStremioFormat } = require('./converters');
 const { isWatchlist } = require('../utils/common');
 const { staticGenres } = require('../config');
+const axios = require('axios');
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const METADATA_FETCH_RETRY_DELAY_MS = 5000;
@@ -65,16 +67,53 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
 
   let itemsResult;
 
-  if (catalogIdFromRequest === 'random_mdblist_catalog' && enableRandomListFeature && apiKey && randomMDBListUsernames && randomMDBListUsernames.length > 0) {
+  if (catalogIdFromRequest === 'random_mdblist_catalog' && enableRandomListFeature && randomMDBListUsernames && randomMDBListUsernames.length > 0) {
     const randomUsername = randomMDBListUsernames[Math.floor(Math.random() * randomMDBListUsernames.length)];
-    const userLists = await fetchAllListsForUser(apiKey, randomUsername);
-    if (userLists && userLists.length > 0) {
-      const randomUserList = userLists[Math.floor(Math.random() * userLists.length)];
-      const listIdentifierToFetch = randomUserList.slug || String(randomUserList.id);
-      const randomCatalogSortPrefs = sortPreferences?.['random_mdblist_catalog'] || { sort: 'default', order: 'desc' };
-      itemsResult = await fetchMDBListItems( listIdentifierToFetch, apiKey, {}, skip, randomCatalogSortPrefs.sort, randomCatalogSortPrefs.order, false, genre, randomUsername );
+    
+    if (apiKey) {
+      // Use API-based approach when API key is available
+      const userLists = await fetchAllListsForUser(apiKey, randomUsername);
+      if (userLists && userLists.length > 0) {
+        const randomUserList = userLists[Math.floor(Math.random() * userLists.length)];
+        const listIdentifierToFetch = randomUserList.slug || String(randomUserList.id);
+        const randomCatalogSortPrefs = sortPreferences?.['random_mdblist_catalog'] || { sort: 'default', order: 'desc' };
+        itemsResult = await fetchMDBListItems( listIdentifierToFetch, apiKey, {}, skip, randomCatalogSortPrefs.sort, randomCatalogSortPrefs.order, false, genre, randomUsername, false, userConfig );
+      } else {
+        itemsResult = { allItems: [], hasMovies: false, hasShows: false };
+      }
     } else {
-      itemsResult = { allItems: [], hasMovies: false, hasShows: false };
+      // Fallback to public JSON approach when no API key is available
+      console.log(`[Random MDBList] No API key available, using public JSON approach for user: ${randomUsername}`);
+      
+      // For public JSON, we'll use a predefined list of popular/well-known lists
+      // This is a simplified approach since we can't discover lists without an API key
+      const popularListSlugs = [
+        'latest-tv-shows', 'top-rated-movies-2024', 'latest-movies', 'popular-series', 
+        'trending-movies', 'best-sci-fi-movies', 'top-horror-movies', 'classic-movies',
+        'marvel-movies', 'disney-movies', 'netflix-series', 'hbo-series'
+      ];
+      
+      const randomListSlug = popularListSlugs[Math.floor(Math.random() * popularListSlugs.length)];
+      const randomCatalogSortPrefs = sortPreferences?.['random_mdblist_catalog'] || { sort: 'rank', order: 'asc' };
+      
+      console.log(`[Random MDBList] Attempting to fetch ${randomUsername}/${randomListSlug} via public JSON`);
+      
+      // Try to fetch using public JSON
+      const { fetchListItemsFromPublicJson } = require('../integrations/mdblist');
+      itemsResult = await fetchListItemsFromPublicJson(randomUsername, randomListSlug, skip, randomCatalogSortPrefs.sort, randomCatalogSortPrefs.order, genre, userConfig, false);
+      
+      if (!itemsResult) {
+        console.log(`[Random MDBList] Public JSON failed for ${randomUsername}/${randomListSlug}, trying alternative`);
+        // Try another random combination
+        const altUsername = randomMDBListUsernames[Math.floor(Math.random() * randomMDBListUsernames.length)];
+        const altListSlug = popularListSlugs[Math.floor(Math.random() * popularListSlugs.length)];
+        itemsResult = await fetchListItemsFromPublicJson(altUsername, altListSlug, skip, randomCatalogSortPrefs.sort, randomCatalogSortPrefs.order, genre, userConfig, false);
+      }
+      
+      if (!itemsResult) {
+        console.log(`[Random MDBList] All public JSON attempts failed, returning empty result`);
+        itemsResult = { allItems: [], hasMovies: false, hasShows: false };
+      }
     }
   }
 
@@ -82,9 +121,27 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
     const addonConfig = importedAddons[catalogIdFromRequest];
     if (addonConfig.isTraktPublicList) {
       itemsResult = await fetchTraktListItems( addonConfig.id, userConfig, skip, sortPrefsForImportedOrRandom.sort, sortPrefsForImportedOrRandom.order, true, addonConfig.traktUser, itemTypeHintForFetching, genre );
-    } else if (addonConfig.isMDBListUrlImport && apiKey) {
-      const isListUserMerged = userConfig.mergedLists?.[catalogIdFromRequest] !== false;
-      itemsResult = await fetchMDBListItems( addonConfig.mdblistId, apiKey, listsMetadata, skip, sortPrefsForImportedOrRandom.sort, sortPrefsForImportedOrRandom.order, true, genre, null, isListUserMerged );
+    } else if (addonConfig.isMDBListUrlImport) {
+      if (apiKey) {
+        // Use API approach when available
+        const isListUserMerged = userConfig.mergedLists?.[catalogIdFromRequest] !== false;
+        itemsResult = await fetchMDBListItems( addonConfig.mdblistId, apiKey, listsMetadata, skip, sortPrefsForImportedOrRandom.sort, sortPrefsForImportedOrRandom.order, true, genre, null, isListUserMerged, userConfig );
+      } else if (addonConfig.mdblistUsername && addonConfig.mdblistSlug) {
+        // Use public JSON fallback when no API key is available
+        console.log(`[MDBList URL Import] No API key, using public JSON for ${addonConfig.mdblistUsername}/${addonConfig.mdblistSlug}`);
+        const { fetchListItemsFromPublicJson } = require('../integrations/mdblist');
+        const isListUserMerged = userConfig.mergedLists?.[catalogIdFromRequest] !== false;
+        itemsResult = await fetchListItemsFromPublicJson(
+          addonConfig.mdblistUsername, 
+          addonConfig.mdblistSlug, 
+          skip, 
+          sortPrefsForImportedOrRandom.sort, 
+          sortPrefsForImportedOrRandom.order, 
+          genre, 
+          userConfig,
+          isListUserMerged
+        );
+      }
     }
   }
 
@@ -93,7 +150,7 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
       if (parentAddon.isMDBListUrlImport || parentAddon.isTraktPublicList) continue;
       const catalogEntry = parentAddon.catalogs?.find(c => String(c.id) === String(catalogIdFromRequest));
       if (catalogEntry) {
-        itemsResult = await fetchExternalAddonItems( catalogEntry.originalId, catalogEntry.originalType, parentAddon, skip, rpdbApiKey, genre );
+        itemsResult = await fetchExternalAddonItems( catalogEntry.originalId, catalogEntry.originalType, parentAddon, skip, rpdbApiKey, genre, userConfig );
         break;
       }
     }
@@ -111,6 +168,12 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
     itemsResult = await fetchTraktListItems( catalogIdFromRequest, userConfig, skip, sortPrefs.sort, sortPrefs.order, false, null, actualTraktItemTypeHint, genre );
   }
 
+  if (!itemsResult && catalogIdFromRequest.startsWith('tmdb_') && userConfig.tmdbSessionId) {
+    const { fetchTmdbListItems } = require('../integrations/tmdb');
+    let sortPrefs = sortPreferences?.[originalListIdForSortLookup] || { sort: 'created_at', order: 'desc' };
+    itemsResult = await fetchTmdbListItems(catalogIdFromRequest, userConfig, skip, sortPrefs.sort, sortPrefs.order, genre);
+  }
+
   if (!itemsResult && apiKey && catalogIdFromRequest.startsWith('aiolists-')) {
     const match = catalogIdFromRequest.match(/^aiolists-([^-]+(?:-[^-]+)*)-([ELW])$/);
     let mdbListOriginalIdFromCatalog = match ? match[1] : catalogIdFromRequest.replace(/^aiolists-/, '').replace(/-[ELW]$/, '');
@@ -119,7 +182,7 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
     let sortForMdbList = mdbListSortPrefs.sort;
     if (mdbListOriginalIdFromCatalog === 'watchlist' && itemTypeHintForFetching === 'all') { sortForMdbList = 'added'; }
     const isListUserMerged = userConfig.mergedLists?.[catalogIdFromRequest] !== false;
-    itemsResult = await fetchMDBListItems( mdbListOriginalIdFromCatalog, apiKey, listsMetadata, skip, sortForMdbList, mdbListSortPrefs.order, false, genre, null, isListUserMerged );
+    itemsResult = await fetchMDBListItems( mdbListOriginalIdFromCatalog, apiKey, listsMetadata, skip, sortForMdbList, mdbListSortPrefs.order, false, genre, null, isListUserMerged, userConfig );
   }
   return itemsResult || null;
 }
@@ -129,12 +192,12 @@ async function createAddon(userConfig) {
   await initTraktApi(userConfig);
   const manifest = {
     id: 'org.stremio.aiolists',
-    version: `1.1.1-${Date.now()}`,
+    version: `1.2.0-${Date.now()}`,
     name: 'AIOLists',
     description: 'Manage all your lists in one place.',
     resources: ['catalog', 'meta'],
     types: [], // Will be populated dynamically
-    idPrefixes: ['tt'],
+    idPrefixes: ['tt', 'tmdb:'],
     catalogs: [],
     logo: `https://i.imgur.com/DigFuAQ.png`,
     behaviorHints: { configurable: true, configurationRequired: false }
@@ -147,6 +210,12 @@ async function createAddon(userConfig) {
   } = userConfig;
 
   const allKnownTypes = new Set(['movie', 'series', 'all']);
+
+  // Add search type if multi search is enabled
+  const searchSources = userConfig.searchSources || ['cinemeta'];
+  if (searchSources.includes('multi')) {
+    allKnownTypes.add('search');
+  }
 
   // Add types from customMediaTypeNames (user overrides)
   Object.values(userConfig.customMediaTypeNames || {}).forEach(type => {
@@ -182,17 +251,42 @@ async function createAddon(userConfig) {
   const hiddenListsSet = new Set(hiddenLists.map(String));
   const removedListsSet = new Set(removedLists.map(String));
   
+  // Determine which genres to use based on metadata source
+  const shouldUseTmdbGenres = userConfig.metadataSource === 'tmdb' && userConfig.tmdbLanguage && userConfig.tmdbBearerToken;
+  let availableGenres = staticGenres;
+  
+  if (shouldUseTmdbGenres) {
+    try {
+      const { fetchTmdbGenres } = require('../integrations/tmdb');
+      const tmdbGenres = await Promise.race([
+        fetchTmdbGenres(userConfig.tmdbLanguage, userConfig.tmdbBearerToken),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('TMDB genres timeout')), 5000))
+      ]);
+      if (tmdbGenres.length > 0) {
+        availableGenres = tmdbGenres;
+      }
+    } catch (error) {
+      console.warn('Failed to fetch TMDB genres, falling back to static genres:', error.message);
+    }
+  }
+  
   let tempGeneratedCatalogs = [];
 
-  if (enableRandomListFeature && apiKey && randomMDBListUsernames && randomMDBListUsernames.length > 0) {
+  if (enableRandomListFeature && randomMDBListUsernames && randomMDBListUsernames.length > 0) {
     const randomCatalogId = 'random_mdblist_catalog';
     let randomCatalogDisplayName = getManifestCatalogName(randomCatalogId, "Discovery", customListNames);
      if (customMediaTypeNames?.[randomCatalogId]?.trim()){
         randomCatalogDisplayName = customMediaTypeNames[randomCatalogId].trim();
      }
+    
+    // Add note to name if no API key is available (will use public JSON)
+    if (!apiKey) {
+      randomCatalogDisplayName += " (Public)";
+    }
+    
     const randomCatalogExtra = [{ name: "skip" }];
     if (includeGenresInManifest) {
-        randomCatalogExtra.push({ name: "genre", options: staticGenres, isRequired: false });
+        randomCatalogExtra.push({ name: "genre", options: availableGenres, isRequired: false });
     }
     tempGeneratedCatalogs.push({
         id: randomCatalogId,
@@ -213,6 +307,21 @@ async function createAddon(userConfig) {
     activeListsInfo.push(...traktFetchedLists.map(l => ({ ...l, source: 'trakt', originalId: String(l.id) })));
   }
   
+  if (userConfig.tmdbSessionId && userConfig.tmdbAccountId) {
+    try {
+      const { fetchTmdbLists } = require('../integrations/tmdb');
+      const tmdbResult = await Promise.race([
+        fetchTmdbLists(userConfig),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('TMDB lists timeout')), 5000))
+      ]);
+      if (tmdbResult.isConnected && tmdbResult.lists && tmdbResult.lists.length > 0) {
+        activeListsInfo.push(...tmdbResult.lists.map(l => ({ ...l, source: 'tmdb', originalId: String(l.id) })));
+      }
+    } catch (error) {
+      console.warn('Failed to fetch TMDB lists:', error.message);
+    }
+  }
+  
   const processListForManifest = async (listSourceInfo, currentListId, isImportedSubCatalog = false, parentAddon = null) => {
     if (removedListsSet.has(currentListId)) {
         return;
@@ -224,7 +333,7 @@ async function createAddon(userConfig) {
 
     const catalogExtraForThisList = [{ name: "skip" }];
     if (includeGenresInManifest) {
-        let genreOpts = staticGenres;
+        let genreOpts = availableGenres;
         if (isImportedSubCatalog && listSourceInfo.extraSupported && Array.isArray(listSourceInfo.extraSupported)) {
             const genreExtraDef = listSourceInfo.extraSupported.find(e => typeof e === 'object' && e.name === 'genre');
             if (genreExtraDef && Array.isArray(genreExtraDef.options) && genreExtraDef.options.length > 0) {
@@ -266,13 +375,17 @@ async function createAddon(userConfig) {
 
     let sourceHasMovies, sourceHasShows;
     if (listSourceInfo.source === 'mdblist' || listSourceInfo.source === 'mdblist_url') {
-      sourceHasMovies = listSourceInfo.hasMovies;
-      sourceHasShows = listSourceInfo.hasShows;
+      // Check both the list info and stored metadata for MDBList lists
+      let metadata = userConfig.listsMetadata[currentListId] || userConfig.listsMetadata[listSourceInfo.originalId] || {};
+      sourceHasMovies = listSourceInfo.hasMovies || metadata.hasMovies === true;
+      sourceHasShows = listSourceInfo.hasShows || metadata.hasShows === true;
+      
+
   } else if (listSourceInfo.source === 'trakt_public') {
       sourceHasMovies = listSourceInfo.hasMovies;
       sourceHasShows = listSourceInfo.hasShows;
   } else if (listSourceInfo.source === 'trakt') { // This now only handles private trakt
-      let metadata = listsMetadata[currentListId] || listsMetadata[listSourceInfo.originalId] || {};
+      let metadata = userConfig.listsMetadata[currentListId] || userConfig.listsMetadata[listSourceInfo.originalId] || {};
       sourceHasMovies = metadata.hasMovies === true;
       sourceHasShows = metadata.hasShows === true;
 
@@ -293,7 +406,7 @@ async function createAddon(userConfig) {
                     
                     const currentMetaForUpdate = userConfig.listsMetadata[currentListId] || {}; // Ensure listsMetadata exists
                     userConfig.listsMetadata[currentListId] = {
-                        ...currentMetaForUpdate, hasMovies: sourceHasMovies, hasShows: sourceHasShows, canBeMerged: true, lastChecked: new Date().toISOString()
+                        ...currentMetaForUpdate, hasMovies: sourceHasMovies, hasShows: sourceHasShows, lastChecked: new Date().toISOString()
                     };
                     delete userConfig.listsMetadata[currentListId].errorFetching;
                     success = true;
@@ -315,6 +428,10 @@ async function createAddon(userConfig) {
                  await delay(DELAY_BETWEEN_DIFFERENT_TRAKT_LISTS_MS);
             }
         }
+    } else if (listSourceInfo.source === 'tmdb') {
+      // Handle TMDB lists - use the hasMovies/hasShows values that were determined earlier
+      sourceHasMovies = listSourceInfo.hasMovies || false;
+      sourceHasShows = listSourceInfo.hasShows || false;
     } else { // Fallback if source type is unknown or properties missing
         sourceHasMovies = listSourceInfo.hasMovies || false;
         sourceHasShows = listSourceInfo.hasShows || false;
@@ -364,6 +481,7 @@ async function createAddon(userConfig) {
     }
   };
   
+  console.log(`[AddonBuilder] Processing ${activeListsInfo.length} lists...`);
   for (const listInfo of activeListsInfo) {
     if (listInfo.source === 'mdblist') {
         const originalMdbListId = String(listInfo.id); 
@@ -378,28 +496,34 @@ async function createAddon(userConfig) {
             originalId: originalMdbListId  
         };
 
-        let determinedHasMovies, determinedHasShows, determinedCanBeMergedFromSource;
+        let determinedHasMovies, determinedHasShows;
         if (originalMdbListId === 'watchlist') {
             determinedHasMovies = true;
             determinedHasShows = true;
-            determinedCanBeMergedFromSource = true; 
         } else {
-            const moviesCount = parseInt(listInfo.movies) || 0;
-            const showsCount = parseInt(listInfo.shows) || 0;
-            determinedHasMovies = moviesCount > 0;
-            determinedHasShows = showsCount > 0;
-            const itemsCount = parseInt(listInfo.items) || 0;
+            // First check if we have stored metadata for this list
+            const existingMetadata = userConfig.listsMetadata[fullManifestListId];
+            if (existingMetadata && typeof existingMetadata.hasMovies === 'boolean' && typeof existingMetadata.hasShows === 'boolean') {
+                determinedHasMovies = existingMetadata.hasMovies;
+                determinedHasShows = existingMetadata.hasShows;
+            } else {
+                // Fall back to API response data
+                const moviesCount = parseInt(listInfo.movies) || 0;
+                const showsCount = parseInt(listInfo.shows) || 0;
+                determinedHasMovies = moviesCount > 0;
+                determinedHasShows = showsCount > 0;
 
-            if (itemsCount > 0 && !determinedHasMovies && !determinedHasShows) {
-                const mediatype = listInfo.mediatype;
-                if (mediatype === 'movie') { determinedHasMovies = true; determinedHasShows = false; }
-                else if (mediatype === 'show' || mediatype === 'series') { determinedHasMovies = false; determinedHasShows = true; }
-                else if (!mediatype || mediatype === '') { determinedHasMovies = true; determinedHasShows = true; }
-            } else if (!determinedHasMovies && !determinedHasShows && (!listInfo.mediatype || listInfo.mediatype === '')) {
-                determinedHasMovies = true;
-                determinedHasShows = true;
+                if (moviesCount === 0 && showsCount === 0) {
+                    const mediatype = listInfo.mediatype;
+                    if (mediatype === 'movie') {
+                        determinedHasMovies = true;
+                    } else if (mediatype === 'show' || mediatype === 'series') {
+                        determinedHasShows = true;
+                    }
+                }
             }
-            determinedCanBeMergedFromSource = (listInfo.dynamic === false || !listInfo.mediatype || listInfo.mediatype === '');
+            
+
         }
 
         listDataForProcessing.hasMovies = determinedHasMovies;
@@ -410,7 +534,6 @@ async function createAddon(userConfig) {
             ...(userConfig.listsMetadata[fullManifestListId] || {}),
             hasMovies: determinedHasMovies,
             hasShows: determinedHasShows,
-            canBeMerged: determinedCanBeMergedFromSource && determinedHasMovies && determinedHasShows, // Actual mergeability
             lastChecked: new Date().toISOString()
         };
         
@@ -420,11 +543,63 @@ async function createAddon(userConfig) {
         const currentListId = String(listInfo.id);
         let listDataForProcessing = { ...listInfo, originalId: currentListId, source: 'trakt' }; 
         await processListForManifest(listDataForProcessing, currentListId, false, null);
+    } else if (listInfo.source === 'tmdb') {
+        const currentListId = String(listInfo.id);
+        
+        // Check if we have stored metadata for this TMDB list
+        let metadata = userConfig.listsMetadata[currentListId] || {};
+        let determinedHasMovies = metadata.hasMovies;
+        let determinedHasShows = metadata.hasShows;
+        
+        // If we don't have metadata, try to determine from list type
+        if (typeof determinedHasMovies !== 'boolean' || typeof determinedHasShows !== 'boolean') {
+            if (currentListId === 'tmdb_watchlist' || currentListId === 'tmdb_favorites') {
+                // Watchlist and favorites can contain both movies and shows
+                determinedHasMovies = true;
+                determinedHasShows = true;
+            } else if (currentListId.startsWith('tmdb_list_')) {
+                // Custom lists can contain both, but we'll try to fetch to determine
+                try {
+                    const tempUserConfigForMetadata = { ...userConfig, listsMetadata: {}, rpdbApiKey: null, customMediaTypeNames: {} };
+                    const content = await fetchListContent(currentListId, tempUserConfigForMetadata, 0, null, 'all');
+                    determinedHasMovies = content?.hasMovies || false;
+                    determinedHasShows = content?.hasShows || false;
+                } catch (error) {
+                    console.error(`Error fetching TMDB list ${currentListId} metadata:`, error.message);
+                    // Default to both types for TMDB lists if we can't determine
+                    determinedHasMovies = true;
+                    determinedHasShows = true;
+                }
+            } else {
+                // Default for unknown TMDB list types
+                determinedHasMovies = true;
+                determinedHasShows = true;
+            }
+            
+            // Update metadata
+            if (!userConfig.listsMetadata) userConfig.listsMetadata = {};
+            userConfig.listsMetadata[currentListId] = {
+                ...(userConfig.listsMetadata[currentListId] || {}),
+                hasMovies: determinedHasMovies,
+                hasShows: determinedHasShows,
+                lastChecked: new Date().toISOString()
+            };
+        }
+        
+        let listDataForProcessing = { 
+            ...listInfo, 
+            originalId: currentListId, 
+            source: 'tmdb',
+            hasMovies: determinedHasMovies,
+            hasShows: determinedHasShows
+        };
+        await processListForManifest(listDataForProcessing, currentListId, false, null);
     }
   }
 
+  console.log(`[AddonBuilder] Processing ${Object.keys(importedAddons || {}).length} imported addons...`);
   for (const addon of Object.values(importedAddons || {})) {
-    const addonGroupId = String(addon.id); 
+    const addonGroupId = String(addon.id);
     if (removedListsSet.has(addonGroupId) || hiddenListsSet.has(addonGroupId)) {
         continue;
     }
@@ -433,7 +608,6 @@ async function createAddon(userConfig) {
     const isTraktPublicList = !!addon.isTraktPublicList;
 
     if (isMDBListUrlImport || isTraktPublicList) {
-      if (isMDBListUrlImport && !apiKey) continue; 
       let listDataForUrlImport = {
           id: addonGroupId, // The AIOLists unique ID for this imported URL list
           name: addon.name,
@@ -501,30 +675,406 @@ async function createAddon(userConfig) {
     });
   }
 
+  // Add search catalogs - create separate movie/series catalogs (multi search disabled)
+  const searchCatalogExtra = [
+    { name: "search", isRequired: true },
+    { name: "genre", isRequired: false, options: availableGenres }
+  ];
+  
+  // Create separate movie/series catalogs
+  tempGeneratedCatalogs.push({
+    id: 'aiolists_search',
+    type: 'movie',
+    name: 'Search Movies',
+    extra: searchCatalogExtra,
+    extraSupported: searchCatalogExtra.map(e => e.name)
+  });
+  
+  tempGeneratedCatalogs.push({
+    id: 'aiolists_search',
+    type: 'series', 
+    name: 'Search Series',
+    extra: searchCatalogExtra,
+    extraSupported: searchCatalogExtra.map(e => e.name)
+  });
+  
   manifest.catalogs = tempGeneratedCatalogs;
   const builder = new addonBuilder(manifest);
 
   builder.defineCatalogHandler(async ({ type, id, extra }) => {
     const skip = parseInt(extra?.skip) || 0;
     const genre = extra?.genre || null;
+    const searchQuery = extra?.search || null;
     
-    // Pass the 'type' from the Stremio request to fetchListContent as stremioCatalogType
+    // Handle search catalog
+    if (id === 'aiolists_search' && searchQuery) {      
+      if (!searchQuery || searchQuery.trim().length < 2) {
+        return Promise.resolve({ metas: [] });
+      }
+
+      try {
+        // Determine search sources based on user configuration
+        const userSearchSources = userConfig.searchSources || ['cinemeta'];
+        let sources = [];
+        
+        // Individual search sources mode (multi search is disabled)
+        if (userSearchSources.includes('cinemeta')) {
+          sources.push('cinemeta');
+        }
+        if (userSearchSources.includes('trakt')) {
+          sources.push('trakt');
+        }
+        if (userSearchSources.includes('tmdb') && (userConfig.tmdbBearerToken || userConfig.tmdbSessionId)) {
+          sources.push('tmdb');
+        }
+        
+        // Default to Cinemeta if no valid sources
+        if (sources.length === 0) {
+          sources = ['cinemeta'];
+        }
+
+        const { searchContent } = require('../utils/searchEngine');
+        
+        // Use the type for search
+        const searchType = type || 'all';
+        
+        const searchResults = await searchContent({
+          query: searchQuery.trim(),
+          type: searchType,
+          sources: sources,
+          limit: 50,
+          userConfig: userConfig
+        });
+
+        // Filter results by type and genre if specified
+        let filteredMetas = searchResults.results || [];
+        
+        // Filter by type if specified
+        if (type && type !== 'all' && type !== 'search') {
+          filteredMetas = filteredMetas.filter(result => result.type === type);
+        }
+
+        // Filter by genre if specified
+        if (genre && genre !== 'All') {
+          const beforeFilter = filteredMetas.length;
+          filteredMetas = filteredMetas.filter(result => {
+            if (!result.genres) return false;
+            const itemGenres = Array.isArray(result.genres) ? result.genres : [result.genres];
+            return itemGenres.some(g => 
+              String(g).toLowerCase() === String(genre).toLowerCase()
+            );
+          });
+        }
+
+        return Promise.resolve({ 
+          metas: filteredMetas,
+          cacheMaxAge: 300 // 5 minutes cache for search results
+        });
+
+      } catch (error) {
+        console.error(`[Search] Error in search catalog for "${searchQuery}":`, error);
+        return Promise.resolve({ metas: [] });
+      }
+    }
+    
+    // Handle regular list catalogs
     const itemsResult = await fetchListContent(id, userConfig, skip, genre, type); 
     if (!itemsResult || !itemsResult.allItems) return Promise.resolve({ metas: [] });
 
-    let metas = await convertToStremioFormat(itemsResult, userConfig.rpdbApiKey);
+    // Enrich items with metadata based on user's metadata source preference
+    const metadataSource = userConfig.metadataSource || 'cinemeta';
+    const hasTmdbOAuth = !!(userConfig.tmdbSessionId && userConfig.tmdbAccountId);
+    const tmdbLanguage = userConfig.tmdbLanguage || 'en-US';
+    
+    // Debug the environment variable loading
+    const envToken = require('../config').TMDB_BEARER_TOKEN;
+    console.log(`[DEBUG] AddonBuilder - Raw env TMDB_BEARER_TOKEN: "${envToken}"`);
+    console.log(`[DEBUG] AddonBuilder - Raw env TMDB_BEARER_TOKEN length: ${envToken ? envToken.length : 'null/undefined'}`);
+    console.log(`[DEBUG] AddonBuilder - process.env.TMDB_BEARER_TOKEN exists: ${!!process.env.TMDB_BEARER_TOKEN}`);
+    console.log(`[DEBUG] AddonBuilder - process.env.TMDB_BEARER_TOKEN length: ${process.env.TMDB_BEARER_TOKEN ? process.env.TMDB_BEARER_TOKEN.length : 'null/undefined'}`);
+    
+    const tmdbBearerToken = userConfig.tmdbBearerToken || envToken;
+    
+    console.log(`[DEBUG] AddonBuilder - metadataSource: ${metadataSource}, hasTmdbOAuth: ${hasTmdbOAuth}, tmdbBearerToken: ${tmdbBearerToken ? 'SET' : 'NULL/UNDEFINED'}`);
+    console.log(`[DEBUG] AddonBuilder - userConfig.tmdbBearerToken: ${userConfig.tmdbBearerToken ? 'SET' : 'NULL/UNDEFINED'}`);
+    console.log(`[DEBUG] AddonBuilder - userConfig.tmdbBearerToken exact value: "${userConfig.tmdbBearerToken}"`);
+    console.log(`[DEBUG] AddonBuilder - environment TMDB_BEARER_TOKEN: ${envToken ? 'SET' : 'NULL/UNDEFINED'}`);
+    console.log(`[DEBUG] AddonBuilder - final tmdbBearerToken: ${tmdbBearerToken ? 'SET' : 'NULL/UNDEFINED'}`);
+    console.log(`[DEBUG] AddonBuilder - final tmdbBearerToken length: ${tmdbBearerToken ? tmdbBearerToken.length : 'null/undefined'}`);
+    
+    const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
+    const enrichedItems = await enrichItemsWithMetadata(
+      itemsResult.allItems, 
+      metadataSource, 
+      hasTmdbOAuth, 
+      tmdbLanguage, 
+      tmdbBearerToken
+    );
+    
+    // Log conversion results for debugging
+    const tmdbFormatItems = enrichedItems.filter(i => i.id && i.id.startsWith('tmdb:')).length;
+    if (tmdbFormatItems > 0) {
+      console.log(`[DEBUG] Catalog contains ${tmdbFormatItems} items with tmdb: format IDs`);
+    }
+    
+    // Update the items result with enriched items
+    const enrichedResult = {
+      ...itemsResult,
+      allItems: enrichedItems
+    };
 
+    // Create metadata config for converter
+    const metadataConfig = {
+      metadataSource: userConfig.metadataSource || 'cinemeta',
+      tmdbLanguage: userConfig.tmdbLanguage || 'en-US'
+    };
+
+    let metas = await convertToStremioFormat(enrichedResult, userConfig.rpdbApiKey, metadataConfig);
+
+    // Apply type filtering
     if (type === 'movie' || type === 'series') {
         metas = metas.filter(meta => meta.type === type);
+    }
+    
+    // Apply genre filtering after enrichment (since we removed it from integration layer)
+    if (genre && genre !== 'All' && metas.length > 0) {
+        const beforeFilterCount = metas.length;
+        metas = metas.filter(meta => {
+            if (!meta.genres) return false;
+            const itemGenres = Array.isArray(meta.genres) ? meta.genres : [meta.genres];
+            return itemGenres.some(g => 
+                String(g).toLowerCase() === String(genre).toLowerCase()
+            );
+        });
+        console.log(`[AddonBuilder] Genre filter "${genre}": ${beforeFilterCount} -> ${metas.length} items after enrichment`);
     }
     
     const cacheMaxAge = (id === 'random_mdblist_catalog' || isWatchlist(id)) ? 0 : (5 * 60);
     return Promise.resolve({ metas, cacheMaxAge });
   });
 
-  builder.defineMetaHandler(({ type, id }) => {
-    if (!id.startsWith('tt')) return Promise.resolve({ meta: null });
-    return Promise.resolve({ meta: { id, type, name: "Loading details..." } }); 
+  builder.defineMetaHandler(async ({ type, id }) => {
+    // Support both IMDB IDs (tt) and TMDB IDs (tmdb:)
+    if (!id.startsWith('tt') && !id.startsWith('tmdb:')) {
+      return Promise.resolve({ meta: null });
+    }
+    
+    try {
+      // Extract metadata config from userConfig
+      const metadataSource = userConfig.metadataSource || 'cinemeta';
+      const hasTmdbOAuth = !!(userConfig.tmdbSessionId && userConfig.tmdbAccountId);
+      const tmdbLanguage = userConfig.tmdbLanguage || 'en-US';
+      const tmdbBearerToken = userConfig.tmdbBearerToken || require('../config').TMDB_BEARER_TOKEN;
+      
+      console.log(`[MetaHandler] Processing ${id} with source: ${metadataSource}`);
+      console.log(`[MetaHandler] tmdbBearerToken available: ${!!tmdbBearerToken}`);
+      console.log(`[MetaHandler] hasTmdbOAuth: ${hasTmdbOAuth}`);
+      
+      // Always use English for meta requests to ensure Stremio compatibility
+      const metaLanguage = 'en-US';
+      
+      // Handle TMDB IDs differently based on source preference
+      if (id.startsWith('tmdb:') || (metadataSource === 'tmdb' && tmdbBearerToken)) {
+        let tmdbId, tmdbType, originalImdbId;
+        
+        if (id.startsWith('tmdb:')) {
+          // Direct TMDB ID
+          tmdbId = id.replace('tmdb:', '');
+          tmdbType = type;
+          
+          // Try to get IMDB ID for this TMDB item for cross-referencing
+          try {
+            const { fetchTmdbMetadata } = require('../integrations/tmdb');
+            const tmdbData = await fetchTmdbMetadata(tmdbId, tmdbType, metaLanguage, tmdbBearerToken);
+            if (tmdbData?.imdb_id) {
+              originalImdbId = tmdbData.imdb_id;
+            }
+          } catch (error) {
+            console.warn(`[MetaHandler] Could not fetch IMDB ID for TMDB:${tmdbId}:`, error.message);
+          }
+        } else if (id.startsWith('tt')) {
+          // Convert IMDB ID to TMDB ID and get TMDB metadata using tmdb: format
+          originalImdbId = id;
+          const { convertImdbToTmdbId } = require('../integrations/tmdb');
+          const tmdbResult = await convertImdbToTmdbId(id, tmdbBearerToken);
+          if (tmdbResult && tmdbResult.tmdbId) {
+            tmdbId = tmdbResult.tmdbId;
+            tmdbType = tmdbResult.type;
+          }
+        }
+        
+        if (tmdbId) {
+          try {
+            console.log(`[MetaHandler] Attempting to fetch TMDB metadata for ID: ${tmdbId}, type: ${tmdbType}`);
+            // Fetch comprehensive TMDB metadata
+            const { fetchTmdbMetadata } = require('../integrations/tmdb');
+            const tmdbMeta = await fetchTmdbMetadata(tmdbId, tmdbType, metaLanguage, tmdbBearerToken);
+            
+            if (tmdbMeta) {
+              // Always preserve the original request ID format
+              tmdbMeta.id = id;
+              tmdbMeta.imdb_id = originalImdbId || tmdbMeta.imdb_id;
+              
+              // Supplement with IMDB rating and missing fields from Cinemeta
+              const imdbIdForCinemeta = tmdbMeta.imdb_id;
+              if (imdbIdForCinemeta && imdbIdForCinemeta.startsWith('tt')) {
+                try {
+                  const cinemetaResponse = await axios.get(`https://v3-cinemeta.strem.io/meta/${tmdbType}/${imdbIdForCinemeta}.json`, { 
+                    timeout: 3000 
+                  });
+                  
+                  const cinemetaMeta = cinemetaResponse.data?.meta;
+                  if (cinemetaMeta) {
+                    // Use Cinemeta's IMDB rating as it's more authoritative
+                    if (cinemetaMeta.imdbRating) {
+                      tmdbMeta.imdbRating = cinemetaMeta.imdbRating;
+                    }
+                    
+                    // Fill missing essential Cinemeta fields
+                    if (cinemetaMeta.awards && !tmdbMeta.awards) {
+                      tmdbMeta.awards = cinemetaMeta.awards;
+                    }
+                    if (cinemetaMeta.dvdRelease && !tmdbMeta.dvdRelease) {
+                      tmdbMeta.dvdRelease = cinemetaMeta.dvdRelease;
+                    }
+                    if (cinemetaMeta.country && !tmdbMeta.country) {
+                      tmdbMeta.country = cinemetaMeta.country;
+                    }
+                    // Prefer Cinemeta logo if TMDB doesn't have one
+                    if (cinemetaMeta.logo && !tmdbMeta.logo) {
+                      tmdbMeta.logo = cinemetaMeta.logo;
+                    }
+                    
+                    console.log(`[MetaHandler] Enhanced TMDB metadata with Cinemeta data for ${imdbIdForCinemeta}`);
+                  }
+                } catch (cinemetaError) {
+                  console.warn(`[MetaHandler] Could not fetch Cinemeta data for ${imdbIdForCinemeta}:`, cinemetaError.message);
+                }
+              }
+              
+              // Enhance behavioral hints for better Stremio integration
+              tmdbMeta.behaviorHints = {
+                defaultVideoId: tmdbMeta.imdb_id || tmdbMeta.id,
+                hasScheduledVideos: tmdbType === 'series',
+                p2p: false,
+                configurable: false,
+                configurationRequired: false
+              };
+              
+              console.log(`[MetaHandler] Successfully fetched comprehensive TMDB metadata for ${id} -> ${tmdbMeta.id}`);
+              
+              return Promise.resolve({ 
+                meta: tmdbMeta,
+                cacheMaxAge: 24 * 60 * 60 // Cache for 24 hours
+              });
+            }
+          } catch (tmdbError) {
+            console.error(`[MetaHandler] TMDB metadata fetch failed for ${id}:`, tmdbError.message);
+            console.error(`[MetaHandler] TMDB error stack:`, tmdbError.stack);
+          }
+        } else {
+          console.warn(`[MetaHandler] No TMDB ID found for ${id}`);
+        }
+      }
+      
+      // Fallback to standard enrichment process for non-TMDB sources or failures
+      const itemForEnrichment = [{
+        id: id,
+        imdb_id: id.startsWith('tt') ? id : undefined,
+        type: type,
+        title: "Loading...",
+        name: "Loading..."
+      }];
+      
+      const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
+      const enrichedItems = await enrichItemsWithMetadata(itemForEnrichment, 'cinemeta', false, 'en-US', null);
+      
+      if (enrichedItems && enrichedItems.length > 0) {
+        const enrichedItem = enrichedItems[0];
+        
+        // Create a comprehensive meta object
+        const meta = {
+          id: id,
+          imdb_id: id.startsWith('tt') ? id : enrichedItem.imdb_id,
+          type: type,
+          name: enrichedItem.name || enrichedItem.title || "Unknown Title",
+          poster: enrichedItem.poster,
+          background: enrichedItem.background || enrichedItem.backdrop,
+          description: enrichedItem.description || enrichedItem.overview,
+          releaseInfo: enrichedItem.releaseInfo || enrichedItem.year || 
+                       (enrichedItem.release_date ? enrichedItem.release_date.split('-')[0] : 
+                       (enrichedItem.first_air_date ? enrichedItem.first_air_date.split('-')[0] : undefined)),
+          year: enrichedItem.year,
+          released: enrichedItem.released,
+          imdbRating: enrichedItem.imdbRating,
+          runtime: enrichedItem.runtime,
+          genres: enrichedItem.genres,
+          genre: enrichedItem.genres, // Cinemeta compatibility
+          cast: enrichedItem.cast,
+          director: enrichedItem.director,
+          writer: enrichedItem.writer,
+          country: enrichedItem.country,
+          trailers: enrichedItem.trailers,
+          trailerStreams: enrichedItem.trailerStreams,
+          videos: enrichedItem.videos || [],
+          links: enrichedItem.links || [],
+          awards: enrichedItem.awards,
+          dvdRelease: enrichedItem.dvdRelease,
+          logo: enrichedItem.logo,
+          slug: enrichedItem.slug,
+          popularity: enrichedItem.popularity,
+          popularities: enrichedItem.popularities,
+          status: type === 'series' ? enrichedItem.status : undefined,
+          behaviorHints: {
+            defaultVideoId: id,
+            hasScheduledVideos: type === 'series',
+            p2p: false,
+            configurable: false,
+            configurationRequired: false
+          }
+        };
+        
+        // Clean up undefined values
+        Object.keys(meta).forEach(key => {
+          if (meta[key] === undefined) {
+            delete meta[key];
+          }
+        });
+        
+        console.log(`[MetaHandler] Returning enriched metadata for ${id} with ${Object.keys(meta).length} fields`);
+        
+        return Promise.resolve({ 
+          meta,
+          cacheMaxAge: 12 * 60 * 60 // 12 hours cache
+        });
+      }
+      
+      // Final fallback - but first log what went wrong
+      console.error(`[MetaHandler] All metadata sources failed for ${id}, returning fallback`);
+      return Promise.resolve({ 
+        meta: { 
+          id, 
+          type, 
+          name: "Details unavailable",
+          behaviorHints: {
+            hasScheduledVideos: type === 'series'
+          }
+        }
+      });
+      
+    } catch (error) {
+      console.error(`Error in meta handler for ${id}:`, error);
+      return Promise.resolve({ 
+        meta: { 
+          id, 
+          type, 
+          name: "Error loading details",
+          behaviorHints: {
+            hasScheduledVideos: type === 'series'
+          }
+        }
+      });
+    }
   });
 
   return builder.getInterface();

@@ -1,6 +1,6 @@
 // src/integrations/externalAddons.js
 const axios = require('axios');
-const { enrichItemsWithCinemeta } = require('../utils/metadataFetcher');
+const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
 
 class ExternalAddon {
   constructor(manifestUrl) {
@@ -118,8 +118,6 @@ class ExternalAddon {
         // No logo URL provided or it's not a string
         if (this.manifest.hasOwnProperty('logo') && this.manifest.logo !== null && typeof this.manifest.logo !== 'undefined') { // if 'logo' key exists but value is weird
           console.warn(`[ExternalAddon] Invalid logo value specified for addon ${this.manifest.id}: ${this.manifest.logo}. Using default logo.`);
-        } else { // 'logo' key might be missing or null/undefined
-          console.log(`[ExternalAddon] No logo specified for addon ${this.manifest.id}. Using default logo.`);
         }
         tentativeLogo = defaultLogoUrl;
       }
@@ -189,7 +187,7 @@ async function importExternalAddon(manifestUrl, userConfig) {
   return await addon.import(userConfig);
 }
 
-async function fetchExternalAddonItems(targetOriginalId, targetOriginalType, sourceAddonConfig, skip = 0, rpdbApiKey = null, genre = null) {
+async function fetchExternalAddonItems(targetOriginalId, targetOriginalType, sourceAddonConfig, skip = 0, rpdbApiKey = null, genre = null, userConfig = null) {
   let attemptedUrl = "Unknown (URL could not be constructed before error)";
   try {
     if (!sourceAddonConfig || !sourceAddonConfig.apiBaseUrl || !sourceAddonConfig.catalogs) {
@@ -226,17 +224,16 @@ async function fetchExternalAddonItems(targetOriginalId, targetOriginalType, sou
             return meta;
         });
     }
-    let enrichedMetas = [];
-    if (metasFromExternal.length > 0) {
-        enrichedMetas = await enrichItemsWithCinemeta(metasFromExternal);
-    }
+    // No metadata enrichment here - this will be done in the addon builder when serving to Stremio
+    let enrichedMetas = metasFromExternal;
     let finalMetas = enrichedMetas;
     if (genre && finalMetas.length > 0) {
-        finalMetas = finalMetas.filter(meta => 
-            meta.genres && 
-            Array.isArray(meta.genres) && 
-            meta.genres.map(g => String(g).toLowerCase()).includes(String(genre).toLowerCase())
-        );
+        // Basic genre filtering - comprehensive filtering will happen after enrichment in addon builder
+        finalMetas = finalMetas.filter(meta => {
+            // Most external addon items may not have detailed genre data at this stage
+            // This filtering will be more comprehensive after enrichment in the addon builder
+            return true; // For now, include all items - genre filtering will happen after enrichment
+        });
     }
     const hasMovies = finalMetas.some(m => m.type === 'movie');
     const hasShows = finalMetas.some(m => m.type === 'series');
