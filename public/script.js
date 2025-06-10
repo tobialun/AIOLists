@@ -759,6 +759,14 @@ document.addEventListener('DOMContentLoaded', function() {
         removedLists: new Set(data.config.removedLists || []),
         customMediaTypeNames: data.config.customMediaTypeNames || {},
       };
+      
+      // Ensure hiddenLists and removedLists are Sets (double check)
+      if (!state.userConfig.hiddenLists || !state.userConfig.hiddenLists.has) {
+        state.userConfig.hiddenLists = new Set(data.config.hiddenLists || []);
+      }
+      if (!state.userConfig.removedLists || !state.userConfig.removedLists.has) {
+        state.userConfig.removedLists = new Set(data.config.removedLists || []);
+      }
       state.userConfig.randomMDBListUsernames = (data.config.randomMDBListUsernames && data.config.randomMDBListUsernames.length > 0)
                                                 ? data.config.randomMDBListUsernames
                                                 : [...defaultConfig.randomMDBListUsernames];
@@ -2469,6 +2477,13 @@ function startNameEditing(listItemElement, list) {
       
       if (data.success) {
         state.userConfig = data.config;
+        // Ensure hiddenLists and removedLists are Sets
+        if (!state.userConfig.hiddenLists || !state.userConfig.hiddenLists.has) {
+          state.userConfig.hiddenLists = new Set(data.config.hiddenLists || []);
+        }
+        if (!state.userConfig.removedLists || !state.userConfig.removedLists.has) {
+          state.userConfig.removedLists = new Set(data.config.removedLists || []);
+        }
         updateAllUIFromConfig();
         updateConnectionStatusFromConfig();
         updateSearchSourcesUI(); // Add this line
@@ -2485,6 +2500,91 @@ function startNameEditing(listItemElement, list) {
       showNotification('config', 'Failed to load configuration', 'error');
     } finally {
       loadingState.set('config', false);
+    }
+  }
+
+  function updateAllUIFromConfig() {
+    try {
+      // Update API keys
+      if (elements.apiKeyInput) {
+        updateApiKeyUI(elements.apiKeyInput, state.userConfig.apiKey, 'mdblist', state.userConfig.mdblistUsername);
+      }
+      if (elements.rpdbApiKeyInput) {
+        updateApiKeyUI(elements.rpdbApiKeyInput, state.userConfig.rpdbApiKey, 'rpdb');
+      }
+
+      // Update TMDB Bearer Token input field
+      const tmdbBearerTokenInput = document.getElementById('tmdbBearerToken');
+      const tmdbBearerTokenGroup = document.getElementById('tmdbBearerTokenGroup');
+      if (tmdbBearerTokenInput && tmdbBearerTokenGroup) {
+        if (state.env && state.env.hasTmdbBearerToken) {
+          tmdbBearerTokenGroup.style.display = 'none';
+        } else {
+          tmdbBearerTokenGroup.style.display = 'block';
+          tmdbBearerTokenInput.value = state.userConfig.tmdbBearerToken || '';
+        }
+      }
+
+      // Update Upstash credentials
+      if (elements.upstashUrlInput) {
+        elements.upstashUrlInput.value = state.userConfig.upstashUrl || '';
+      }
+      if (elements.upstashTokenInput) {
+        elements.upstashTokenInput.value = state.userConfig.upstashToken || '';
+      }
+
+      // Update metadata settings
+      if (elements.metadataSourceSelect) {
+        elements.metadataSourceSelect.value = state.userConfig.metadataSource || 'cinemeta';
+      }
+      if (elements.tmdbLanguageSelect) {
+        elements.tmdbLanguageSelect.value = state.userConfig.tmdbLanguage || 'en-US';
+      }
+
+      // Update UI components
+      updateMetadataSourceUI();
+      updateGenreFilterButtonText();
+      updateRandomListButtonState();
+      updateSearchSourcesUI();
+
+      // Update persistence status
+      const hasUpstashCredentials = !!(state.userConfig.upstashUrl && state.userConfig.upstashToken);
+      updatePersistenceStatus(hasUpstashCredentials);
+    } catch (error) {
+      console.error('Error updating UI from config:', error);
+    }
+  }
+
+  function updateConnectionStatusFromConfig() {
+    try {
+      // Check if Trakt token is expired
+      const isTraktTokenExpired = state.userConfig.traktExpiresAt && new Date() >= new Date(state.userConfig.traktExpiresAt);
+
+      if (isTraktTokenExpired && !state.userConfig.upstashUrl) {
+        // If the token is expired and there's no Upstash for persistence/refresh, treat as disconnected
+        state.userConfig.traktAccessToken = null;
+        state.userConfig.traktRefreshToken = null;
+        state.userConfig.traktExpiresAt = null;
+        showNotification('connections', 'Trakt connection expired. Please reconnect.', 'error', true);
+      }
+
+      // Update Trakt UI
+      const isTraktConnected = !!(state.userConfig.traktAccessToken || (state.userConfig.upstashUrl && state.userConfig.traktUuid));
+      updateTraktUI(isTraktConnected);
+
+      // Update TMDB UI
+      const isTmdbConnected = !!state.userConfig.tmdbSessionId;
+      updateTmdbConnectionUI(isTmdbConnected, state.userConfig.tmdbUsername);
+    } catch (error) {
+      console.error('Error updating connection status from config:', error);
+    }
+  }
+
+  function showSharedConfigNotice() {
+    try {
+      showNotification('config', 'This appears to be a shared configuration. API keys and tokens are not included for security.', 'info', true);
+    } catch (error) {
+      console.error('Error showing shared config notice:', error);
     }
   }
 

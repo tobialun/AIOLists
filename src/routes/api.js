@@ -629,6 +629,8 @@ module.exports = function(router) {
       const configHash = req.params.configHash;
       const { code } = req.body;
       
+      console.log(`[Trakt Auth] Attempting authentication with code: ${code ? 'present' : 'missing'}`);
+      
       if (!configHash) {
         return res.status(400).json({ error: 'Config hash is required' });
       }
@@ -643,11 +645,22 @@ module.exports = function(router) {
         return res.status(400).json({ error: 'Invalid config hash' });
       }
       
+      console.log(`[Trakt Auth] Config decompressed successfully`);
+      
       // Complete Trakt authentication
       const authResult = await authenticateTrakt(code, userConfig);
       
-      if (!authResult.success) {
-        return res.status(400).json({ error: authResult.error || 'Trakt authentication failed' });
+      console.log(`[Trakt Auth] Authentication result:`, {
+        hasAccessToken: !!authResult?.accessToken,
+        hasRefreshToken: !!authResult?.refreshToken,
+        hasUuid: !!authResult?.uuid,
+        expiresAt: authResult?.expiresAt
+      });
+      
+      // authenticateTrakt returns the auth data directly or throws an error
+      if (!authResult || !authResult.accessToken) {
+        console.error(`[Trakt Auth] Authentication failed - no access token received`);
+        return res.status(400).json({ error: 'Trakt authentication failed - no access token received' });
       }
       
       // Update userConfig with new tokens
@@ -658,8 +671,12 @@ module.exports = function(router) {
         userConfig.traktUuid = authResult.uuid;
       }
       
+      console.log(`[Trakt Auth] User config updated with tokens`);
+      
       // Compress and return new config hash
       const newConfigHash = await compressConfig(userConfig);
+      
+      console.log(`[Trakt Auth] New config hash generated: ${newConfigHash ? 'success' : 'failed'}`);
       
       res.json({
         success: true,
@@ -670,7 +687,7 @@ module.exports = function(router) {
       
     } catch (error) {
       console.error('Error in Trakt OAuth callback:', error);
-      res.status(500).json({ error: 'Internal server error during Trakt authentication' });
+      res.status(500).json({ error: `Internal server error during Trakt authentication: ${error.message}` });
     }
   });
   
