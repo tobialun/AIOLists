@@ -823,7 +823,13 @@ async function createAddon(userConfig) {
       allItems: enrichedItems
     };
 
-    let metas = await convertToStremioFormat(enrichedResult, userConfig.rpdbApiKey);
+    // Create metadata config for converter
+    const metadataConfig = {
+      metadataSource: userConfig.metadataSource || 'cinemeta',
+      tmdbLanguage: userConfig.tmdbLanguage || 'en-US'
+    };
+
+    let metas = await convertToStremioFormat(enrichedResult, userConfig.rpdbApiKey, metadataConfig);
 
     if (type === 'movie' || type === 'series') {
         metas = metas.filter(meta => meta.type === type);

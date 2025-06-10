@@ -143,19 +143,66 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null, metadataCo
     }
   });
 
+  // Apply RPDB posters if API key is provided - RPDB posters take priority
   if (useRPDB && itemsToProcess.length > 0) {
-    const imdbIds = itemsToProcess.map(item => item.id).filter(id => id && id.startsWith('tt'));
-    if (imdbIds.length > 0) {
-      const posterMap = await batchFetchPosters(imdbIds, rpdbApiKey);
-      metas = itemsToProcess.map(item => {
-        if (item.id && posterMap[item.id]) {
-          return { ...item, poster: posterMap[item.id] };
+    // Extract IMDB IDs for RPDB poster fetching
+    // Handle both direct IMDB IDs and items with separate imdb_id field
+    const imdbIds = [];
+    const itemImdbIdMap = new Map(); // Map to track which IMDB ID belongs to which item
+    
+    itemsToProcess.forEach((item, index) => {
+      let imdbId = null;
+      
+      // Priority 1: Direct IMDB ID in item.id
+      if (item.id && item.id.startsWith('tt')) {
+        imdbId = item.id;
+      }
+      // Priority 2: IMDB ID in imdb_id field (common with TMDB metadata)
+      else if (item.imdb_id && item.imdb_id.startsWith('tt')) {
+        imdbId = item.imdb_id;
+      }
+      
+      if (imdbId) {
+        imdbIds.push(imdbId);
+        // Map this IMDB ID to the item index for later reference
+        if (!itemImdbIdMap.has(imdbId)) {
+          itemImdbIdMap.set(imdbId, []);
         }
-        return item;
+        itemImdbIdMap.get(imdbId).push(index);
+      }
+    });
+    
+    if (imdbIds.length > 0) {
+      // Extract language from metadata config for RPDB posters
+      let rpdbLanguage = null;
+      if (metadataConfig.tmdbLanguage) {
+        // Convert TMDB language format (e.g., 'en-US') to RPDB language format (e.g., 'en')
+        rpdbLanguage = metadataConfig.tmdbLanguage.split('-')[0];
+      }
+      
+      console.log(`[RPDB] Fetching posters for ${imdbIds.length} items with language: ${rpdbLanguage || 'default'}`);
+      
+      const posterMap = await batchFetchPosters(imdbIds, rpdbApiKey, rpdbLanguage);
+      
+      // Apply RPDB posters to items (RPDB takes priority over metadata source posters)
+      Object.entries(posterMap).forEach(([imdbId, posterUrl]) => {
+        if (posterUrl && itemImdbIdMap.has(imdbId)) {
+          const itemIndices = itemImdbIdMap.get(imdbId);
+          itemIndices.forEach(index => {
+            if (itemsToProcess[index]) {
+              console.log(`[RPDB] Applying poster for ${imdbId}: ${posterUrl}`);
+              itemsToProcess[index].poster = posterUrl;
+            }
+          });
+        }
       });
+      
+      console.log(`[RPDB] Applied ${Object.keys(posterMap).filter(k => posterMap[k]).length} posters out of ${imdbIds.length} requested`);
     } else {
-       metas = itemsToProcess;
+      console.log(`[RPDB] No valid IMDB IDs found for poster fetching from ${itemsToProcess.length} items`);
     }
+    
+    metas = itemsToProcess;
   } else {
     metas = itemsToProcess;
   }

@@ -435,7 +435,13 @@ module.exports = function(router) {
         };
       }
   
-      let metas = await convertToStremioFormat(enrichedResult, req.userConfig.rpdbApiKey);  
+      // Create metadata config for converter
+      const metadataConfig = {
+        metadataSource: req.userConfig.metadataSource || 'cinemeta',
+        tmdbLanguage: req.userConfig.tmdbLanguage || 'en-US'
+      };
+
+      let metas = await convertToStremioFormat(enrichedResult, req.userConfig.rpdbApiKey, metadataConfig);  
       if (catalogType === 'movie' || catalogType === 'series') {
           metas = metas.filter(meta => meta.type === catalogType);
       }
