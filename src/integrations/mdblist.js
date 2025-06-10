@@ -160,6 +160,144 @@ function processMDBListApiResponse(data, isWatchlistUnified = false) {
     return { items: finalItems, hasMovies, hasShows };
   }
 
+/**
+ * Fetch items from MDBList public JSON endpoint (no API key required)
+ * @param {string} username - MDBList username
+ * @param {string} listSlug - List slug/identifier  
+ * @param {number} skip - Number of items to skip for pagination
+ * @param {string} sort - Sort parameter (supports all MDBList sort options)
+ * @param {string} order - Order parameter (asc/desc)
+ * @param {string} genre - Genre filter
+ * @param {Object} userConfig - User configuration for metadata enrichment
+ * @param {boolean} isMergedByUser - Whether this is a merged/unified list
+ * @returns {Promise<Object|null>} Formatted list content or null if failed
+ */
+async function fetchListItemsFromPublicJson(username, listSlug, skip = 0, sort = 'rank', order = 'asc', genre = null, userConfig = null, isMergedByUser = false) {
+  try {
+    // Construct the public JSON URL with full parameter support
+    const params = new URLSearchParams();
+    params.append('limit', ITEMS_PER_PAGE.toString());
+    
+    // Use offset instead of skip for MDBList API compatibility
+    if (skip > 0) {
+      params.append('offset', skip.toString());
+    }
+    
+    // Add sort parameter - MDBList public JSON supports most sort options
+    if (sort && sort !== 'default') {
+      params.append('sort', sort);
+    }
+    
+    // Add order parameter
+    if (order === 'desc') {
+      params.append('order', 'desc');
+    } else if (order === 'asc') {
+      params.append('order', 'asc');
+    }
+    
+    // Add unified parameter for mergeable lists (combines movies and shows)
+    if (isMergedByUser) {
+      params.append('unified', 'true');
+    }
+    
+    // Add append_to_response for additional metadata (if supported)
+    params.append('append_to_response', 'ratings');
+
+    const publicJsonUrl = `https://mdblist.com/lists/${username}/${listSlug}/json/?${params.toString()}`;
+    
+    console.log(`[MDBList Public] Attempting to fetch from public JSON: ${publicJsonUrl}`);
+    
+    const response = await axios.get(publicJsonUrl, { 
+      timeout: 15000,
+      headers: {
+        'User-Agent': 'AIOLists-Stremio-Addon/1.0'
+      }
+    });
+
+    if (!response.data || !Array.isArray(response.data)) {
+      console.error('[MDBList Public] Invalid response format from public JSON endpoint');
+      return null;
+    }
+
+    const rawItems = response.data;
+    console.log(`[MDBList Public] Fetched ${rawItems.length} items from public JSON`);
+
+    // Process the public JSON response format
+    let hasMovies = false;
+    let hasShows = false;
+    
+    const processedItems = rawItems.map(item => {
+      // Convert public JSON format to internal format
+      const type = (item.mediatype === 'show' || item.mediatype === 'series') ? 'series' : 'movie';
+      if (type === 'movie') hasMovies = true;
+      if (type === 'series') hasShows = true;
+
+      return {
+        id: item.imdb_id,
+        imdb_id: item.imdb_id,
+        type: type,
+        title: item.title,
+        name: item.title,
+        year: item.release_year,
+        release_year: item.release_year,
+        rank: item.rank,
+        // Add other fields that might be present
+        tvdb_id: item.tvdbid,
+        adult: item.adult
+      };
+    }).filter(item => item.imdb_id); // Only keep items with valid IMDB IDs
+
+    // Apply genre filter if specified
+    let filteredItems = processedItems;
+    if (genre && genre !== 'All') {
+      // For public JSON, we don't have genre data, so we'll need to enrich first
+      console.log(`[MDBList Public] Genre filtering requested for "${genre}" - will filter after metadata enrichment`);
+    }
+
+    // Enrich items with metadata
+    let enrichedItems = filteredItems;
+    if (filteredItems.length > 0) {
+      const metadataSource = userConfig?.metadataSource || 'cinemeta';
+      const hasTmdbOAuth = !!(userConfig?.tmdbSessionId && userConfig?.tmdbAccountId);
+      const tmdbLanguage = userConfig?.tmdbLanguage || 'en-US';
+      const tmdbBearerToken = userConfig?.tmdbBearerToken;
+      
+      try {
+        enrichedItems = await enrichItemsWithMetadata(filteredItems, metadataSource, hasTmdbOAuth, tmdbLanguage, tmdbBearerToken);
+      } catch (error) {
+        console.error('[MDBList Public] Error enriching metadata:', error.message);
+        enrichedItems = filteredItems; // Use non-enriched items as fallback
+      }
+    }
+
+    // Apply genre filter after enrichment if specified
+    if (genre && genre !== 'All' && enrichedItems.length > 0) {
+      const beforeFilterCount = enrichedItems.length;
+      enrichedItems = enrichedItems.filter(item => {
+        if (!item.genres) return false;
+        const itemGenres = Array.isArray(item.genres) ? item.genres : [item.genres];
+        return itemGenres.some(g => 
+          String(g).toLowerCase() === String(genre).toLowerCase()
+        );
+      });
+      console.log(`[MDBList Public] Genre filter "${genre}": ${beforeFilterCount} -> ${enrichedItems.length} items`);
+    }
+
+    return {
+      allItems: enrichedItems,
+      hasMovies,
+      hasShows
+    };
+
+  } catch (error) {
+    console.error(`[MDBList Public] Error fetching from public JSON endpoint:`, error.message);
+    if (error.response) {
+      console.error(`[MDBList Public] HTTP ${error.response.status}: ${error.response.statusText}`);
+    }
+    return null;
+  }
+}
+
 async function fetchListItems(
     listId, // This will be the MDBList list ID (numeric) or slug
     apiKey,
@@ -173,7 +311,44 @@ async function fetchListItems(
     isMergedByUser = false,
     userConfig = null // Added to access metadata preferences
 ) {
-  if (!apiKey) return null;
+  // If no API key is provided, try to use public JSON endpoint if we have the necessary information
+  if (!apiKey) {
+    console.log('[MDBList] No API key provided, checking for public JSON fallback...');
+    
+    // Check if we have the necessary information for public JSON access
+    let username = usernameForRandomList;
+    let listSlug = String(listId);
+    
+    // Try to extract username and slug from userConfig.importedAddons if this is a URL import
+    if (!username && userConfig?.importedAddons) {
+      for (const addon of Object.values(userConfig.importedAddons)) {
+        if (addon.isMDBListUrlImport && (addon.mdblistId === listId || addon.id === listId)) {
+          username = addon.mdblistUsername;
+          listSlug = addon.mdblistSlug || addon.mdblistId;
+          break;
+        }
+      }
+    }
+    
+    // Also check if this is from randomMDBListUsernames feature
+    if (!username && userConfig?.enableRandomListFeature && userConfig?.randomMDBListUsernames?.length > 0) {
+      // For random lists, we might have the username stored differently
+      // This would need to be coordinated with how the random list selection works
+      console.log('[MDBList] Random list feature detected but no specific username provided for public JSON');
+    }
+    
+    if (username && listSlug) {
+      console.log(`[MDBList] Attempting public JSON access for ${username}/${listSlug}`);
+      const publicResult = await fetchListItemsFromPublicJson(username, listSlug, stremioSkip, sort, order, genre, userConfig, isMergedByUser);
+      if (publicResult) {
+        console.log(`[MDBList] Successfully fetched ${publicResult.allItems.length} items via public JSON`);
+        return publicResult;
+      }
+    }
+    
+    console.log('[MDBList] Public JSON fallback not available or failed, returning null');
+    return null;
+  }
 
   const MAX_ATTEMPTS_FOR_GENRE_FILTER = 1;
   const MDBLIST_PAGE_LIMIT = ITEMS_PER_PAGE;
@@ -243,7 +418,35 @@ async function fetchListItems(
           }
           success = true;
         } catch (error) {
-          // ... (error handling as before)
+          // Check if this is an API key validation error and we have fallback info
+          if (!success && error.response && (error.response.status === 401 || error.response.status === 403)) {
+            console.log(`[MDBList] API authentication failed (${error.response.status}), attempting public JSON fallback...`);
+            
+            // Try to extract username and slug for public JSON fallback
+            let username = listOwnerUsername;
+            let listSlug = effectiveMdbListId;
+            
+            if (!username && userConfig?.importedAddons) {
+              for (const addon of Object.values(userConfig.importedAddons)) {
+                if (addon.isMDBListUrlImport && (addon.mdblistId === listId || addon.id === listId)) {
+                  username = addon.mdblistUsername;
+                  listSlug = addon.mdblistSlug || addon.mdblistId;
+                  break;
+                }
+              }
+            }
+            
+            if (username && listSlug) {
+              console.log(`[MDBList] Attempting public JSON fallback for ${username}/${listSlug}`);
+              const publicResult = await fetchListItemsFromPublicJson(username, listSlug, stremioSkip, sort, order, genre, userConfig, isMergedByUser);
+              if (publicResult) {
+                console.log(`[MDBList] Public JSON fallback successful, returning ${publicResult.allItems.length} items`);
+                return publicResult;
+              }
+            }
+          }
+          
+          // ... (existing error handling)
           currentRetries++;
           console.error(`Error fetching MDBList page for list ${effectiveMdbListId} of user ${listOwnerUsername || 'self'} (offset ${mdbListOffset}, attempt ${currentRetries}/${MAX_RETRIES}):`, error.message);
           if (error.response && (error.response.status === 503 || error.response.status === 429) && currentRetries < MAX_RETRIES) {
@@ -334,6 +537,34 @@ async function fetchListItems(
           }
           success = true;
       } catch (error) {
+          // Check if this is an API key validation error and we have fallback info
+          if (!success && error.response && (error.response.status === 401 || error.response.status === 403)) {
+            console.log(`[MDBList] API authentication failed (${error.response.status}), attempting public JSON fallback...`);
+            
+            // Try to extract username and slug for public JSON fallback
+            let username = listOwnerUsername;
+            let listSlug = effectiveMdbListId;
+            
+            if (!username && userConfig?.importedAddons) {
+              for (const addon of Object.values(userConfig.importedAddons)) {
+                if (addon.isMDBListUrlImport && (addon.mdblistId === listId || addon.id === listId)) {
+                  username = addon.mdblistUsername;
+                  listSlug = addon.mdblistSlug || addon.mdblistId;
+                  break;
+                }
+              }
+            }
+            
+            if (username && listSlug) {
+              console.log(`[MDBList] Attempting public JSON fallback for ${username}/${listSlug}`);
+              const publicResult = await fetchListItemsFromPublicJson(username, listSlug, stremioSkip, sort, order, genre, userConfig, isMergedByUser);
+              if (publicResult) {
+                console.log(`[MDBList] Public JSON fallback successful, returning ${publicResult.allItems.length} items`);
+                return publicResult;
+              }
+            }
+          }
+          
           currentRetries++;
           console.error(`Error fetching MDBList items for list ${effectiveMdbListId} of user ${listOwnerUsername || 'self'} (offset ${mdbListOffset}, attempt ${currentRetries}/${MAX_RETRIES}):`, error.message);
           if (error.response && (error.response.status === 503 || error.response.status === 429) && currentRetries < MAX_RETRIES) {
@@ -379,14 +610,82 @@ async function fetchListItems(
 }
 
 async function extractListFromUrl(url, apiKey) {
+  // Parse URL first to extract username and list slug
+  const urlPattern = /^https?:\/\/mdblist\.com\/lists\/([\w-]+)\/([\w-]+)\/?$/;
+  const urlMatch = url.match(urlPattern);
+  if (!urlMatch) {
+    throw new Error('Invalid MDBList URL format. Expected: https://mdblist.com/lists/username/list-slug');
+  }
+  const [, usernameFromUrl, listSlug] = urlMatch;
+
+  // If no API key is provided, try to use public JSON endpoint to extract basic list info
+  if (!apiKey) {
+    console.log('[MDBList] No API key provided for URL extraction, attempting public JSON approach...');
+    try {
+      // Try to fetch just a small sample to verify the list exists and get basic info
+      const sampleUrl = `https://mdblist.com/lists/${usernameFromUrl}/${listSlug}/json/?limit=1`;
+      const response = await axios.get(sampleUrl, { 
+        timeout: 10000,
+        headers: {
+          'User-Agent': 'AIOLists-Stremio-Addon/1.0'
+        }
+      });
+
+      if (!response.data || !Array.isArray(response.data)) {
+        throw new Error('Public JSON endpoint returned invalid format');
+      }
+
+      // For public JSON, we can't get exact count or list details, so we'll make reasonable assumptions
+      const hasItems = response.data.length > 0;
+      
+      // Analyze the sample to determine content types
+      let hasMovies = false;
+      let hasShows = false;
+      
+      if (hasItems) {
+        response.data.forEach(item => {
+          if (item.mediatype === 'movie') hasMovies = true;
+          if (item.mediatype === 'show' || item.mediatype === 'series') hasShows = true;
+        });
+      }
+      
+      // If we couldn't determine from sample, assume both types are possible
+      if (!hasMovies && !hasShows) {
+        hasMovies = true;
+        hasShows = true;
+      }
+
+      console.log(`[MDBList] Successfully extracted public list info for ${usernameFromUrl}/${listSlug}`);
+      
+      // Convert slug to human-readable name
+      const humanReadableName = listSlug
+        .split('-')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+      
+      return {
+        listId: listSlug, // Use slug as ID for public access
+        listSlug: listSlug,
+        username: usernameFromUrl,
+        listName: humanReadableName, // Convert slug to readable name
+        isUrlImport: true,
+        isPublicAccess: true, // Flag to indicate this was accessed via public JSON
+        hasMovies: hasMovies,
+        hasShows: hasShows,
+        // Store info needed for public JSON access
+        mdblistUsername: usernameFromUrl,
+        mdblistSlug: listSlug
+      };
+    } catch (error) {
+      console.error(`[MDBList] Public JSON extraction failed for ${usernameFromUrl}/${listSlug}:`, error.message);
+      throw new Error(`Failed to extract MDBList via public JSON: ${error.message}. An API key may be required for this list.`);
+    }
+  }
+
+  // Original API-based extraction when API key is available
   let currentRetries = 0;
   while (currentRetries < MAX_RETRIES) {
     try {
-      const urlPattern = /^https?:\/\/mdblist\.com\/lists\/([\w-]+)\/([\w-]+)\/?$/;
-      const urlMatch = url.match(urlPattern);
-      if (!urlMatch) throw new Error('Invalid MDBList URL format. Expected: https://mdblist.com/lists/username/list-slug');
-      const [, usernameFromUrl, listSlug] = urlMatch; // Renamed to avoid confusion with username in response
-
       const apiResponse = await axios.get(`https://api.mdblist.com/lists/${usernameFromUrl}/${listSlug}?apikey=${apiKey}`, { timeout: 15000 });
 
       if (!apiResponse.data || !Array.isArray(apiResponse.data) || apiResponse.data.length === 0) {
@@ -407,11 +706,70 @@ async function extractListFromUrl(url, apiKey) {
         listName: listData.name,
         isUrlImport: true,
         hasMovies: listData.movies > 0,
-        hasShows: listData.shows > 0
+        hasShows: listData.shows > 0,
+        // Store info needed for public JSON access as fallback
+        mdblistUsername: usernameFromUrl,
+        mdblistSlug: listSlug
       };
     } catch (error) {
       currentRetries++;
       console.error(`Error extracting MDBList from URL (attempt ${currentRetries}/${MAX_RETRIES}):`, error.response ? (error.response.data || error.response.status) : error.message);
+      
+      // If API key is invalid/expired, try public JSON fallback
+      if (error.response && (error.response.status === 401 || error.response.status === 403)) {
+        console.log(`[MDBList] API authentication failed during URL extraction, attempting public JSON fallback...`);
+        try {
+          const sampleUrl = `https://mdblist.com/lists/${usernameFromUrl}/${listSlug}/json/?limit=1`;
+          const publicResponse = await axios.get(sampleUrl, { 
+            timeout: 10000,
+            headers: {
+              'User-Agent': 'AIOLists-Stremio-Addon/1.0'
+            }
+          });
+
+          if (publicResponse.data && Array.isArray(publicResponse.data)) {
+            const hasItems = publicResponse.data.length > 0;
+            let hasMovies = false;
+            let hasShows = false;
+            
+            if (hasItems) {
+              publicResponse.data.forEach(item => {
+                if (item.mediatype === 'movie') hasMovies = true;
+                if (item.mediatype === 'show' || item.mediatype === 'series') hasShows = true;
+              });
+            }
+            
+            if (!hasMovies && !hasShows) {
+              hasMovies = true;
+              hasShows = true;
+            }
+
+            console.log(`[MDBList] Public JSON fallback successful for ${usernameFromUrl}/${listSlug}`);
+            
+            // Convert slug to human-readable name
+            const humanReadableName = listSlug
+              .split('-')
+              .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+              .join(' ');
+            
+            return {
+              listId: listSlug,
+              listSlug: listSlug,
+              username: usernameFromUrl,
+              listName: humanReadableName,
+              isUrlImport: true,
+              isPublicAccess: true,
+              hasMovies: hasMovies,
+              hasShows: hasShows,
+              mdblistUsername: usernameFromUrl,
+              mdblistSlug: listSlug
+            };
+          }
+        } catch (publicError) {
+          console.error(`[MDBList] Public JSON fallback also failed:`, publicError.message);
+        }
+      }
+      
       if (error.response && (error.response.status === 503 || error.response.status === 429) && currentRetries < MAX_RETRIES) {
         const retryDelay = INITIAL_RETRY_DELAY_MS * Math.pow(2, currentRetries - 1);
         console.log(`Retrying after ${retryDelay}ms...`);
@@ -430,6 +788,7 @@ module.exports = {
   fetchAllLists,
   fetchAllListsForUser,
   fetchListItems,
+  fetchListItemsFromPublicJson,
   validateMDBListKey,
   extractListFromUrl
 };

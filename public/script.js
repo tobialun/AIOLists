@@ -143,7 +143,6 @@ document.addEventListener('DOMContentLoaded', function() {
     searchCinemeta: document.getElementById('searchCinemeta'),
     searchTrakt: document.getElementById('searchTrakt'),
     searchTmdb: document.getElementById('searchTmdb'),
-    searchMulti: document.getElementById('searchMulti'),
     searchNotification: document.getElementById('searchNotification')
   };
 
@@ -1259,12 +1258,15 @@ document.addEventListener('DOMContentLoaded', function() {
     let apiKeyType = null;
     let apiKeyMissing = false;
 
+    // Use the existing apiKeyMissingForList function for accurate checking
+    apiKeyMissing = apiKeyMissingForList(list);
+
     if (list.source === 'mdblist' || list.source === 'mdblist_url' || list.source === 'random_mdblist') {
         needsApiKey = true; apiKeyType = 'MDBList';
-        if (!state.userConfig.apiKey) apiKeyMissing = true;
+        // apiKeyMissing is already set by apiKeyMissingForList
     } else if (list.source === 'trakt' && (list.isTraktList || list.isTraktWatchlist) && !list.isTraktTrending && !list.isTraktPopular && !list.isTraktRecommendations) {
         needsApiKey = true; apiKeyType = 'Trakt';
-        if (!state.userConfig.traktAccessToken && !state.userConfig.upstashUrl) apiKeyMissing = true;
+        // apiKeyMissing is already set by apiKeyMissingForList
     }
 
     if (apiKeyMissing && state.isPotentiallySharedConfig) {
@@ -1440,10 +1442,6 @@ document.addEventListener('DOMContentLoaded', function() {
         nameContainer.appendChild(mediaTypeDisplayElement);
         nameContainer.appendChild(nameSpan);
 
-        if (apiKeyMissing && state.isPotentiallySharedConfig) {
-            const infoIcon = document.createElement('span'); infoIcon.className = 'info-icon'; infoIcon.innerHTML = '&#9432;'; infoIcon.title = `Connect to ${apiKeyType} to activate this list.`;
-            nameContainer.appendChild(infoIcon);
-        }
         topRow.appendChild(nameContainer);
 
         const bottomRow = document.createElement('div');
@@ -1489,11 +1487,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const nameContainer = document.createElement('div'); nameContainer.className = 'name-container';
         nameContainer.appendChild(mediaTypeDisplayElement);
         nameContainer.appendChild(nameSpan);
-
-        if (apiKeyMissing && state.isPotentiallySharedConfig) {
-            const infoIcon = document.createElement('span'); infoIcon.className = 'info-icon'; infoIcon.innerHTML = '&#9432;'; infoIcon.title = `Connect to ${apiKeyType} to activate this list.`;
-            nameContainer.appendChild(infoIcon);
-        }
 
         const actionsGroup = document.createElement('div'); actionsGroup.className = 'list-actions-group';
         if (mergeToggle) actionsGroup.appendChild(mergeToggle);
@@ -1622,9 +1615,22 @@ function startNameEditing(listItemElement, list) {
 }
   
   function apiKeyMissingForList(list) {
-    if ((list.source === 'mdblist' || list.source === 'mdblist_url' || list.source === 'random_mdblist' || list.id === 'random_mdblist_catalog') && !state.userConfig.apiKey) {
+    // Check if MDBList features require API key
+    if ((list.source === 'mdblist' || list.source === 'random_mdblist' || list.id === 'random_mdblist_catalog') && !state.userConfig.apiKey) {
         return true;
     }
+    
+    // Special handling for MDBList URL imports - they can work with public JSON if they have username/slug
+    if (list.source === 'mdblist_url' && !state.userConfig.apiKey) {
+        // Check if this URL import has the necessary public access information
+        const addonConfig = state.userConfig.importedAddons?.[list.id];
+        const hasPublicAccess = addonConfig && addonConfig.mdblistUsername && addonConfig.mdblistSlug;
+        if (hasPublicAccess) {
+            return false; // Public JSON access available, no API key needed
+        }
+        return true; // No public access info, API key required
+    }
+    
     if (list.source === 'trakt' && (list.isTraktList || list.isTraktWatchlist) && !list.isTraktTrending && !list.isTraktPopular && !list.isTraktRecommendations && !state.userConfig.traktAccessToken && !state.userConfig.upstashUrl) {
         return true;
     }
@@ -2069,8 +2075,8 @@ function startNameEditing(listItemElement, list) {
         tmdbBearerTokenInput.value = '';
       }
       
-      // Reset metadata source to Cinemeta if it was set to TMDB
-      if (state.userConfig.metadataSource === 'tmdb') {
+      // Only reset metadata source to Cinemeta if no environment Bearer Token is available
+      if (state.userConfig.metadataSource === 'tmdb' && !state.env?.hasTmdbBearerToken) {
         state.userConfig.metadataSource = 'cinemeta';
         if (elements.metadataSourceSelect) {
           elements.metadataSourceSelect.value = 'cinemeta';
@@ -2081,7 +2087,10 @@ function startNameEditing(listItemElement, list) {
       updateStremioButtonHref();
       updateTmdbConnectionUI(false);
       
-      showNotification('connections', 'Disconnected from TMDB. Metadata source reset to Cinemeta.', 'success');
+      const message = state.env?.hasTmdbBearerToken ? 
+        'Disconnected from TMDB OAuth. TMDB features still available via environment Bearer Token.' :
+        'Disconnected from TMDB. Metadata source reset to Cinemeta.';
+      showNotification('connections', message, 'success');
       await loadUserListsAndAddons();
     } catch (error) {
       console.error('TMDB Disconnect Error:', error);
@@ -2125,10 +2134,13 @@ function startNameEditing(listItemElement, list) {
   async function handleMetadataSourceChange() {
     const newMetadataSource = elements.metadataSourceSelect.value;
     
-    if (newMetadataSource === 'tmdb' && !state.userConfig.tmdbSessionId) {
-      showNotification('settings', 'TMDB OAuth connection required to use TMDB as metadata source. Please connect to TMDB first.', 'error');
-      elements.metadataSourceSelect.value = state.userConfig.metadataSource;
-      return;
+    if (newMetadataSource === 'tmdb') {
+      const hasTmdbBearerToken = state.userConfig.tmdbBearerToken || state.env?.hasTmdbBearerToken;
+      if (!hasTmdbBearerToken) {
+        showNotification('settings', 'TMDB Bearer Token required to use TMDB as metadata source.', 'error');
+        elements.metadataSourceSelect.value = state.userConfig.metadataSource;
+        return;
+      }
     }
     
     await updateMetadataSettings(newMetadataSource, null);
@@ -2190,13 +2202,14 @@ function startNameEditing(listItemElement, list) {
       elements.tmdbLanguageGroup.style.display = showLanguageSettings ? 'flex' : 'none';
     }
     
-    // Enable/disable TMDB option based on OAuth connection
+    // Enable/disable TMDB option based on Bearer Token availability (OAuth not required for metadata)
     if (elements.metadataSourceSelect) {
       const tmdbOption = elements.metadataSourceSelect.querySelector('option[value="tmdb"]');
       if (tmdbOption) {
-        const isTmdbConnected = !!state.userConfig.tmdbSessionId;
-        tmdbOption.disabled = !isTmdbConnected;
-        tmdbOption.textContent = isTmdbConnected ? 'TMDB' : 'TMDB (Connect first)';
+        // TMDB is available if user has bearer token OR environment has bearer token
+        const hasTmdbBearerToken = state.userConfig.tmdbBearerToken || state.env?.hasTmdbBearerToken;
+        tmdbOption.disabled = !hasTmdbBearerToken;
+        tmdbOption.textContent = hasTmdbBearerToken ? 'TMDB' : 'TMDB (Bearer Token required)';
       }
     }
     
@@ -2315,7 +2328,6 @@ function startNameEditing(listItemElement, list) {
       }
       
       // Set individual search sources
-      if (elements.searchMulti) elements.searchMulti.checked = false;
       if (elements.searchCinemeta) {
         elements.searchCinemeta.checked = state.userConfig.searchSources.includes('cinemeta');
       }
@@ -2330,7 +2342,6 @@ function startNameEditing(listItemElement, list) {
       if (elements.searchCinemeta) {
         elements.searchCinemeta.checked = true;
       }
-      if (elements.searchMulti) elements.searchMulti.checked = false;
     }
 
     // Trakt search is always available (no connection required)
@@ -2343,18 +2354,17 @@ function startNameEditing(listItemElement, list) {
       }
     }
 
-    // Enable/disable TMDB search based on connection
-    // Check for TMDB connection: either has sessionId and bearerToken in config, or has sessionId and env has bearerToken
-    const hasTmdbConnection = state.userConfig.tmdbSessionId && 
-                              (state.userConfig.tmdbBearerToken || state.env?.hasTmdbBearerToken);
+    // Enable/disable TMDB search based on Bearer Token availability (OAuth not required for search)
+    // Check for TMDB Bearer Token: either user has token or environment has token
+    const hasTmdbBearerToken = state.userConfig.tmdbBearerToken || state.env?.hasTmdbBearerToken;
     
     if (elements.searchTmdb) {
-      if (!hasTmdbConnection) {
+      if (!hasTmdbBearerToken) {
         elements.searchTmdb.disabled = true;
         elements.searchTmdb.checked = false;
         const label = elements.searchTmdb.parentElement;
         if (label) {
-          label.title = 'Connect to TMDB first to enable TMDB search';
+          label.title = 'TMDB Bearer Token required for TMDB search';
           label.style.opacity = '0.6';
         }
       } else {
@@ -2382,19 +2392,10 @@ function startNameEditing(listItemElement, list) {
   async function saveSearchPreferences() {
     if (!state.configHash) return;
 
-    // If any individual search source is selected, disable multi search
-    if ((elements.searchCinemeta && elements.searchCinemeta.checked) ||
-        (elements.searchTrakt && elements.searchTrakt.checked) ||
-        (elements.searchTmdb && elements.searchTmdb.checked)) {
-      if (elements.searchMulti) elements.searchMulti.checked = false;
-    }
-
     const searchSources = [];
     if (elements.searchCinemeta && elements.searchCinemeta.checked) searchSources.push('cinemeta');
     if (elements.searchTrakt && elements.searchTrakt.checked && !elements.searchTrakt.disabled) searchSources.push('trakt');
     if (elements.searchTmdb && elements.searchTmdb.checked && !elements.searchTmdb.disabled) searchSources.push('tmdb');
-    // Multi search is temporarily disabled
-    // if (elements.searchMulti && elements.searchMulti.checked) searchSources.push('multi');
 
     try {
       const response = await fetch(`/api/${state.configHash}/config`, {

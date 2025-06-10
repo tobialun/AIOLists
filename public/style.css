@@ -346,13 +346,14 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 .language-group {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 15px;
 }
 
 .metadata-source-group label,
 .language-group label {
     min-width: 140px;
     font-weight: 500;
+    margin-right: 20px;
 }
 
 .metadata-select {
@@ -599,7 +600,8 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
   .metadata-source-group label,
   .language-group label {
     min-width: auto;
-    margin-bottom: 5px;
+    margin-bottom: 8px; /* Increased spacing on mobile */
+    margin-right: 0; /* Remove right margin on mobile */
   }
   
   .metadata-select {
@@ -1085,8 +1087,7 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
   flex-wrap: wrap;
   gap: 15px;
   align-items: center;
-  margin-top: 12px; /* Increased spacing */
-  margin-bottom: 8px; /* Add bottom margin for separation */
+  margin-left: 20px; /* Add left margin to offset from label */
 }
 
 .search-options .checkbox-label {

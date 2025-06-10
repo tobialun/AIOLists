@@ -23,34 +23,28 @@ async function searchContent({ query, type = 'all', sources = ['cinemeta'], limi
   const searchPromises = [];
   const searchSources = [];
 
-  // Multi search (Trakt + TMDB combined, always searches both movies and series)
-  if (sources.includes('multi')) {
-    searchPromises.push(searchMulti(query, limit, userConfig));
-    searchSources.push('multi');
-  } else {
-    // Individual source searches
-    
-    // Convert 'search' type to 'all' for individual search functions
-    // The 'search' type is only used for catalog routing, not for actual searches
-    const searchType = type === 'search' ? 'all' : type;
+  // Individual source searches
+  
+  // Convert 'search' type to 'all' for individual search functions
+  // The 'search' type is only used for catalog routing, not for actual searches
+  const searchType = type === 'search' ? 'all' : type;
 
-    // Cinemeta search (always available)
-    if (sources.includes('cinemeta')) {
-      searchPromises.push(searchCinemeta(query, searchType, limit));
-      searchSources.push('cinemeta');
-    }
+  // Cinemeta search (always available)
+  if (sources.includes('cinemeta')) {
+    searchPromises.push(searchCinemeta(query, searchType, limit));
+    searchSources.push('cinemeta');
+  }
 
-    // Trakt search (if available)
-    if (sources.includes('trakt')) {
-      searchPromises.push(searchTrakt(query, searchType, limit, userConfig));
-      searchSources.push('trakt');
-    }
+  // Trakt search (if available)
+  if (sources.includes('trakt')) {
+    searchPromises.push(searchTrakt(query, searchType, limit, userConfig));
+    searchSources.push('trakt');
+  }
 
-    // TMDB search (if available and configured)
-    if (sources.includes('tmdb') && (userConfig.tmdbBearerToken || TMDB_BEARER_TOKEN)) {
-      searchPromises.push(searchTMDB(query, searchType, limit, userConfig));
-      searchSources.push('tmdb');
-    }
+  // TMDB search (if available and configured)
+  if (sources.includes('tmdb') && (userConfig.tmdbBearerToken || TMDB_BEARER_TOKEN)) {
+    searchPromises.push(searchTMDB(query, searchType, limit, userConfig));
+    searchSources.push('tmdb');
   }
 
   try {

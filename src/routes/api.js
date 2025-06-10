@@ -189,9 +189,9 @@ module.exports = function(router) {
         return res.status(400).json({ success: false, error: 'Invalid metadata source. Must be "cinemeta" or "tmdb".' });
       }
       
-      if (metadataSource === 'tmdb' && !req.userConfig.tmdbSessionId) {
+      if (metadataSource === 'tmdb' && !req.userConfig.tmdbSessionId && !req.userConfig.tmdbBearerToken && !process.env.TMDB_BEARER_TOKEN) {
         return res.status(400).json({ 
-          error: 'TMDB metadata source requires OAuth connection. Please connect your TMDB account.' 
+          error: 'TMDB metadata source requires either OAuth connection or a TMDB Bearer Token. Please connect your TMDB account or provide a Bearer Token.' 
         });
       }
 
@@ -380,8 +380,18 @@ module.exports = function(router) {
         await initTraktApi(req.userConfig);
       }
 
-      if ((listSource === 'mdblist_native' || listSource === 'mdblist_url' || listSource === 'random_mdblist') && !req.userConfig.apiKey) {
+      // Check for MDBList API key requirements
+      if ((listSource === 'mdblist_native' || listSource === 'random_mdblist') && !req.userConfig.apiKey) {
           return res.json({ metas: [] });
+      }
+      
+      // Special handling for MDBList URL imports - allow if they have public access info
+      if (listSource === 'mdblist_url' && !req.userConfig.apiKey) {
+          const addonConfig = req.userConfig.importedAddons?.[catalogId];
+          const hasPublicAccess = addonConfig && addonConfig.mdblistUsername && addonConfig.mdblistSlug;
+          if (!hasPublicAccess) {
+              return res.json({ metas: [] });
+          }
       }
       if (listSource === 'trakt_native' && !req.userConfig.traktAccessToken) {
           return res.json({ metas: [] });
@@ -572,15 +582,21 @@ module.exports = function(router) {
     configToSend.hiddenLists = Array.from(new Set(configToSend.hiddenLists || []));
     configToSend.removedLists = Array.from(new Set(configToSend.removedLists || []));
     configToSend.customMediaTypeNames = configToSend.customMediaTypeNames || {};
+    
+    // Don't expose environment TMDB Bearer Token in config
+    if (configToSend.tmdbBearerToken === TMDB_BEARER_TOKEN) {
+      configToSend.tmdbBearerToken = '';
+    }
+    
     res.json({ 
       success: true, 
-      config: configToSend, 
-      isPotentiallySharedConfig: req.isPotentiallySharedConfig,
+      config: configToSend,
+      isPotentiallySharedConfig: req.isPotentiallySharedConfig || false,
       isDbConnected: false,
       env: {
         hasTmdbBearerToken: !!TMDB_BEARER_TOKEN,
         hasTmdbRedirectUri: !!TMDB_REDIRECT_URI,
-        hasTraktRedirectUri: !!(TRAKT_REDIRECT_URI && TRAKT_REDIRECT_URI !== 'urn:ietf:wg:oauth:2.0:oob')
+        hasTraktRedirectUri: !!TRAKT_REDIRECT_URI
       }
     });
   });
@@ -608,9 +624,14 @@ module.exports = function(router) {
             purgeListConfigs(req.userConfig, 'random_mdblist_catalog', true);
             if (req.userConfig.importedAddons) {
                 for (const addonKey in req.userConfig.importedAddons) {
-                    if (req.userConfig.importedAddons[addonKey]?.isMDBListUrlImport) {
-                        purgeListConfigs(req.userConfig, addonKey, true);
-                        delete req.userConfig.importedAddons[addonKey];
+                    const addon = req.userConfig.importedAddons[addonKey];
+                    if (addon?.isMDBListUrlImport) {
+                        // Only remove URL imports that don't have public access information
+                        const hasPublicAccess = addon.mdblistUsername && addon.mdblistSlug;
+                        if (!hasPublicAccess) {
+                            purgeListConfigs(req.userConfig, addonKey, true);
+                            delete req.userConfig.importedAddons[addonKey];
+                        }
                     }
                 }
             }
@@ -806,6 +827,8 @@ module.exports = function(router) {
                 hasShows: importedListDetails.hasShows,
                 isMDBListUrlImport: true,
                 mdblistId: importedListDetails.listId,
+                mdblistUsername: importedListDetails.username,
+                mdblistSlug: importedListDetails.listSlug,
                 dynamic: importedListDetails.dynamic,
                 mediatype: importedListDetails.mediatype,
                 types: [
@@ -1710,16 +1733,19 @@ module.exports = function(router) {
     try {
       let genres = staticGenres;
       
-      // Use TMDB genres if TMDB is selected and configured
-      if (req.userConfig.metadataSource === 'tmdb' && req.userConfig.tmdbSessionId && req.userConfig.tmdbLanguage && req.userConfig.tmdbBearerToken) {
-        try {
-          const { fetchTmdbGenres } = require('../integrations/tmdb');
-          const tmdbGenres = await fetchTmdbGenres(req.userConfig.tmdbLanguage, req.userConfig.tmdbBearerToken);
-          if (tmdbGenres.length > 0) {
-            genres = tmdbGenres;
+      // Use TMDB genres if TMDB is selected and Bearer Token is available
+      if (req.userConfig.metadataSource === 'tmdb' && req.userConfig.tmdbLanguage) {
+        const tmdbBearerToken = req.userConfig.tmdbBearerToken || TMDB_BEARER_TOKEN;
+        if (tmdbBearerToken) {
+          try {
+            const { fetchTmdbGenres } = require('../integrations/tmdb');
+            const tmdbGenres = await fetchTmdbGenres(req.userConfig.tmdbLanguage, tmdbBearerToken);
+            if (tmdbGenres.length > 0) {
+              genres = tmdbGenres;
+            }
+          } catch (error) {
+            console.warn('Failed to fetch TMDB genres for API response:', error.message);
           }
-        } catch (error) {
-          console.warn('Failed to fetch TMDB genres for API response:', error.message);
         }
       }
       
@@ -1775,8 +1801,8 @@ module.exports = function(router) {
       req.userConfig.tmdbSessionId = null;
       req.userConfig.tmdbAccountId = null;
       
-      // Revert to default metadata source if TMDB was selected
-      if (req.userConfig.metadataSource === 'tmdb') {
+      // Only revert to default metadata source if no environment Bearer Token is available
+      if (req.userConfig.metadataSource === 'tmdb' && !TMDB_BEARER_TOKEN) {
         req.userConfig.metadataSource = 'cinemeta';
       }
       
@@ -1856,7 +1882,7 @@ module.exports = function(router) {
       }
 
       const trimmedQuery = query.trim();
-      const validSources = sources.filter(s => ['cinemeta', 'trakt', 'tmdb', 'multi'].includes(s));
+      const validSources = sources.filter(s => ['cinemeta', 'trakt', 'tmdb'].includes(s));
       
       if (validSources.length === 0) {
         return res.status(400).json({ error: 'At least one valid search source must be specified' });

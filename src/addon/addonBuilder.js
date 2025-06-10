@@ -67,16 +67,53 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
 
   let itemsResult;
 
-  if (catalogIdFromRequest === 'random_mdblist_catalog' && enableRandomListFeature && apiKey && randomMDBListUsernames && randomMDBListUsernames.length > 0) {
+  if (catalogIdFromRequest === 'random_mdblist_catalog' && enableRandomListFeature && randomMDBListUsernames && randomMDBListUsernames.length > 0) {
     const randomUsername = randomMDBListUsernames[Math.floor(Math.random() * randomMDBListUsernames.length)];
-    const userLists = await fetchAllListsForUser(apiKey, randomUsername);
-    if (userLists && userLists.length > 0) {
-      const randomUserList = userLists[Math.floor(Math.random() * userLists.length)];
-      const listIdentifierToFetch = randomUserList.slug || String(randomUserList.id);
-      const randomCatalogSortPrefs = sortPreferences?.['random_mdblist_catalog'] || { sort: 'default', order: 'desc' };
-      itemsResult = await fetchMDBListItems( listIdentifierToFetch, apiKey, {}, skip, randomCatalogSortPrefs.sort, randomCatalogSortPrefs.order, false, genre, randomUsername, false, userConfig );
+    
+    if (apiKey) {
+      // Use API-based approach when API key is available
+      const userLists = await fetchAllListsForUser(apiKey, randomUsername);
+      if (userLists && userLists.length > 0) {
+        const randomUserList = userLists[Math.floor(Math.random() * userLists.length)];
+        const listIdentifierToFetch = randomUserList.slug || String(randomUserList.id);
+        const randomCatalogSortPrefs = sortPreferences?.['random_mdblist_catalog'] || { sort: 'default', order: 'desc' };
+        itemsResult = await fetchMDBListItems( listIdentifierToFetch, apiKey, {}, skip, randomCatalogSortPrefs.sort, randomCatalogSortPrefs.order, false, genre, randomUsername, false, userConfig );
+      } else {
+        itemsResult = { allItems: [], hasMovies: false, hasShows: false };
+      }
     } else {
-      itemsResult = { allItems: [], hasMovies: false, hasShows: false };
+      // Fallback to public JSON approach when no API key is available
+      console.log(`[Random MDBList] No API key available, using public JSON approach for user: ${randomUsername}`);
+      
+      // For public JSON, we'll use a predefined list of popular/well-known lists
+      // This is a simplified approach since we can't discover lists without an API key
+      const popularListSlugs = [
+        'latest-tv-shows', 'top-rated-movies-2024', 'latest-movies', 'popular-series', 
+        'trending-movies', 'best-sci-fi-movies', 'top-horror-movies', 'classic-movies',
+        'marvel-movies', 'disney-movies', 'netflix-series', 'hbo-series'
+      ];
+      
+      const randomListSlug = popularListSlugs[Math.floor(Math.random() * popularListSlugs.length)];
+      const randomCatalogSortPrefs = sortPreferences?.['random_mdblist_catalog'] || { sort: 'rank', order: 'asc' };
+      
+      console.log(`[Random MDBList] Attempting to fetch ${randomUsername}/${randomListSlug} via public JSON`);
+      
+      // Try to fetch using public JSON
+      const { fetchListItemsFromPublicJson } = require('../integrations/mdblist');
+      itemsResult = await fetchListItemsFromPublicJson(randomUsername, randomListSlug, skip, randomCatalogSortPrefs.sort, randomCatalogSortPrefs.order, genre, userConfig, false);
+      
+      if (!itemsResult) {
+        console.log(`[Random MDBList] Public JSON failed for ${randomUsername}/${randomListSlug}, trying alternative`);
+        // Try another random combination
+        const altUsername = randomMDBListUsernames[Math.floor(Math.random() * randomMDBListUsernames.length)];
+        const altListSlug = popularListSlugs[Math.floor(Math.random() * popularListSlugs.length)];
+        itemsResult = await fetchListItemsFromPublicJson(altUsername, altListSlug, skip, randomCatalogSortPrefs.sort, randomCatalogSortPrefs.order, genre, userConfig, false);
+      }
+      
+      if (!itemsResult) {
+        console.log(`[Random MDBList] All public JSON attempts failed, returning empty result`);
+        itemsResult = { allItems: [], hasMovies: false, hasShows: false };
+      }
     }
   }
 
@@ -84,9 +121,27 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
     const addonConfig = importedAddons[catalogIdFromRequest];
     if (addonConfig.isTraktPublicList) {
       itemsResult = await fetchTraktListItems( addonConfig.id, userConfig, skip, sortPrefsForImportedOrRandom.sort, sortPrefsForImportedOrRandom.order, true, addonConfig.traktUser, itemTypeHintForFetching, genre );
-    } else if (addonConfig.isMDBListUrlImport && apiKey) {
-      const isListUserMerged = userConfig.mergedLists?.[catalogIdFromRequest] !== false;
-      itemsResult = await fetchMDBListItems( addonConfig.mdblistId, apiKey, listsMetadata, skip, sortPrefsForImportedOrRandom.sort, sortPrefsForImportedOrRandom.order, true, genre, null, isListUserMerged, userConfig );
+    } else if (addonConfig.isMDBListUrlImport) {
+      if (apiKey) {
+        // Use API approach when available
+        const isListUserMerged = userConfig.mergedLists?.[catalogIdFromRequest] !== false;
+        itemsResult = await fetchMDBListItems( addonConfig.mdblistId, apiKey, listsMetadata, skip, sortPrefsForImportedOrRandom.sort, sortPrefsForImportedOrRandom.order, true, genre, null, isListUserMerged, userConfig );
+      } else if (addonConfig.mdblistUsername && addonConfig.mdblistSlug) {
+        // Use public JSON fallback when no API key is available
+        console.log(`[MDBList URL Import] No API key, using public JSON for ${addonConfig.mdblistUsername}/${addonConfig.mdblistSlug}`);
+        const { fetchListItemsFromPublicJson } = require('../integrations/mdblist');
+        const isListUserMerged = userConfig.mergedLists?.[catalogIdFromRequest] !== false;
+        itemsResult = await fetchListItemsFromPublicJson(
+          addonConfig.mdblistUsername, 
+          addonConfig.mdblistSlug, 
+          skip, 
+          sortPrefsForImportedOrRandom.sort, 
+          sortPrefsForImportedOrRandom.order, 
+          genre, 
+          userConfig,
+          isListUserMerged
+        );
+      }
     }
   }
 
@@ -217,12 +272,18 @@ async function createAddon(userConfig) {
   
   let tempGeneratedCatalogs = [];
 
-  if (enableRandomListFeature && apiKey && randomMDBListUsernames && randomMDBListUsernames.length > 0) {
+  if (enableRandomListFeature && randomMDBListUsernames && randomMDBListUsernames.length > 0) {
     const randomCatalogId = 'random_mdblist_catalog';
     let randomCatalogDisplayName = getManifestCatalogName(randomCatalogId, "Discovery", customListNames);
      if (customMediaTypeNames?.[randomCatalogId]?.trim()){
         randomCatalogDisplayName = customMediaTypeNames[randomCatalogId].trim();
      }
+    
+    // Add note to name if no API key is available (will use public JSON)
+    if (!apiKey) {
+      randomCatalogDisplayName += " (Public)";
+    }
+    
     const randomCatalogExtra = [{ name: "skip" }];
     if (includeGenresInManifest) {
         randomCatalogExtra.push({ name: "genre", options: availableGenres, isRequired: false });
@@ -547,7 +608,6 @@ async function createAddon(userConfig) {
     const isTraktPublicList = !!addon.isTraktPublicList;
 
     if (isMDBListUrlImport || isTraktPublicList) {
-      if (isMDBListUrlImport && !apiKey) continue; 
       let listDataForUrlImport = {
           id: addonGroupId, // The AIOLists unique ID for this imported URL list
           name: addon.name,
