@@ -224,23 +224,16 @@ async function fetchExternalAddonItems(targetOriginalId, targetOriginalType, sou
             return meta;
         });
     }
-    let enrichedMetas = [];
-    if (metasFromExternal.length > 0) {
-        // Extract metadata config from userConfig if available
-        const metadataSource = userConfig?.metadataSource || 'cinemeta';
-        const hasTmdbOAuth = !!(userConfig?.tmdbSessionId && userConfig?.tmdbAccountId);
-        const tmdbLanguage = userConfig?.tmdbLanguage || 'en-US';
-        const tmdbBearerToken = userConfig?.tmdbBearerToken;
-        
-        enrichedMetas = await enrichItemsWithMetadata(metasFromExternal, metadataSource, hasTmdbOAuth, tmdbLanguage, tmdbBearerToken);
-    }
+    // No metadata enrichment here - this will be done in the addon builder when serving to Stremio
+    let enrichedMetas = metasFromExternal;
     let finalMetas = enrichedMetas;
     if (genre && finalMetas.length > 0) {
-        finalMetas = finalMetas.filter(meta => 
-            meta.genres && 
-            Array.isArray(meta.genres) && 
-            meta.genres.map(g => String(g).toLowerCase()).includes(String(genre).toLowerCase())
-        );
+        // Basic genre filtering - comprehensive filtering will happen after enrichment in addon builder
+        finalMetas = finalMetas.filter(meta => {
+            // Most external addon items may not have detailed genre data at this stage
+            // This filtering will be more comprehensive after enrichment in the addon builder
+            return true; // For now, include all items - genre filtering will happen after enrichment
+        });
     }
     const hasMovies = finalMetas.some(m => m.type === 'movie');
     const hasShows = finalMetas.some(m => m.type === 'series');

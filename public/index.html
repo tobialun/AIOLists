@@ -196,31 +196,18 @@
                 </div>
                 <div class="form-group language-group" id="tmdbLanguageGroup" style="display: none;">
                     <label for="tmdbLanguageSelect">Language:</label>
-                    <select id="tmdbLanguageSelect" class="metadata-select">
-                        <option value="en-US">English (en-US)</option>
-                        <option value="fr-FR">French (fr-FR)</option>
-                        <option value="es-ES">Spanish (es-ES)</option>
-                        <option value="de-DE">German (de-DE)</option>
-                        <option value="it-IT">Italian (it-IT)</option>
-                        <option value="pt-BR">Portuguese Brazil (pt-BR)</option>
-                        <option value="ja-JP">Japanese (ja-JP)</option>
-                        <option value="ko-KR">Korean (ko-KR)</option>
-                        <option value="zh-CN">Chinese Simplified (zh-CN)</option>
-                        <option value="ru-RU">Russian (ru-RU)</option>
-                        <option value="hi-IN">Hindi (hi-IN)</option>
-                        <option value="ar-SA">Arabic (ar-SA)</option>
-                        <option value="nl-NL">Dutch (nl-NL)</option>
-                        <option value="sv-SE">Swedish (sv-SE)</option>
-                        <option value="da-DK">Danish (da-DK)</option>
-                        <option value="fi-FI">Finnish (fi-FI)</option>
-                        <option value="no-NO">Norwegian (no-NO)</option>
-                        <option value="pl-PL">Polish (pl-PL)</option>
-                        <option value="tr-TR">Turkish (tr-TR)</option>
-                        <option value="th-TH">Thai (th-TH)</option>
-                    </select>
+                    <div class="searchable-select-container">
+                        <input type="text" id="tmdbLanguageSelect" class="searchable-select" placeholder="Search and select language..." readonly>
+                        <div class="searchable-select-arrow">▼</div>
+                        <div id="tmdbLanguageDropdown" class="searchable-select-dropdown" style="display: none;">
+                            <input type="text" id="tmdbLanguageSearch" class="searchable-select-search" placeholder="Type to search languages...">
+                            <div id="tmdbLanguageOptions" class="searchable-select-options">
+                                <!-- Options will be populated by JavaScript -->
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
-            <span id="metadataInfo" class="setting-info-text">Choose metadata source and language preferences.</span>
         </div>
     </div>
     

@@ -442,16 +442,23 @@ module.exports = function(router) {
       };
 
       let metas = await convertToStremioFormat(enrichedResult, req.userConfig.rpdbApiKey, metadataConfig);  
+      
+      // Apply type filtering
       if (catalogType === 'movie' || catalogType === 'series') {
           metas = metas.filter(meta => meta.type === catalogType);
       }
       
-      if (genre && metas.length > 0) {
-          metas = metas.filter(meta => 
-              meta.genres && 
-              Array.isArray(meta.genres) && 
-              meta.genres.map(g => String(g).toLowerCase()).includes(String(genre).toLowerCase())
-          );
+      // Apply genre filtering after enrichment (since we removed it from integration layer)
+      if (genre && genre !== 'All' && metas.length > 0) {
+          const beforeFilterCount = metas.length;
+          metas = metas.filter(meta => {
+              if (!meta.genres) return false;
+              const itemGenres = Array.isArray(meta.genres) ? meta.genres : [meta.genres];
+              return itemGenres.some(g => 
+                  String(g).toLowerCase() === String(genre).toLowerCase()
+              );
+          });
+          console.log(`[API] Genre filter "${genre}": ${beforeFilterCount} -> ${metas.length} items after enrichment`);
       }
       
       res.json({ metas });

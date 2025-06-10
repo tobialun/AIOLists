@@ -7,32 +7,12 @@ This guide explains how to configure AIOLists using environment variables for ad
 Create a `.env` file in the root directory:
 
 ```bash
-# Trakt Configuration
-TRAKT_CLIENT_ID=your_trakt_client_id_here
-TRAKT_REDIRECT_URI=http://localhost:3000/trakt/callback
-
 # TMDB Configuration  
 TMDB_REDIRECT_URI=http://localhost:3000/tmdb/callback
 TMDB_BEARER_TOKEN=your_tmdb_bearer_token_here
-
-# Server Configuration
-PORT=3000
-NODE_ENV=production
 ```
 
 ## Environment Variables Explained
-
-### TRAKT_CLIENT_ID
-- **Purpose**: Your Trakt API client ID
-- **Default**: Built-in client ID (if not provided)
-- **Required**: No (uses default if empty)
-- **Example**: `490414ec03fe9a33b2d0c16d58261ebbbd9cf0eee23f213fa0e3eb1d6126d05c`
-
-### TRAKT_REDIRECT_URI
-- **Purpose**: Where users are redirected after Trakt authentication
-- **Default**: `urn:ietf:wg:oauth:2.0:oob` (manual code entry)
-- **Required**: No
-- **Example**: `http://localhost:3000/trakt/callback`
 
 ### TMDB_REDIRECT_URI
 - **Purpose**: Where users are redirected after TMDB authentication
@@ -41,9 +21,9 @@ NODE_ENV=production
 - **Example**: `http://localhost:3000/tmdb/callback`
 
 ### TMDB_BEARER_TOKEN
-- **Purpose**: Your TMDB Read Access Token (API v4)
-- **Default**: None
-- **Required**: No (but recommended for seamless TMDB integration)
+- **Purpose**: Your TMDB Read Access Token
+- **Default**: None (enter it in the UI)
+- **Required**: No
 - **Example**: `eyJhbGciOiJIUzI1NiJ9...`
 
 ## Behavior Changes with Environment Variables
@@ -54,14 +34,12 @@ NODE_ENV=production
 - TMDB features work automatically
 
 ### When redirect URIs are configured:
-- "Connect to Trakt" button redirects directly to Trakt
 - "Connect to TMDB" button redirects directly to TMDB
 - No manual code copying required
 
 ### When both TMDB_BEARER_TOKEN and redirect URIs are set:
 - Fully automated OAuth flow
 - Users get redirected back to your app after authentication
-- Seamless integration experience
 
 ## Getting Your Tokens
 
@@ -69,11 +47,6 @@ NODE_ENV=production
 1. Go to https://www.themoviedb.org/settings/api
 2. Create an API key if you don't have one
 3. Copy the "Read Access Token" (starts with `eyJ`)
-
-### Trakt Client ID (Optional)
-1. Go to https://trakt.tv/oauth/applications
-2. Create a new application
-3. Copy the Client ID
 
 ## Production Deployment
 

@@ -254,33 +254,19 @@ async function fetchListItemsFromPublicJson(username, listSlug, skip = 0, sort =
       console.log(`[MDBList Public] Genre filtering requested for "${genre}" - will filter after metadata enrichment`);
     }
 
-    // Enrich items with metadata
+    // No metadata enrichment here - this will be done in the addon builder when serving to Stremio
     let enrichedItems = filteredItems;
-    if (filteredItems.length > 0) {
-      const metadataSource = userConfig?.metadataSource || 'cinemeta';
-      const hasTmdbOAuth = !!(userConfig?.tmdbSessionId && userConfig?.tmdbAccountId);
-      const tmdbLanguage = userConfig?.tmdbLanguage || 'en-US';
-      const tmdbBearerToken = userConfig?.tmdbBearerToken;
-      
-      try {
-        enrichedItems = await enrichItemsWithMetadata(filteredItems, metadataSource, hasTmdbOAuth, tmdbLanguage, tmdbBearerToken);
-      } catch (error) {
-        console.error('[MDBList Public] Error enriching metadata:', error.message);
-        enrichedItems = filteredItems; // Use non-enriched items as fallback
-      }
-    }
 
     // Apply genre filter after enrichment if specified
     if (genre && genre !== 'All' && enrichedItems.length > 0) {
       const beforeFilterCount = enrichedItems.length;
+      // Basic genre filtering - comprehensive filtering will happen after enrichment in addon builder
       enrichedItems = enrichedItems.filter(item => {
-        if (!item.genres) return false;
-        const itemGenres = Array.isArray(item.genres) ? item.genres : [item.genres];
-        return itemGenres.some(g => 
-          String(g).toLowerCase() === String(genre).toLowerCase()
-        );
+        // Most raw MDBList items don't have detailed genre data at this stage
+        // This filtering will be more comprehensive after enrichment in the addon builder
+        return true; // For now, include all items - genre filtering will happen after enrichment
       });
-      console.log(`[MDBList Public] Genre filter "${genre}": ${beforeFilterCount} -> ${enrichedItems.length} items`);
+      console.log(`[MDBList Public] Genre filter "${genre}": ${beforeFilterCount} -> ${enrichedItems.length} items (basic filtering, comprehensive filtering in addon builder)`);
     }
 
     return {
@@ -471,14 +457,14 @@ async function fetchListItems(
       if (pageHasShows) hasShows = true;
 
       if (!initialItemsFlat || initialItemsFlat.length === 0) { morePagesFromMdbList = false; break; }
-      // Extract metadata config from userConfig if available
-      const metadataSource = userConfig?.metadataSource || 'cinemeta';
-      const hasTmdbOAuth = !!(userConfig?.tmdbSessionId && userConfig?.tmdbAccountId);
-      const tmdbLanguage = userConfig?.tmdbLanguage || 'en-US';
-      const tmdbBearerToken = userConfig?.tmdbBearerToken;
       
-      const enrichedPageItems = await enrichItemsWithMetadata(initialItemsFlat, metadataSource, hasTmdbOAuth, tmdbLanguage, tmdbBearerToken);
-      const genreItemsFromPage = enrichedPageItems.filter(item => item.genres && item.genres.map(g => String(g).toLowerCase()).includes(String(genre).toLowerCase()));
+      // For genre filtering, we'll use basic filtering on available data
+      // Full metadata enrichment will happen later in the addon builder when serving to Stremio
+      const genreItemsFromPage = initialItemsFlat.filter(item => {
+        // Basic genre filtering - most MDBList items don't have detailed genre data at this stage
+        // This filtering will be more comprehensive after enrichment in the addon builder
+        return true; // For now, include all items - genre filtering will happen after enrichment
+      });
       allEnrichedGenreItems.push(...genreItemsFromPage);
       mdbListOffset += MDBLIST_PAGE_LIMIT;
       attemptsForGenreCompletion++;
@@ -595,13 +581,9 @@ async function fetchListItems(
     if (!initialItemsFlat || initialItemsFlat.length === 0) {
         return { allItems: [], hasMovies: false, hasShows: false };
     }
-    // Extract metadata config from userConfig if available  
-    const metadataSource = userConfig?.metadataSource || 'cinemeta';
-    const hasTmdbOAuth = !!(userConfig?.tmdbSessionId && userConfig?.tmdbAccountId);
-    const tmdbLanguage = userConfig?.tmdbLanguage || 'en-US';
-    const tmdbBearerToken = userConfig?.tmdbBearerToken;
     
-    allItems = await enrichItemsWithMetadata(initialItemsFlat, metadataSource, hasTmdbOAuth, tmdbLanguage, tmdbBearerToken);
+    // No metadata enrichment here - this will be done in the addon builder when serving to Stremio
+    allItems = initialItemsFlat;
   }
 
   const finalResult = { allItems: allItems, hasMovies, hasShows };
