@@ -1171,6 +1171,29 @@ module.exports = function(router) {
     }
   });
 
+  // Config-specific Trakt login endpoint that includes config hash as state
+  router.get('/:configHash/trakt/login', (req, res) => {
+    try { 
+      const configHash = req.configHash;
+      // If both TMDB Bearer Token and redirect URIs are configured, 
+      // allow direct redirect, otherwise return JSON for frontend handling
+      if (TMDB_BEARER_TOKEN && TMDB_REDIRECT_URI && TRAKT_REDIRECT_URI) {
+        res.redirect(getTraktAuthUrl(configHash));
+      } else {
+        res.json({ 
+          success: true, 
+          authUrl: getTraktAuthUrl(configHash),
+          requiresManualAuth: true,
+          configHash: configHash
+        });
+      }
+    }
+    catch (error) {
+        console.error('Error in /trakt/login redirect:', error);
+        res.status(500).json({ error: 'Internal server error for Trakt login' });
+    }
+  });
+
   router.get('/:configHash/lists', async (req, res) => {
     try {
       const initialListsMetadataJson = JSON.stringify(req.userConfig.listsMetadata || {});

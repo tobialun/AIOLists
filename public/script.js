@@ -157,10 +157,18 @@ document.addEventListener('DOMContentLoaded', function() {
     const requestToken = urlParams.get('request_token');
     const isApproved = urlParams.get('approved');
     
+    // Check for Trakt callback (code and state parameters)
+    const traktCode = urlParams.get('code');
+    const traktState = urlParams.get('state');
+    
     if (requestToken && pathParts.length >= 2 && pathParts[1] === 'configure') {
       // This is a TMDB callback - extract config hash from URL
       initialConfigHash = pathParts[0];
       action = 'tmdb-callback';
+    } else if (traktCode && traktState && pathParts.length >= 2 && pathParts[1] === 'configure') {
+      // This is a Trakt callback - extract config hash from state or URL
+      initialConfigHash = traktState || pathParts[0];
+      action = 'trakt-callback';
     } else if (pathParts.length === 0 || (pathParts.length === 1 && pathParts[0] === 'configure')) {
         // Fresh page, no config hash
     } else if (pathParts.length >= 1 && pathParts[0] === 'import-shared' && pathParts[1]) {
@@ -179,6 +187,10 @@ document.addEventListener('DOMContentLoaded', function() {
       // Handle TMDB callback
       state.configHash = initialConfigHash;
       await handleTmdbCallback(requestToken, isApproved);
+    } else if (action === 'trakt-callback' && initialConfigHash && traktCode) {
+      // Handle Trakt callback
+      state.configHash = initialConfigHash;
+      await handleTraktCallback(traktCode, traktState);
     } else if (action === 'import-shared' && initialConfigHash) {
         try {
             const response = await fetch('/api/config/create', {
@@ -399,11 +411,42 @@ document.addEventListener('DOMContentLoaded', function() {
     elements.closeUpstashBtn.addEventListener('click', () => {
         elements.upstashContainer.classList.add('hidden');
     });
-    elements.traktLoginBtn?.addEventListener('click', () => { 
-      elements.traktPinContainer.style.setProperty('display', 'inline-flex', 'important'); 
-      // Keep the login button visible until successful PIN submission
-    });
     elements.submitTraktPin?.addEventListener('click', handleTraktPinSubmit);
+    elements.traktPin?.addEventListener('keypress', function(e) { if (e.key === 'Enter') handleTraktPinSubmit(); });
+    
+    // Trakt login button click handler
+    elements.traktLoginBtn?.addEventListener('click', async function(e) {
+      e.preventDefault();
+      try {
+        if (!state.configHash) {
+          showNotification('connections', 'Please wait for configuration to load', 'error');
+          return;
+        }
+        
+        // Try to get auth URL from the config-specific endpoint
+        const response = await fetch(`/${state.configHash}/trakt/login`);
+        const data = await response.json();
+        
+        if (data.success && data.authUrl) {
+          if (data.requiresManualAuth) {
+            // Manual PIN flow - open URL and show PIN input
+            window.open(data.authUrl, '_blank');
+            elements.traktLoginBtn.style.setProperty('display', 'none', 'important');
+            elements.traktPinContainer.style.setProperty('display', 'flex', 'important');
+            showNotification('connections', 'Please authorize the app and enter the PIN here.', 'info', true);
+          } else {
+            // Direct redirect flow
+            window.location.href = data.authUrl;
+          }
+        } else {
+          throw new Error(data.error || 'Failed to get Trakt auth URL');
+        }
+      } catch (error) {
+        console.error('Trakt Login Error:', error);
+        showNotification('connections', `Trakt Login Error: ${error.message}`, 'error');
+      }
+    });
+    
     elements.universalImportInput.addEventListener('paste', handleUniversalPaste);
     elements.universalImportInput.addEventListener('input', handleUniversalInputChange);
     elements.copyManifestBtn?.addEventListener('click', copyManifestUrlToClipboard);
@@ -2492,6 +2535,56 @@ function startNameEditing(listItemElement, list) {
     } catch (error) {
       console.error('TMDB Callback Error:', error);
       showNotification('connections', `TMDB Authentication Error: ${error.message}`, 'error', true);
+    }
+  }
+
+  async function handleTraktCallback(code, traktState) {
+    try {
+      // Clean up URL by removing Trakt parameters
+      const url = new URL(window.location);
+      url.searchParams.delete('code');
+      url.searchParams.delete('state');
+      window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+      
+      showNotification('connections', 'Completing Trakt authentication...', 'info', true);
+      
+      // Complete the authentication using the authorization code
+      const response = await fetch(`/${state.configHash}/trakt/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          code: code
+        })
+      });
+      
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to authenticate with Trakt');
+      }
+      
+      // Update state
+      state.configHash = data.configHash;
+      
+      // Update Trakt connection state
+      state.userConfig.traktAccessToken = 'connected'; // Don't store actual token
+      state.userConfig.traktRefreshToken = 'connected';
+      state.userConfig.traktExpiresAt = new Date(Date.now() + 86400000).toISOString(); // 24 hours from now
+      if (data.uuid) state.userConfig.traktUuid = data.uuid;
+      
+      updateURL();
+      updateStremioButtonHref();
+      
+      // Reload configuration to get the actual session values from backend
+      await loadConfig();
+      
+      updateTraktUI(true);
+      
+      showNotification('connections', 'Successfully connected to Trakt!', 'success');
+      await loadUserListsAndAddons();
+      
+    } catch (error) {
+      console.error('Trakt Callback Error:', error);
+      showNotification('connections', `Trakt Authentication Error: ${error.message}`, 'error', true);
     }
   }
 

@@ -87,8 +87,14 @@ async function initTraktApi(userConfig) {
   return false;
 }
 
-function getTraktAuthUrl() {
-  const url = `${TRAKT_API_URL}/oauth/authorize?response_type=code&client_id=${TRAKT_CLIENT_ID}&redirect_uri=${encodeURIComponent(TRAKT_REDIRECT_URI)}`;
+function getTraktAuthUrl(state = null) {
+  let url = `${TRAKT_API_URL}/oauth/authorize?response_type=code&client_id=${TRAKT_CLIENT_ID}&redirect_uri=${encodeURIComponent(TRAKT_REDIRECT_URI)}`;
+  
+  // Add state parameter if provided (e.g., config hash)
+  if (state) {
+    url += `&state=${encodeURIComponent(state)}`;
+  }
+  
   return url;
 }
 
