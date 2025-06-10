@@ -626,57 +626,89 @@ module.exports = function(router) {
 
   router.post('/:configHash/trakt/auth', async (req, res) => {
     try {
-        const { code } = req.body;
-        if (!code) return res.status(400).json({ error: 'Authorization code required' });
-
-        // Step 1: Authenticate and get all token information back.
-        const traktAuthResult = await authenticateTrakt(code, req.userConfig);
-        
-        // Step 2: Check if Upstash is configured and handle the logic here.
-        if (req.userConfig.upstashUrl && req.userConfig.upstashToken) {
-            // Logic for persistent storage in Redis
-            
-            // a) Update the user config in memory with the new UUID.
-            req.userConfig.traktUuid = traktAuthResult.uuid;
-
-            // b) Prepare the token object that will be saved to Redis.
-            const tokensToSave = {
-                accessToken: traktAuthResult.accessToken,
-                refreshToken: traktAuthResult.refreshToken,
-                expiresAt: traktAuthResult.expiresAt
-            };
-
-            // c) Save to Redis using the now-complete userConfig.
-            await saveTraktTokens(req.userConfig, tokensToSave);
-
-            // d) Clear the local tokens from the config that gets hashed into the URL.
-            req.userConfig.traktAccessToken = null;
-            req.userConfig.traktRefreshToken = null;
-            req.userConfig.traktExpiresAt = null;
-
-        } else {
-            // Logic for non-persistent storage (tokens in URL hash).
-            req.userConfig.traktUuid = traktAuthResult.uuid;
-            req.userConfig.traktAccessToken = traktAuthResult.accessToken;
-            req.userConfig.traktRefreshToken = traktAuthResult.refreshToken;
-            req.userConfig.traktExpiresAt = traktAuthResult.expiresAt;
-        }
-
-        // Step 3: Generate the new config hash and send the response.
-        req.userConfig.lastUpdated = new Date().toISOString();
-        const newConfigHash = await compressConfig(req.userConfig);
-        manifestCache.clear();
-        
-        res.json({
-            success: true,
-            configHash: newConfigHash,
-            message: 'Authenticated with Trakt'
-        });
+      const configHash = req.params.configHash;
+      const { code } = req.body;
+      
+      if (!configHash) {
+        return res.status(400).json({ error: 'Config hash is required' });
+      }
+      
+      if (!code) {
+        return res.status(400).json({ error: 'Authorization code is required' });
+      }
+      
+      // Decompress and get user config
+      const userConfig = await decompressConfig(configHash);
+      if (!userConfig) {
+        return res.status(400).json({ error: 'Invalid config hash' });
+      }
+      
+      // Complete Trakt authentication
+      const authResult = await authenticateTrakt(code, userConfig);
+      
+      if (!authResult.success) {
+        return res.status(400).json({ error: authResult.error || 'Trakt authentication failed' });
+      }
+      
+      // Update userConfig with new tokens
+      userConfig.traktAccessToken = authResult.accessToken;
+      userConfig.traktRefreshToken = authResult.refreshToken;
+      userConfig.traktExpiresAt = authResult.expiresAt;
+      if (authResult.uuid) {
+        userConfig.traktUuid = authResult.uuid;
+      }
+      
+      // Compress and return new config hash
+      const newConfigHash = await compressConfig(userConfig);
+      
+      res.json({
+        success: true,
+        configHash: newConfigHash,
+        message: 'Successfully connected to Trakt!',
+        uuid: authResult.uuid
+      });
+      
     } catch (error) {
-        console.error('Error in /trakt/auth:', error);
-        res.status(500).json({ error: 'Failed to authenticate with Trakt', details: error.message });
+      console.error('Error in Trakt OAuth callback:', error);
+      res.status(500).json({ error: 'Internal server error during Trakt authentication' });
     }
-});
+  });
+  
+  // Trakt callback redirect handler (for when user is redirected back from Trakt)
+  router.get('/trakt/callback', async (req, res) => {
+    try {
+      const { code, state } = req.query;
+      
+      if (!code) {
+        return res.status(400).send('Authorization code not provided');
+      }
+      
+      if (!state) {
+        return res.status(400).send('State parameter not provided');
+      }
+      
+      // Decode state to get config hash
+      let stateObject;
+      try {
+        stateObject = JSON.parse(Buffer.from(state, 'base64').toString());
+      } catch (error) {
+        return res.status(400).send('Invalid state parameter');
+      }
+      
+      const configHash = stateObject.configHash;
+      if (!configHash) {
+        return res.status(400).send('Config hash not found in state');
+      }
+      
+      // Redirect back to configure page with the code and state
+      const redirectUrl = `/${configHash}/configure?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+      res.redirect(redirectUrl);
+      
+    } catch (error) {
+      console.error('Error in Trakt callback redirect:', error);
+      res.status(500).send('Internal server error during Trakt callback');
+    }
+  });
 
   router.post('/:configHash/trakt/disconnect', async (req, res) => {
     try {
@@ -1153,16 +1185,20 @@ module.exports = function(router) {
 
   router.get('/trakt/login', (req, res) => {
     try { 
-      // If both TMDB Bearer Token and redirect URIs are configured, 
-      // allow direct redirect, otherwise return JSON for frontend handling
-      if (TMDB_BEARER_TOKEN && TMDB_REDIRECT_URI && TRAKT_REDIRECT_URI) {
-        res.redirect(getTraktAuthUrl());
-      } else {
+      // Check if this is a request that expects JSON response
+      const acceptsJson = req.headers.accept && req.headers.accept.includes('application/json');
+      
+      if (acceptsJson) {
+        // Return JSON for AJAX requests
         res.json({ 
           success: true, 
           authUrl: getTraktAuthUrl(),
-          requiresManualAuth: true
+          requiresManualAuth: true,
+          message: 'Please authorize in the opened window'
         });
+      } else {
+        // Direct redirect for page navigation
+        res.redirect(getTraktAuthUrl());
       }
     }
     catch (error) {
@@ -1174,22 +1210,38 @@ module.exports = function(router) {
   // Config-specific Trakt login endpoint that includes config hash as state
   router.get('/:configHash/trakt/login', (req, res) => {
     try { 
-      const configHash = req.configHash;
-      // If both TMDB Bearer Token and redirect URIs are configured, 
-      // allow direct redirect, otherwise return JSON for frontend handling
-      if (TMDB_BEARER_TOKEN && TMDB_REDIRECT_URI && TRAKT_REDIRECT_URI) {
-        res.redirect(getTraktAuthUrl(configHash));
-      } else {
+      const configHash = req.params.configHash;
+      const acceptsJson = req.headers.accept && req.headers.accept.includes('application/json');
+      
+      if (!configHash) {
+        return res.status(400).json({ error: 'Config hash is required' });
+      }
+      
+      // Create state object with config hash for the callback
+      const stateObject = {
+        configHash: configHash,
+        timestamp: Date.now()
+      };
+      
+      // Convert state to base64 string
+      const stateString = Buffer.from(JSON.stringify(stateObject)).toString('base64');
+      const authUrl = getTraktAuthUrl(stateString);
+      
+      if (acceptsJson) {
+        // Return JSON for AJAX requests  
         res.json({ 
           success: true, 
-          authUrl: getTraktAuthUrl(configHash),
-          requiresManualAuth: true,
-          configHash: configHash
+          authUrl: authUrl,
+          requiresManualAuth: !TRAKT_REDIRECT_URI, // Only manual if no redirect URI
+          message: TRAKT_REDIRECT_URI ? 'Redirecting to Trakt...' : 'Please authorize in the opened window'
         });
+      } else {
+        // Direct redirect for page navigation
+        res.redirect(authUrl);
       }
     }
     catch (error) {
-        console.error('Error in /trakt/login redirect:', error);
+        console.error('Error in config-specific /trakt/login:', error);
         res.status(500).json({ error: 'Internal server error for Trakt login' });
     }
   });

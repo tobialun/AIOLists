@@ -415,7 +415,7 @@ document.addEventListener('DOMContentLoaded', function() {
     elements.traktPin?.addEventListener('keypress', function(e) { if (e.key === 'Enter') handleTraktPinSubmit(); });
     
     // Trakt login button click handler
-    elements.traktLoginBtn?.addEventListener('click', async function(e) {
+    elements.traktLoginBtn.addEventListener('click', async function(e) {
       e.preventDefault();
       try {
         if (!state.configHash) {
@@ -423,27 +423,28 @@ document.addEventListener('DOMContentLoaded', function() {
           return;
         }
         
-        // Try to get auth URL from the config-specific endpoint
-        const response = await fetch(`/${state.configHash}/trakt/login`);
-        const data = await response.json();
+        // For Trakt OAuth, we need to redirect/open directly instead of using fetch
+        // because OAuth URLs don't support CORS
+        const loginUrl = `/${state.configHash}/trakt/login`;
         
-        if (data.success && data.authUrl) {
-          if (data.requiresManualAuth) {
-            // Manual PIN flow - open URL and show PIN input
-            window.open(data.authUrl, '_blank');
-            elements.traktLoginBtn.style.setProperty('display', 'none', 'important');
-            elements.traktPinContainer.style.setProperty('display', 'flex', 'important');
-            showNotification('connections', 'Please authorize the app and enter the PIN here.', 'info', true);
-          } else {
-            // Direct redirect flow
-            window.location.href = data.authUrl;
-          }
+        // Check if we have both TMDB Bearer Token and redirect URIs configured for direct redirect
+        if (window.location.protocol === 'https:' || window.location.hostname === 'localhost') {
+          // Try to redirect directly - the backend will handle the OAuth flow
+          window.location.href = loginUrl;
         } else {
-          throw new Error(data.error || 'Failed to get Trakt auth URL');
+          // Fallback: open in new tab if direct redirect might not work
+          const newTab = window.open(loginUrl, '_blank');
+          if (!newTab) {
+            // If popup was blocked, show manual instruction
+            showNotification('connections', 'Please allow popups or manually visit the Trakt login page', 'warning');
+          } else {
+            showNotification('connections', 'Opening Trakt login in new tab...', 'info');
+          }
         }
+        
       } catch (error) {
         console.error('Trakt Login Error:', error);
-        showNotification('connections', `Trakt Login Error: ${error.message}`, 'error');
+        showNotification('connections', `Trakt Login Error: ${error.message}`, 'error', true);
       }
     });
     
