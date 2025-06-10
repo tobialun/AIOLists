@@ -2675,13 +2675,12 @@ function startNameEditing(listItemElement, list) {
       updateURL();
       updateStremioButtonHref();
       
-      // Reload configuration to get the actual session values from backend
-      await loadConfig();
-      
-      updateTraktUI(true);
+      updateTraktUI(true); // Update UI before reloading
       
       showNotification('connections', 'Successfully connected to Trakt!', 'success');
-      await loadUserListsAndAddons();
+      
+      // Reload full configuration including lists
+      await loadConfiguration();
       
     } catch (error) {
       console.error('Trakt Callback Error:', error);
