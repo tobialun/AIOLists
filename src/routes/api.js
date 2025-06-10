@@ -449,65 +449,102 @@ module.exports = function(router) {
     try {
       const { type, id } = req.params;
       
-      if (!id.startsWith('tt')) {
+      // Support both IMDB IDs (tt) and TMDB IDs (tmdb:)
+      if (!id.startsWith('tt') && !id.startsWith('tmdb:')) {
         return res.status(404).json({ meta: null });
       }
 
       // Set cache headers - meta data can be cached longer since it doesn't change often
       res.setHeader('Cache-Control', 'public, max-age=3600'); // 1 hour cache
       
-      // Create a minimal item object for enrichment
-      const itemForEnrichment = [{
-        id: id,
-        imdb_id: id,
-        type: type,
-        title: "Loading...",
-        name: "Loading..."
-      }];
-      
-      // Extract metadata config from userConfig
-      const metadataSource = req.userConfig.metadataSource || 'cinemeta';
-      const hasTmdbOAuth = !!(req.userConfig.tmdbSessionId && req.userConfig.tmdbAccountId);
-      const tmdbLanguage = req.userConfig.tmdbLanguage || 'en-US';
-      const tmdbBearerToken = req.userConfig.tmdbBearerToken;
-      
-      // Use the same enrichment as catalog items
-      const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
-      const enrichedItems = await enrichItemsWithMetadata(itemForEnrichment, metadataSource, hasTmdbOAuth, tmdbLanguage, tmdbBearerToken);
-      
-      if (enrichedItems && enrichedItems.length > 0) {
-        const enrichedItem = enrichedItems[0];
+      // Handle TMDB IDs with enhanced metadata fetching
+      if (id.startsWith('tmdb:')) {
+        const tmdbId = id.replace('tmdb:', '');
+        const metadataSource = req.userConfig.metadataSource || 'cinemeta';
+        const hasTmdbOAuth = !!(req.userConfig.tmdbSessionId && req.userConfig.tmdbAccountId);
+        const tmdbLanguage = req.userConfig.tmdbLanguage || 'en-US';
+        const tmdbBearerToken = req.userConfig.tmdbBearerToken || require('../config').TMDB_BEARER_TOKEN;
         
-        // Convert to Stremio meta format
-        const meta = {
-          id: id,
-          type: type,
-          name: enrichedItem.name || enrichedItem.title || "Unknown Title",
-          poster: enrichedItem.poster,
-          background: enrichedItem.background || enrichedItem.backdrop,
-          description: enrichedItem.description || enrichedItem.overview,
-          releaseInfo: enrichedItem.releaseInfo || enrichedItem.year || 
-                       (enrichedItem.release_date ? enrichedItem.release_date.split('-')[0] : 
-                       (enrichedItem.first_air_date ? enrichedItem.first_air_date.split('-')[0] : undefined)),
-          imdbRating: enrichedItem.imdbRating,
-          runtime: enrichedItem.runtime,
-          genres: enrichedItem.genres,
-          cast: enrichedItem.cast,
-          director: enrichedItem.director,
-          writer: enrichedItem.writer,
-          country: enrichedItem.country,
-          trailers: enrichedItem.trailers,
-          status: type === 'series' ? enrichedItem.status : undefined,
-          videos: enrichedItem.videos // Include episode data for series
-        };
+        if (metadataSource === 'tmdb' && tmdbBearerToken) {
+          try {
+            const { fetchTmdbMetadata } = require('../integrations/tmdb');
+            const tmdbMeta = await fetchTmdbMetadata(tmdbId, type, tmdbLanguage, tmdbBearerToken);
+            
+            if (tmdbMeta) {
+              // Ensure the ID matches the request
+              tmdbMeta.id = id;
+              return res.json({ meta: tmdbMeta });
+            }
+          } catch (tmdbError) {
+            console.error(`TMDB metadata fetch failed for ${id}:`, tmdbError.message);
+          }
+        }
         
-        // Clean up undefined values
-        Object.keys(meta).forEach(key => meta[key] === undefined && delete meta[key]);
-        
-        return res.json({ meta });
+        // Fallback for TMDB IDs - try to convert to IMDB and use that
+        try {
+          const { convertImdbToTmdbId } = require('../integrations/tmdb');
+          // This is a bit backwards, but we need to find the IMDB ID for this TMDB ID
+          // For now, return a basic meta object
+          return res.json({ 
+            meta: { 
+              id, 
+              type, 
+              name: `TMDB ID ${tmdbId}`,
+              description: "TMDB metadata temporarily unavailable"
+            } 
+          });
+        } catch (error) {
+          console.error(`Error handling TMDB ID ${id}:`, error.message);
+        }
       }
       
-      // Fallback if enrichment fails
+      // Handle IMDB IDs with existing enrichment
+      if (id.startsWith('tt')) {
+        const itemForEnrichment = [{
+          id: id,
+          imdb_id: id,
+          type: type,
+          title: "Loading...",
+          name: "Loading..."
+        }];
+        
+        const metadataSource = req.userConfig.metadataSource || 'cinemeta';
+        const hasTmdbOAuth = !!(req.userConfig.tmdbSessionId && req.userConfig.tmdbAccountId);
+        const tmdbLanguage = req.userConfig.tmdbLanguage || 'en-US';
+        const tmdbBearerToken = req.userConfig.tmdbBearerToken;
+        
+        const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
+        const enrichedItems = await enrichItemsWithMetadata(itemForEnrichment, metadataSource, hasTmdbOAuth, tmdbLanguage, tmdbBearerToken);
+        
+        if (enrichedItems && enrichedItems.length > 0) {
+          const enrichedItem = enrichedItems[0];
+          
+          const meta = {
+            id: id,
+            type: type,
+            name: enrichedItem.name || enrichedItem.title || "Unknown Title",
+            poster: enrichedItem.poster,
+            background: enrichedItem.background || enrichedItem.backdrop,
+            description: enrichedItem.description || enrichedItem.overview,
+            releaseInfo: enrichedItem.releaseInfo || enrichedItem.year,
+            imdbRating: enrichedItem.imdbRating,
+            runtime: enrichedItem.runtime,
+            genres: enrichedItem.genres,
+            cast: enrichedItem.cast,
+            director: enrichedItem.director,
+            writer: enrichedItem.writer,
+            country: enrichedItem.country,
+            trailers: enrichedItem.trailers,
+            status: type === 'series' ? enrichedItem.status : undefined,
+            videos: enrichedItem.videos
+          };
+          
+          Object.keys(meta).forEach(key => meta[key] === undefined && delete meta[key]);
+          return res.json({ meta });
+        }
+      }
+      
+      // Fallback if addon meta handler fails
       return res.json({ 
         meta: { 
           id, 
@@ -543,7 +580,7 @@ module.exports = function(router) {
       env: {
         hasTmdbBearerToken: !!TMDB_BEARER_TOKEN,
         hasTmdbRedirectUri: !!TMDB_REDIRECT_URI,
-        hasTraktRedirectUri: !!TRAKT_REDIRECT_URI
+        hasTraktRedirectUri: !!(TRAKT_REDIRECT_URI && TRAKT_REDIRECT_URI !== 'urn:ietf:wg:oauth:2.0:oob')
       }
     });
   });
@@ -1245,12 +1282,15 @@ module.exports = function(router) {
       const authUrl = getTraktAuthUrl(stateString);
       
       if (acceptsJson) {
+        // Check if we're using PIN flow (out-of-band) or proper redirect
+        const isPinFlow = !TRAKT_REDIRECT_URI || TRAKT_REDIRECT_URI === 'urn:ietf:wg:oauth:2.0:oob';
+        
         // Return JSON for AJAX requests  
         res.json({ 
           success: true, 
           authUrl: authUrl,
-          requiresManualAuth: !TRAKT_REDIRECT_URI, // Only manual if no redirect URI
-          message: TRAKT_REDIRECT_URI ? 'Redirecting to Trakt...' : 'Please authorize in the opened window'
+          requiresManualAuth: isPinFlow, // Manual auth needed for PIN flow
+          message: isPinFlow ? 'Please authorize in the opened window' : 'Redirecting to Trakt...'
         });
       } else {
         // Direct redirect for page navigation

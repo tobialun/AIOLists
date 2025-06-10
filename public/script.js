@@ -93,6 +93,7 @@ document.addEventListener('DOMContentLoaded', function() {
     traktPinContainer: document.getElementById('traktPinContainer'),
     traktPin: document.getElementById('traktPin'),
     submitTraktPin: document.getElementById('submitTraktPin'),
+    cancelTraktPin: document.getElementById('cancelTraktPin'),
     traktPersistenceContainer: document.getElementById('traktPersistenceContainer'),
     traktStatus: document.getElementById('traktStatus'),
     upstashContainer: document.getElementById('upstashContainer'),
@@ -413,6 +414,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     elements.submitTraktPin?.addEventListener('click', handleTraktPinSubmit);
     elements.traktPin?.addEventListener('keypress', function(e) { if (e.key === 'Enter') handleTraktPinSubmit(); });
+    elements.cancelTraktPin?.addEventListener('click', handleTraktPinCancel);
     
     // Trakt login button click handler
     elements.traktLoginBtn.addEventListener('click', async function(e) {
@@ -423,23 +425,38 @@ document.addEventListener('DOMContentLoaded', function() {
           return;
         }
         
-        // For Trakt OAuth, we need to redirect/open directly instead of using fetch
-        // because OAuth URLs don't support CORS
-        const loginUrl = `/${state.configHash}/trakt/login`;
-        
-        // Check if we have both TMDB Bearer Token and redirect URIs configured for direct redirect
-        if (window.location.protocol === 'https:' || window.location.hostname === 'localhost') {
-          // Try to redirect directly - the backend will handle the OAuth flow
-          window.location.href = loginUrl;
-        } else {
-          // Fallback: open in new tab if direct redirect might not work
-          const newTab = window.open(loginUrl, '_blank');
-          if (!newTab) {
-            // If popup was blocked, show manual instruction
-            showNotification('connections', 'Please allow popups or manually visit the Trakt login page', 'warning');
-          } else {
-            showNotification('connections', 'Opening Trakt login in new tab...', 'info');
+        // First, check the server to determine if we need PIN flow or redirect flow
+        const response = await fetch(`/${state.configHash}/trakt/login`, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json'
           }
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Server error: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.requiresManualAuth) {
+          // PIN flow - open in new window and show PIN input
+          const newTab = window.open(data.authUrl, '_blank', 'width=600,height=700,scrollbars=yes,resizable=yes');
+          if (!newTab) {
+            showNotification('connections', 'Please allow popups or manually visit the Trakt authorization page', 'warning');
+          } else {
+            showNotification('connections', 'Please authorize the app in the new window and enter the PIN below', 'info');
+          }
+          
+          // Show PIN input container
+          elements.traktLoginBtn.style.setProperty('display', 'none', 'important');
+          elements.traktPinContainer.style.setProperty('display', 'flex', 'important');
+          elements.traktPin.focus();
+          
+        } else {
+          // Redirect flow - redirect directly
+          showNotification('connections', 'Redirecting to Trakt for authorization...', 'info');
+          window.location.href = data.authUrl;
         }
         
       } catch (error) {
@@ -1059,6 +1076,14 @@ document.addEventListener('DOMContentLoaded', function() {
     elements.traktStatus.appendChild(statusIcon);
     elements.traktStatus.appendChild(statusText);
     elements.traktStatus.appendChild(actionLink);
+  }
+
+  function handleTraktPinCancel() {
+    // Hide PIN container and show login button again
+    elements.traktPinContainer.style.setProperty('display', 'none', 'important');
+    elements.traktLoginBtn.style.setProperty('display', 'inline-flex', 'important');
+    elements.traktPin.value = '';
+    showNotification('connections', 'Trakt authentication cancelled', 'info');
   }
 
   async function handleTraktPinSubmit() {

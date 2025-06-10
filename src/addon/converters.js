@@ -12,13 +12,24 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null, metadataCo
 
   if (listContent.allItems && Array.isArray(listContent.allItems)) {
     itemsToProcess = listContent.allItems.map(item => {
+        // Support both IMDB IDs (tt) and TMDB IDs (tmdb:)
+        let itemId = item.id;
         let imdbId = item.imdb_id || item.imdbid;
-        if (imdbId && !imdbId.startsWith('tt')) imdbId = `tt${imdbId}`;
-        if (!imdbId) return null;
+        
+        // If we have a specific ID (could be tmdb: format), use it
+        if (itemId && (itemId.startsWith('tt') || itemId.startsWith('tmdb:'))) {
+          // ID is already in correct format
+        } else {
+          // Fallback to IMDB ID processing
+          if (imdbId && !imdbId.startsWith('tt')) imdbId = `tt${imdbId}`;
+          if (!imdbId) return null;
+          itemId = imdbId;
+        }
 
         // Create base metadata, prioritizing enriched metadata fields over fallbacks
         const baseMeta = {
-            id: imdbId,
+            id: itemId,
+            imdb_id: imdbId, // Always preserve IMDB ID for cross-referencing
             type: item.type,
             // For enriched items, the name should already be in the preferred language/source
             // Only use fallbacks if name is truly missing

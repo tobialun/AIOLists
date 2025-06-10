@@ -136,17 +136,21 @@ async function enrichItemsWithTMDB(items, language = 'en-US', userBearerToken = 
     const tmdbMetadataMap = await batchFetchTmdbMetadata(tmdbItems, language, userBearerToken);
     console.log(`[DEBUG] TMDB metadata fetch completed, got ${Object.keys(tmdbMetadataMap).length} results`);
     
-    // Step 3: Merge TMDB metadata with original items
+    // Step 3: Merge TMDB metadata with original items and convert IDs to tmdb: format
     const enrichedItems = items.map(item => {
       const imdbId = item.imdb_id || item.id;
       const tmdbMetadata = tmdbMetadataMap[imdbId];
       
       if (tmdbMetadata) {
+        // Get the TMDB ID for this item
+        const tmdbConversion = imdbToTmdbMap[imdbId];
+        const newId = tmdbConversion ? `tmdb:${tmdbConversion.tmdbId}` : item.id;
+        
         return {
           ...item,
           ...tmdbMetadata,
-          // Preserve original ID and type
-          id: item.id,
+          // Use tmdb: format for ID when enriched with TMDB
+          id: newId,
           imdb_id: item.imdb_id || item.id,
           type: item.type
         };

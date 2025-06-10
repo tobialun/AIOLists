@@ -582,7 +582,7 @@ async function batchConvertImdbToTmdbIds(imdbIds, userBearerToken = DEFAULT_TMDB
   if (uncachedIds.length === 0) return results;
   
   // Process uncached IDs in parallel with concurrency control
-  const CONCURRENCY_LIMIT = 5; // Process 5 requests at a time
+  const CONCURRENCY_LIMIT = 20; // Process 5 requests at a time
   
   const processChunk = async (chunk) => {
     const chunkPromises = chunk.map(async (imdbId) => {
@@ -641,7 +641,7 @@ async function fetchTmdbMetadata(tmdbId, type, language = 'en-US', userBearerTok
     const response = await axios.get(`${TMDB_BASE_URL_V3}/${endpoint}/${tmdbId}`, {
       params: {
         language: language,
-        append_to_response: 'credits,videos,external_ids'
+        append_to_response: 'credits,videos,external_ids,images'
       },
       headers: {
         'accept': 'application/json',
@@ -674,6 +674,10 @@ async function fetchTmdbMetadata(tmdbId, type, language = 'en-US', userBearerTok
 function convertTmdbToStremioFormat(tmdbData, type) {
   const isMovie = type === 'movie';
   
+  // Use tmdb: format for ID, preserve IMDB ID separately
+  const tmdbId = `tmdb:${tmdbData.id}`;
+  const imdbId = tmdbData.external_ids?.imdb_id || tmdbData.imdb_id;
+  
   // Extract cast and crew
   const cast = tmdbData.credits?.cast?.slice(0, 10).map(person => person.name) || [];
   const crew = tmdbData.credits?.crew || [];
@@ -682,39 +686,183 @@ function convertTmdbToStremioFormat(tmdbData, type) {
     person.job === 'Writer' || person.job === 'Screenplay' || person.job === 'Story'
   ).map(person => person.name);
   
-  // Extract trailer
-  const trailers = tmdbData.videos?.results?.filter(video => 
+  // Extract and format trailers
+  const trailerVideos = tmdbData.videos?.results?.filter(video => 
     video.type === 'Trailer' && video.site === 'YouTube'
-  ).map(video => `https://www.youtube.com/watch?v=${video.key}`) || [];
+  ) || [];
   
-  return {
-    id: tmdbData.imdb_id || `tmdb:${tmdbData.id}`,
+  const trailers = trailerVideos.map(video => `https://www.youtube.com/watch?v=${video.key}`);
+  const trailerStreams = trailerVideos.map(video => ({
+    title: tmdbData.title || tmdbData.name,
+    ytId: video.key
+  }));
+  
+  // Format release date
+  const releaseDate = isMovie ? tmdbData.release_date : tmdbData.first_air_date;
+  const releaseYear = releaseDate ? releaseDate.split('-')[0] : undefined;
+  const releasedFormatted = releaseDate ? `${releaseDate}T00:00:00.000Z` : undefined;
+  
+  // Get logos from TMDB images
+  let logo = undefined;
+  if (tmdbData.images?.logos && tmdbData.images.logos.length > 0) {
+    // Prefer English logos or the first available
+    const englishLogo = tmdbData.images.logos.find(img => img.iso_639_1 === 'en') || tmdbData.images.logos[0];
+    logo = `https://image.tmdb.org/t/p/original${englishLogo.file_path}`;
+  }
+
+  // Build detailed cast information for app_extras
+  const detailedCast = tmdbData.credits?.cast?.slice(0, 10).map(person => ({
+    name: person.name,
+    character: person.character || undefined,
+    photo: person.profile_path ? `https://image.tmdb.org/t/p/w276_and_h350_face${person.profile_path}` : undefined
+  })) || [];
+
+  // Build comprehensive metadata object similar to Cinemeta structure
+  const metadata = {
+    id: tmdbId,
+    imdb_id: imdbId,
     type: type,
     name: isMovie ? tmdbData.title : tmdbData.name,
-    description: tmdbData.overview,
+    description: tmdbData.overview || "",
     poster: tmdbData.poster_path ? `https://image.tmdb.org/t/p/w500${tmdbData.poster_path}` : undefined,
     background: tmdbData.backdrop_path ? `https://image.tmdb.org/t/p/w1280${tmdbData.backdrop_path}` : undefined,
-    releaseInfo: isMovie ? 
-      (tmdbData.release_date ? tmdbData.release_date.split('-')[0] : undefined) :
-      (tmdbData.first_air_date ? tmdbData.first_air_date.split('-')[0] : undefined),
+    releaseInfo: releaseYear,
+    year: releaseYear,
+    released: releasedFormatted,
     runtime: isMovie ? 
       (tmdbData.runtime ? `${tmdbData.runtime} min` : undefined) :
       (tmdbData.episode_run_time?.[0] ? `${tmdbData.episode_run_time[0]} min` : undefined),
     genres: tmdbData.genres?.map(genre => genre.name) || [],
+    genre: tmdbData.genres?.map(genre => genre.name) || [], // Cinemeta uses 'genre' as well
     cast: cast.length > 0 ? cast : undefined,
     director: directors.length > 0 ? directors : undefined,
     writer: writers.length > 0 ? writers : undefined,
     imdbRating: tmdbData.vote_average ? tmdbData.vote_average.toFixed(1) : undefined,
     country: isMovie ? 
-      tmdbData.production_countries?.map(country => country.name) :
-      tmdbData.origin_country,
-    trailers: trailers.length > 0 ? trailers : undefined,
+      (tmdbData.production_countries?.map(country => country.name)?.[0] || 'Unknown') :
+      (tmdbData.origin_country?.[0] || 'Unknown'),
+    trailers: trailers.length > 0 ? trailerVideos.map(video => ({ source: video.key, type: 'Trailer' })) : undefined,
+    trailerStreams: trailerStreams.length > 0 ? trailerStreams : undefined,
+    videos: [], // Cinemeta compatibility - empty array for now
     status: !isMovie ? tmdbData.status : undefined,
     tmdbId: tmdbData.id,
+    moviedb_id: tmdbData.id, // Cinemeta compatibility
     tmdbRating: tmdbData.vote_average,
     tmdbVotes: tmdbData.vote_count,
-    popularity: tmdbData.popularity
+    popularity: tmdbData.popularity ? (tmdbData.popularity / 100) : 0, // Normalize to match Cinemeta scale
+    
+    // Add logo if available
+    logo: logo,
+    
+    // Add Stremio-specific fields for better integration
+    popularities: {
+      moviedb: tmdbData.popularity || 0,
+      tmdb: tmdbData.popularity || 0,
+      stremio: tmdbData.popularity ? (tmdbData.popularity / 100) : 0
+    },
+    
+    // Create links similar to Cinemeta
+    links: [],
+    
+    // Enhanced behavior hints for better Stremio integration
+    behaviorHints: {
+      defaultVideoId: imdbId && imdbId.startsWith('tt') ? imdbId : tmdbId,
+      hasScheduledVideos: !isMovie, // TV shows have scheduled videos
+      p2p: false,
+      configurable: false,
+      configurationRequired: false
+    },
+    
+    // Add detailed cast information in app_extras for richer metadata
+    app_extras: {
+      cast: detailedCast.length > 0 ? detailedCast : undefined
+    }
   };
+  
+  // Build links array similar to Cinemeta
+  if (metadata.links) {
+    // IMDb rating link
+    if (metadata.imdbRating && imdbId && imdbId.startsWith('tt')) {
+      metadata.links.push({
+        name: metadata.imdbRating,
+        category: "imdb",
+        url: `https://imdb.com/title/${imdbId}`
+      });
+    }
+    
+    // TMDB rating link
+    if (metadata.tmdbRating) {
+      const tmdbUrl = isMovie ? 
+        `https://www.themoviedb.org/movie/${tmdbData.id}` :
+        `https://www.themoviedb.org/tv/${tmdbData.id}`;
+      metadata.links.push({
+        name: metadata.tmdbRating.toFixed(1),
+        category: "tmdb",
+        url: tmdbUrl
+      });
+    }
+    
+    // Genre links
+    if (metadata.genres && metadata.genres.length > 0) {
+      metadata.genres.forEach(genre => {
+        metadata.links.push({
+          name: genre,
+          category: "Genres",
+          url: `stremio:///discover/tmdb/${type}/popular?genre=${encodeURIComponent(genre)}`
+        });
+      });
+    }
+    
+    // Cast links
+    if (metadata.cast && metadata.cast.length > 0) {
+      metadata.cast.slice(0, 5).forEach(actor => { // Limit to 5 cast members
+        metadata.links.push({
+          name: actor,
+          category: "Cast",
+          url: `stremio:///search?search=${encodeURIComponent(actor)}`
+        });
+      });
+    }
+    
+    // Director links
+    if (metadata.director && metadata.director.length > 0) {
+      metadata.director.forEach(dir => {
+        metadata.links.push({
+          name: dir,
+          category: "Directors",
+          url: `stremio:///search?search=${encodeURIComponent(dir)}`
+        });
+      });
+    }
+    
+    // Writer links
+    if (metadata.writer && metadata.writer.length > 0) {
+      metadata.writer.forEach(writer => {
+        metadata.links.push({
+          name: writer,
+          category: "Writers", 
+          url: `stremio:///search?search=${encodeURIComponent(writer)}`
+        });
+      });
+    }
+  }
+  
+  // Add slug for Stremio compatibility
+  if (metadata.name && metadata.releaseInfo) {
+    const slugTitle = metadata.name.toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .trim('-');
+    
+    // Use IMDB ID for slug if available, otherwise use TMDB ID
+    const idForSlug = imdbId && imdbId.startsWith('tt') ? 
+      imdbId.replace('tt', '') : 
+      tmdbData.id;
+    metadata.slug = `${type}/${slugTitle}-${idForSlug}`;
+  }
+  
+  return metadata;
 }
 
 /**

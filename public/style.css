@@ -288,31 +288,32 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 }
 
 .metadata-search-settings {
-  margin-top: 15px;
+  margin-top: 20px;
   padding-top: 15px;
-  border-top: 1px solid #e0e0e0;
+  border-top: 1px solid #eee;
 }
 
 .metadata-row {
   display: flex;
+  align-items: center;
   gap: 20px;
-  align-items: flex-end;
-  flex-wrap: wrap;
+  margin-top: 10px;
 }
 
 .metadata-row .form-group {
-  margin-bottom: 10px;
-  min-width: 200px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .metadata-row .form-group label {
-  width: auto;
-  margin-bottom: 5px;
-  display: block;
+  font-weight: 500;
+  white-space: nowrap;
+  min-width: auto;
 }
 
 .metadata-row .metadata-select {
-  width: 100%;
   min-width: 180px;
 }
 
@@ -325,6 +326,13 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
   .metadata-row .form-group {
     min-width: unset;
     width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .metadata-search-settings {
+    margin-top: 15px; /* Slightly less margin on mobile */
+    padding-top: 12px;
   }
 }
 
@@ -1077,7 +1085,8 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
   flex-wrap: wrap;
   gap: 15px;
   align-items: center;
-  margin-top: 8px;
+  margin-top: 12px; /* Increased spacing */
+  margin-bottom: 8px; /* Add bottom margin for separation */
 }
 
 .search-options .checkbox-label {

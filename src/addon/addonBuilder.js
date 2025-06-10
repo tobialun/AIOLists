@@ -6,6 +6,7 @@ const { fetchExternalAddonItems } = require('../integrations/externalAddons');
 const { convertToStremioFormat } = require('./converters');
 const { isWatchlist } = require('../utils/common');
 const { staticGenres } = require('../config');
+const axios = require('axios');
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const METADATA_FETCH_RETRY_DELAY_MS = 5000;
@@ -141,7 +142,7 @@ async function createAddon(userConfig) {
     description: 'Manage all your lists in one place.',
     resources: ['catalog', 'meta'],
     types: [], // Will be populated dynamically
-    idPrefixes: ['tt'],
+    idPrefixes: ['tt', 'tmdb:'],
     catalogs: [],
     logo: `https://i.imgur.com/DigFuAQ.png`,
     behaviorHints: { configurable: true, configurationRequired: false }
@@ -750,6 +751,12 @@ async function createAddon(userConfig) {
       tmdbBearerToken
     );
     
+    // Log conversion results for debugging
+    const tmdbFormatItems = enrichedItems.filter(i => i.id && i.id.startsWith('tmdb:')).length;
+    if (tmdbFormatItems > 0) {
+      console.log(`[DEBUG] Catalog contains ${tmdbFormatItems} items with tmdb: format IDs`);
+    }
+    
     // Update the items result with enriched items
     const enrichedResult = {
       ...itemsResult,
@@ -767,34 +774,148 @@ async function createAddon(userConfig) {
   });
 
   builder.defineMetaHandler(async ({ type, id }) => {
-    if (!id.startsWith('tt')) return Promise.resolve({ meta: null });
+    // Support both IMDB IDs (tt) and TMDB IDs (tmdb:)
+    if (!id.startsWith('tt') && !id.startsWith('tmdb:')) {
+      return Promise.resolve({ meta: null });
+    }
     
     try {
-      // Create a minimal item object for enrichment
-      const itemForEnrichment = [{
-        id: id,
-        imdb_id: id,
-        type: type,
-        title: "Loading...",
-        name: "Loading..."
-      }];
-      
       // Extract metadata config from userConfig
       const metadataSource = userConfig.metadataSource || 'cinemeta';
       const hasTmdbOAuth = !!(userConfig.tmdbSessionId && userConfig.tmdbAccountId);
       const tmdbLanguage = userConfig.tmdbLanguage || 'en-US';
       const tmdbBearerToken = userConfig.tmdbBearerToken || require('../config').TMDB_BEARER_TOKEN;
       
-      // Use the same enrichment as catalog items
+      console.log(`[MetaHandler] Processing ${id} with source: ${metadataSource}`);
+      console.log(`[MetaHandler] tmdbBearerToken available: ${!!tmdbBearerToken}`);
+      console.log(`[MetaHandler] hasTmdbOAuth: ${hasTmdbOAuth}`);
+      
+      // Always use English for meta requests to ensure Stremio compatibility
+      const metaLanguage = 'en-US';
+      
+      // Handle TMDB IDs differently based on source preference
+      if (id.startsWith('tmdb:') || (metadataSource === 'tmdb' && tmdbBearerToken)) {
+        let tmdbId, tmdbType, originalImdbId;
+        
+        if (id.startsWith('tmdb:')) {
+          // Direct TMDB ID
+          tmdbId = id.replace('tmdb:', '');
+          tmdbType = type;
+          
+          // Try to get IMDB ID for this TMDB item for cross-referencing
+          try {
+            const { fetchTmdbMetadata } = require('../integrations/tmdb');
+            const tmdbData = await fetchTmdbMetadata(tmdbId, tmdbType, metaLanguage, tmdbBearerToken);
+            if (tmdbData?.imdb_id) {
+              originalImdbId = tmdbData.imdb_id;
+            }
+          } catch (error) {
+            console.warn(`[MetaHandler] Could not fetch IMDB ID for TMDB:${tmdbId}:`, error.message);
+          }
+        } else if (id.startsWith('tt')) {
+          // Convert IMDB ID to TMDB ID and get TMDB metadata using tmdb: format
+          originalImdbId = id;
+          const { convertImdbToTmdbId } = require('../integrations/tmdb');
+          const tmdbResult = await convertImdbToTmdbId(id, tmdbBearerToken);
+          if (tmdbResult && tmdbResult.tmdbId) {
+            tmdbId = tmdbResult.tmdbId;
+            tmdbType = tmdbResult.type;
+          }
+        }
+        
+        if (tmdbId) {
+          try {
+            console.log(`[MetaHandler] Attempting to fetch TMDB metadata for ID: ${tmdbId}, type: ${tmdbType}`);
+            // Fetch comprehensive TMDB metadata
+            const { fetchTmdbMetadata } = require('../integrations/tmdb');
+            const tmdbMeta = await fetchTmdbMetadata(tmdbId, tmdbType, metaLanguage, tmdbBearerToken);
+            
+            if (tmdbMeta) {
+              // Always preserve the original request ID format
+              tmdbMeta.id = id;
+              tmdbMeta.imdb_id = originalImdbId || tmdbMeta.imdb_id;
+              
+              // Supplement with IMDB rating and missing fields from Cinemeta
+              const imdbIdForCinemeta = tmdbMeta.imdb_id;
+              if (imdbIdForCinemeta && imdbIdForCinemeta.startsWith('tt')) {
+                try {
+                  const cinemetaResponse = await axios.get(`https://v3-cinemeta.strem.io/meta/${tmdbType}/${imdbIdForCinemeta}.json`, { 
+                    timeout: 3000 
+                  });
+                  
+                  const cinemetaMeta = cinemetaResponse.data?.meta;
+                  if (cinemetaMeta) {
+                    // Use Cinemeta's IMDB rating as it's more authoritative
+                    if (cinemetaMeta.imdbRating) {
+                      tmdbMeta.imdbRating = cinemetaMeta.imdbRating;
+                    }
+                    
+                    // Fill missing essential Cinemeta fields
+                    if (cinemetaMeta.awards && !tmdbMeta.awards) {
+                      tmdbMeta.awards = cinemetaMeta.awards;
+                    }
+                    if (cinemetaMeta.dvdRelease && !tmdbMeta.dvdRelease) {
+                      tmdbMeta.dvdRelease = cinemetaMeta.dvdRelease;
+                    }
+                    if (cinemetaMeta.country && !tmdbMeta.country) {
+                      tmdbMeta.country = cinemetaMeta.country;
+                    }
+                    // Prefer Cinemeta logo if TMDB doesn't have one
+                    if (cinemetaMeta.logo && !tmdbMeta.logo) {
+                      tmdbMeta.logo = cinemetaMeta.logo;
+                    }
+                    
+                    console.log(`[MetaHandler] Enhanced TMDB metadata with Cinemeta data for ${imdbIdForCinemeta}`);
+                  }
+                } catch (cinemetaError) {
+                  console.warn(`[MetaHandler] Could not fetch Cinemeta data for ${imdbIdForCinemeta}:`, cinemetaError.message);
+                }
+              }
+              
+              // Enhance behavioral hints for better Stremio integration
+              tmdbMeta.behaviorHints = {
+                defaultVideoId: tmdbMeta.imdb_id || tmdbMeta.id,
+                hasScheduledVideos: tmdbType === 'series',
+                p2p: false,
+                configurable: false,
+                configurationRequired: false
+              };
+              
+              console.log(`[MetaHandler] Successfully fetched comprehensive TMDB metadata for ${id} -> ${tmdbMeta.id}`);
+              
+              return Promise.resolve({ 
+                meta: tmdbMeta,
+                cacheMaxAge: 24 * 60 * 60 // Cache for 24 hours
+              });
+            }
+          } catch (tmdbError) {
+            console.error(`[MetaHandler] TMDB metadata fetch failed for ${id}:`, tmdbError.message);
+            console.error(`[MetaHandler] TMDB error stack:`, tmdbError.stack);
+          }
+        } else {
+          console.warn(`[MetaHandler] No TMDB ID found for ${id}`);
+        }
+      }
+      
+      // Fallback to standard enrichment process for non-TMDB sources or failures
+      const itemForEnrichment = [{
+        id: id,
+        imdb_id: id.startsWith('tt') ? id : undefined,
+        type: type,
+        title: "Loading...",
+        name: "Loading..."
+      }];
+      
       const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
-      const enrichedItems = await enrichItemsWithMetadata(itemForEnrichment, metadataSource, hasTmdbOAuth, tmdbLanguage, tmdbBearerToken);
+      const enrichedItems = await enrichItemsWithMetadata(itemForEnrichment, 'cinemeta', false, 'en-US', null);
       
       if (enrichedItems && enrichedItems.length > 0) {
         const enrichedItem = enrichedItems[0];
         
-        // Convert to Stremio meta format
+        // Create a comprehensive meta object
         const meta = {
           id: id,
+          imdb_id: id.startsWith('tt') ? id : enrichedItem.imdb_id,
           type: type,
           name: enrichedItem.name || enrichedItem.title || "Unknown Title",
           poster: enrichedItem.poster,
@@ -803,30 +924,62 @@ async function createAddon(userConfig) {
           releaseInfo: enrichedItem.releaseInfo || enrichedItem.year || 
                        (enrichedItem.release_date ? enrichedItem.release_date.split('-')[0] : 
                        (enrichedItem.first_air_date ? enrichedItem.first_air_date.split('-')[0] : undefined)),
+          year: enrichedItem.year,
+          released: enrichedItem.released,
           imdbRating: enrichedItem.imdbRating,
           runtime: enrichedItem.runtime,
           genres: enrichedItem.genres,
+          genre: enrichedItem.genres, // Cinemeta compatibility
           cast: enrichedItem.cast,
           director: enrichedItem.director,
           writer: enrichedItem.writer,
           country: enrichedItem.country,
           trailers: enrichedItem.trailers,
-          status: type === 'series' ? enrichedItem.status : undefined
+          trailerStreams: enrichedItem.trailerStreams,
+          videos: enrichedItem.videos || [],
+          links: enrichedItem.links || [],
+          awards: enrichedItem.awards,
+          dvdRelease: enrichedItem.dvdRelease,
+          logo: enrichedItem.logo,
+          slug: enrichedItem.slug,
+          popularity: enrichedItem.popularity,
+          popularities: enrichedItem.popularities,
+          status: type === 'series' ? enrichedItem.status : undefined,
+          behaviorHints: {
+            defaultVideoId: id,
+            hasScheduledVideos: type === 'series',
+            p2p: false,
+            configurable: false,
+            configurationRequired: false
+          }
         };
         
         // Clean up undefined values
-        Object.keys(meta).forEach(key => meta[key] === undefined && delete meta[key]);
+        Object.keys(meta).forEach(key => {
+          if (meta[key] === undefined) {
+            delete meta[key];
+          }
+        });
         
-        return Promise.resolve({ meta });
+        console.log(`[MetaHandler] Returning enriched metadata for ${id} with ${Object.keys(meta).length} fields`);
+        
+        return Promise.resolve({ 
+          meta,
+          cacheMaxAge: 12 * 60 * 60 // 12 hours cache
+        });
       }
       
-      // Fallback if enrichment fails
+      // Final fallback - but first log what went wrong
+      console.error(`[MetaHandler] All metadata sources failed for ${id}, returning fallback`);
       return Promise.resolve({ 
         meta: { 
           id, 
           type, 
-          name: "Details unavailable" 
-        } 
+          name: "Details unavailable",
+          behaviorHints: {
+            hasScheduledVideos: type === 'series'
+          }
+        }
       });
       
     } catch (error) {
@@ -835,8 +988,11 @@ async function createAddon(userConfig) {
         meta: { 
           id, 
           type, 
-          name: "Error loading details" 
-        } 
+          name: "Error loading details",
+          behaviorHints: {
+            hasScheduledVideos: type === 'series'
+          }
+        }
       });
     }
   });
