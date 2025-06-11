@@ -27,7 +27,7 @@ AIOLists is a stateless open source list management addon for Stremio. The proje
 
 Due to the stateless nature of this addon Trakt keys can't automatically update when they expire. I have added an option to make Trakt persistant through Upstash. You can create a free account on there. Here's a short guide:
 
-1. Create an account, using a temp-mail works fine.
+1. [Create an account](https://upstash.com/), using a temp-mail works fine.
 2. After logging in you will be prompted to Create a database press Create Database.
 3. Input a Name and the region closest to you.
 4. Next -> Next -> Create
