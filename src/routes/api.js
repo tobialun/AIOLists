@@ -1289,8 +1289,10 @@ module.exports = function(router) {
         newConfig = { ...newConfig, ...shareablePart };
       }
 
-      const { sharedConfig, ...otherBodyParams } = req.body;
-      newConfig = { ...newConfig, ...otherBodyParams };
+      if (req.body.config) {
+        const userConfig = req.body.config;
+        newConfig = { ...newConfig, ...userConfig };
+      }
 
       const configHash = await compressConfig(newConfig);
       res.json({ success: true, configHash });
