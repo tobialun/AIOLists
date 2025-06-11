@@ -8,8 +8,8 @@ Create a `.env` file in the root directory:
 
 ```bash
 # TMDB Configuration  
-TMDB_REDIRECT_URI=http://localhost:3000/tmdb/callback
-TMDB_BEARER_TOKEN=your_tmdb_bearer_token_here
+TMDB_REDIRECT_URI=https://aiolists.elfhosted.com/
+TMDB_BEARER_TOKEN=eyJhbGciOiJIUzI1NiJ9...
 ```
 
 ## Environment Variables Explained
@@ -18,7 +18,7 @@ TMDB_BEARER_TOKEN=your_tmdb_bearer_token_here
 - **Purpose**: Where users are redirected after TMDB authentication
 - **Default**: None (manual process)
 - **Required**: No
-- **Example**: `http://localhost:3000/tmdb/callback`
+- **Example**: `https://aiolists.elfhosted.com/`
 
 ### TMDB_BEARER_TOKEN
 - **Purpose**: Your TMDB Read Access Token
@@ -55,12 +55,12 @@ For production deployments, set these environment variables in your hosting plat
 **Heroku:**
 ```bash
 heroku config:set TMDB_BEARER_TOKEN=your_token_here
-heroku config:set TMDB_REDIRECT_URI=https://yourapp.herokuapp.com/tmdb/callback
+heroku config:set TMDB_REDIRECT_URI=https://yourapp.herokuapp.com/
 ```
 
 **Docker:**
 ```bash
-docker run -e TMDB_BEARER_TOKEN=your_token_here -e TMDB_REDIRECT_URI=https://yourapp.com/tmdb/callback aiolists
+docker run -e TMDB_BEARER_TOKEN=your_token_here -e TMDB_REDIRECT_URI=https://yourapp.com/ aiolists
 ```
 
 **Railway/Render:**

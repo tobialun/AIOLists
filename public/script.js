@@ -757,12 +757,12 @@ document.addEventListener('DOMContentLoaded', function() {
         const data = await response.json();
         
         if (data.requiresManualAuth) {
-          // PIN flow - open in new window and show PIN input
-          const newTab = window.open(data.authUrl, '_blank', 'width=600,height=700,scrollbars=yes,resizable=yes');
+          // PIN flow - open in new tab and show PIN input
+          const newTab = window.open(data.authUrl, '_blank');
           if (!newTab) {
             showNotification('connections', 'Please allow popups or manually visit the Trakt authorization page', 'warning');
           } else {
-            showNotification('connections', 'Please authorize the app in the new window and enter the PIN below', 'info');
+            showNotification('connections', 'Please authorize the app in the new tab and enter the PIN below', 'info');
           }
           
           // Show PIN input container
