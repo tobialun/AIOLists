@@ -15,6 +15,21 @@ const { saveTraktTokens } = require('../utils/remoteStorage');
 
 const manifestCache = new Cache({ defaultTTL: 1 * 60 * 1000 });
 
+// Helper function to create a config copy for storage that excludes sensitive Trakt tokens when using Upstash
+function createConfigForStorage(userConfig) {
+  const configForStorage = { ...userConfig };
+  
+  // Only exclude Trakt tokens from storage if Upstash is configured and we have a traktUuid
+  // This ensures tokens can be retrieved from Upstash when needed
+  if (configForStorage.upstashUrl && configForStorage.traktUuid) {
+    configForStorage.traktAccessToken = null;
+    configForStorage.traktRefreshToken = null;
+    configForStorage.traktExpiresAt = null;
+  }
+  
+  return configForStorage;
+}
+
 function purgeListConfigs(userConfig, listIdPrefixOrExactId, isExactId = false) {
   const idsToRemove = new Set();
 
@@ -93,6 +108,16 @@ module.exports = function(router) {
     try {
       req.userConfig = await decompressConfig(configHash);
       req.configHash = configHash;
+      
+      // If Upstash is configured and we have a traktUuid, try to load Trakt tokens before determining shared status
+      if (req.userConfig.upstashUrl && req.userConfig.traktUuid && !req.userConfig.traktAccessToken) {
+        try {
+          await initTraktApi(req.userConfig);
+        } catch (error) {
+          console.warn('Failed to load Trakt tokens from Upstash during config param processing:', error.message);
+        }
+      }
+      
       req.isPotentiallySharedConfig = (!req.userConfig.apiKey && Object.values(req.userConfig.importedAddons || {}).some(addon => addon.isMDBListUrlImport)) ||
                                      (!req.userConfig.traktAccessToken && Object.values(req.userConfig.importedAddons || {}).some(addon => addon.isTraktPublicList)) ||
                                      (!req.userConfig.traktAccessToken && (req.userConfig.listOrder || []).some(id => id.startsWith('trakt_') && !id.startsWith('traktpublic_')));
@@ -683,7 +708,7 @@ module.exports = function(router) {
 
       if (configChanged) {
         req.userConfig.lastUpdated = new Date().toISOString();
-        const newConfigHash = await compressConfig(req.userConfig);
+        const newConfigHash = await compressConfig(createConfigForStorage(req.userConfig));
         manifestCache.clear();
         return res.json({ success: true, configHash: newConfigHash });
       }
@@ -701,6 +726,7 @@ module.exports = function(router) {
         req.userConfig.upstashUrl = upstashUrl || '';
         req.userConfig.upstashToken = upstashToken || '';
 
+        // Save Trakt tokens to Upstash but keep them in the active session
         if (upstashUrl && upstashToken && req.userConfig.traktAccessToken && req.userConfig.traktUuid) {
             const tokensToSave = {
                 accessToken: req.userConfig.traktAccessToken,
@@ -708,13 +734,15 @@ module.exports = function(router) {
                 expiresAt: req.userConfig.traktExpiresAt
             };
             await saveTraktTokens(req.userConfig, tokensToSave);
-            req.userConfig.traktAccessToken = null;
-            req.userConfig.traktRefreshToken = null;
-            req.userConfig.traktExpiresAt = null;
+            // Don't remove Trakt tokens from the active session - they'll be removed only from storage
+            
+            // Immediately verify that tokens are accessible from Upstash
+            await initTraktApi(req.userConfig);
         }
         
         req.userConfig.lastUpdated = new Date().toISOString();
-        const newConfigHash = await compressConfig(req.userConfig);
+        
+        const newConfigHash = await compressConfig(createConfigForStorage(req.userConfig));
         manifestCache.clear();
         res.json({ success: true, configHash: newConfigHash });
     } catch (error) {
@@ -1779,16 +1807,10 @@ module.exports = function(router) {
       };
     
       if (configChangedByThisRequest) {
-        const configToSave = { ...req.userConfig };
+        // Update the lastUpdated timestamp on the active config
+        req.userConfig.lastUpdated = new Date().toISOString();
         
-        if (configToSave.upstashUrl) {
-            configToSave.traktAccessToken = null;
-            configToSave.traktRefreshToken = null;
-            configToSave.traktExpiresAt = null;
-        }
-
-        configToSave.lastUpdated = new Date().toISOString();
-        const newConfigHash = await compressConfig(configToSave);
+                 const newConfigHash = await compressConfig(createConfigForStorage(req.userConfig));
         responsePayload.newConfigHash = newConfigHash;
         
         if (req.configHash !== newConfigHash) {
