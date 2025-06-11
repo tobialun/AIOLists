@@ -590,16 +590,37 @@ module.exports = function(router) {
   
   router.get('/:configHash/config', (req, res) => {
     const configToSend = JSON.parse(JSON.stringify(req.userConfig));
+    
+    // Remove all sensitive data before sending to frontend
+    delete configToSend.apiKey;
+    delete configToSend.rpdbApiKey;
+    delete configToSend.tmdbBearerToken;
+    delete configToSend.tmdbSessionId;
+    delete configToSend.tmdbAccountId;
+    delete configToSend.traktAccessToken;
+    delete configToSend.traktRefreshToken;
+    delete configToSend.traktExpiresAt;
+    delete configToSend.traktUuid;
+    delete configToSend.upstashUrl;
+    delete configToSend.upstashToken;
+    
+    // Remove internal sort options that shouldn't be exposed
     delete configToSend.availableSortOptions;
     delete configToSend.traktSortOptions;
+    
+    // Clean up arrays
     configToSend.hiddenLists = Array.from(new Set(configToSend.hiddenLists || []));
     configToSend.removedLists = Array.from(new Set(configToSend.removedLists || []));
     configToSend.customMediaTypeNames = configToSend.customMediaTypeNames || {};
     
-    // Don't expose environment TMDB Bearer Token in config
-    if (configToSend.tmdbBearerToken === TMDB_BEARER_TOKEN) {
-      configToSend.tmdbBearerToken = '';
-    }
+    // Add connection status flags (non-sensitive)
+    configToSend.isConnected = {
+      mdblist: !!req.userConfig.apiKey,
+      rpdb: !!req.userConfig.rpdbApiKey,
+      tmdb: !!(req.userConfig.tmdbSessionId && req.userConfig.tmdbAccountId),
+      trakt: !!req.userConfig.traktAccessToken,
+      upstash: !!(req.userConfig.upstashUrl && req.userConfig.upstashToken)
+    };
     
     res.json({ 
       success: true, 

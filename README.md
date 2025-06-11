@@ -4,9 +4,12 @@ AIOLists is a stateless open source list management addon for Stremio. The proje
 
 # ✨ Features
 - **Unified List Management:** Import and manage lists from various sources in one place.
-- **MDBList & Trakt URL Imports:** Directly import lists by pasting URLs from MDBList.com and Trakt.tv.
+- **Unified Search:** Choose between Cinemeta, Trakt, TMDB or all 3 aggregated search.
+- **Metadata:** Choose between Cinemeta or TMDB metadata, and choose between one of their extensive set of supported languages.
+- **MDBList & Trakt URL Imports:** Directly import lists by pasting URLs from MDBList.com and Trakt.tv no API key or connection needed.
 - **Trakt Integration:** Connect your Trakt account to access personal lists, watchlist, recommendations, trending, and popular content.
-- **External Addon Importing:** Import lists from other Stremio addons, should support most popular ones.
+- **MDBList Integration:** Enter your MDBList API Key and import all your personal lists and watchlists into one place.
+- **External Lists from Addon:** From letterboxd to anime lists import manifest.json from any external addon into AIOLists.
 - **Sorting:** If the sorting option exists it's there.
 - **List Customization:**
     - **Change type:** Instead of movies/series change it to whatever you want, even make it blank.
