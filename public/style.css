@@ -861,6 +861,74 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
   height: 28px; /* Match large button height */
   margin-left: 8px;
 }
+
+/* Custom HTML blurb row styling */
+.custom-blurb-row {
+  width: 100%;
+  padding: 20px 0;
+  margin: 0;
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #e9ecef;
+  display: flex;
+  justify-content: center;
+}
+
+.custom-blurb {
+  max-width: 800px;
+  width: 100%;
+  padding: 0 40px;
+  font-size: 14px;
+  color: #666;
+  line-height: 1.5;
+  text-align: left;
+  overflow: hidden; /* Clear floats */
+}
+
+.custom-blurb p {
+  margin: 12px 0;
+  line-height: 1.6;
+}
+
+.custom-blurb img {
+  /* No width/height restrictions - allow HTML attributes and inline styles to control sizing */
+  border-radius: 6px;
+  /* All sizing and positioning styles are handled inline for maximum flexibility */
+}
+
+.custom-blurb a {
+  color: #4CAF50; /* Use app's green theme for links */
+  text-decoration: none;
+  transition: color 0.2s ease;
+  font-weight: 500;
+}
+
+.custom-blurb a:hover {
+  color: #45a049; /* Darker green on hover */
+  text-decoration: underline;
+}
+
+.custom-blurb br {
+  line-height: 1.8; /* Ensure proper spacing for line breaks */
+}
+
+.custom-blurb * {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Responsive design for smaller screens */
+@media (max-width: 768px) {
+  .custom-blurb {
+    padding: 0px;
+    font-size: 13px;
+  }
+  
+  .custom-blurb img {
+    max-height: 60px;
+    max-width: 60px;
+    margin: 0 8px 8px 0;
+  }
+}
 .github-button, .github-button:visited, .github-button:focus, .github-button:active {
     text-decoration: none !important;
     outline: none !important;

@@ -1938,7 +1938,18 @@ module.exports = function(router) {
     }
   });
 
-  // Debug endpoint to check user config values
+  router.get('/custom-blurb', (req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
+    const customHtmlBlurb = process.env.CUSTOM_HTML_BLURB || '';
+    res.json({ 
+      success: true, 
+      htmlContent: customHtmlBlurb 
+    });
+  });
+
   router.get('/:configHash/debug/config', async (req, res) => {
     try {
       const debugInfo = {
