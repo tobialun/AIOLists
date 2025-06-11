@@ -880,7 +880,8 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
   font-size: 14px;
   color: #666;
   line-height: 1.5;
-  text-align: center;
+  text-align: left;
+  overflow: hidden; /* Clear floats */
 }
 
 .custom-blurb p {
@@ -889,14 +890,9 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
 }
 
 .custom-blurb img {
-  max-height: 80px;
-  max-width: 80px;
-  width: auto;
-  height: auto;
-  vertical-align: middle;
-  margin: 0 12px 12px 0;
+  /* No width/height restrictions - allow HTML attributes and inline styles to control sizing */
   border-radius: 6px;
-  display: inline-block;
+  /* All sizing and positioning styles are handled inline for maximum flexibility */
 }
 
 .custom-blurb a {

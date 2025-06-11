@@ -1938,9 +1938,11 @@ module.exports = function(router) {
     }
   });
 
-  // Debug endpoint to check user config values
-  // Simple endpoint to get custom HTML blurb from environment variable
   router.get('/custom-blurb', (req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    
     const customHtmlBlurb = process.env.CUSTOM_HTML_BLURB || '';
     res.json({ 
       success: true, 
