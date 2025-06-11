@@ -1939,6 +1939,15 @@ module.exports = function(router) {
   });
 
   // Debug endpoint to check user config values
+  // Simple endpoint to get custom HTML blurb from environment variable
+  router.get('/custom-blurb', (req, res) => {
+    const customHtmlBlurb = process.env.CUSTOM_HTML_BLURB || '';
+    res.json({ 
+      success: true, 
+      htmlContent: customHtmlBlurb 
+    });
+  });
+
   router.get('/:configHash/debug/config', async (req, res) => {
     try {
       const debugInfo = {

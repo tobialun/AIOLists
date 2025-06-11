@@ -191,6 +191,27 @@ const tmdbLanguages = [
   { iso_639_1: "yo", english_name: "Yoruba" }
 ];
 
+// Load custom HTML blurb from server
+async function loadCustomBlurb() {
+  try {
+    const response = await fetch('/api/custom-blurb');
+    const data = await response.json();
+    
+    if (data.success && data.htmlContent && data.htmlContent.trim()) {
+      const container = document.getElementById('customBlurbContainer');
+      const content = document.getElementById('customBlurbContent');
+      
+      if (container && content) {
+        content.innerHTML = data.htmlContent;
+        container.style.display = 'block';
+      }
+    }
+  } catch (error) {
+    console.warn('Failed to load custom blurb:', error);
+    // Fail silently - custom blurb is optional
+  }
+}
+
 // Re-introduce defaultConfig for sort options, as server won't send them in /config or /lists responses
 const defaultConfig = {
   availableSortOptions: [
@@ -417,6 +438,10 @@ document.addEventListener('DOMContentLoaded', function() {
     updateURLAndLoadData();
     createCopyConfigHashButton();
     createCopyBlankCharButton();
+    
+    // Load custom HTML blurb
+    await loadCustomBlurb();
+    
     if(elements.settingsContent) elements.settingsContent.style.display = 'none';
     if(elements.settingsArrow) elements.settingsArrow.textContent = '▶';
     if(elements.settingsSection) elements.settingsSection.classList.remove('open');

@@ -12,7 +12,6 @@ module.exports = function(router) {
 
   // Handle TMDB callback redirects at /{configHash}/configure
   router.get('/:configHash/configure', (req, res) => {
-    // The frontend will handle the TMDB callback with the request_token in the URL
     res.sendFile(path.join(__dirname, '..', '..', 'public', 'index.html'));
   });
 

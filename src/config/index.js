@@ -8,6 +8,7 @@ const TRAKT_CLIENT_ID = process.env.TRAKT_CLIENT_ID || '490414ec03fe9a33b2d0c16d
 const TRAKT_REDIRECT_URI = process.env.TRAKT_REDIRECT_URI || 'urn:ietf:wg:oauth:2.0:oob';
 const TMDB_REDIRECT_URI = process.env.TMDB_REDIRECT_URI || '';
 const TMDB_BEARER_TOKEN = process.env.TMDB_BEARER_TOKEN || '';
+const CUSTOM_HTML_BLURB = process.env.CUSTOM_HTML_BLURB || '';
 
 const staticGenres = [
   "All","Action", "Adventure", "Animation", "Anime", "Biography", "Comedy", "Crime",
@@ -88,6 +89,7 @@ module.exports = {
   TRAKT_REDIRECT_URI,
   TMDB_REDIRECT_URI,
   TMDB_BEARER_TOKEN,
+  CUSTOM_HTML_BLURB,
   PORT,
   IS_PRODUCTION,
   staticGenres
