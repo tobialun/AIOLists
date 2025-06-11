@@ -637,42 +637,51 @@ async function createAddon(userConfig) {
     }
   }
   
-  if (userConfig.listOrder && userConfig.listOrder.length > 0) {
+  // Only apply custom sorting if user has explicitly reordered lists
+  const hasCustomOrder = userConfig.listOrder && Array.isArray(userConfig.listOrder) && userConfig.listOrder.length > 0;
+  
+  if (hasCustomOrder) {
     const orderMap = new Map();
     userConfig.listOrder.forEach((id, index) => {
         orderMap.set(String(id), index);
     });
 
-    tempGeneratedCatalogs.sort((a, b) => {
-        const idA_base = String(a.id); 
-        const idB_base = String(b.id);
+    // Create a stable sort by using the original index as a tie-breaker
+    const catalogsWithIndex = tempGeneratedCatalogs.map((catalog, index) => ({ catalog, originalIndex: index }));
+    
+    catalogsWithIndex.sort((a, b) => {
+        const idA_base = String(a.catalog.id); 
+        const idB_base = String(b.catalog.id);
         const indexA = orderMap.get(idA_base);
         const indexB = orderMap.get(idB_base);
 
         if (indexA !== undefined && indexB !== undefined) {
             if (indexA === indexB) { 
                 const typeOrder = { 'movie': 1, 'series': 2 }; // Prioritize movie then series if IDs are same
-                let priorityA = typeOrder[a.type];
-                let priorityB = typeOrder[b.type];
-                if (customMediaTypeNames?.[idA_base] === a.type || a.type === 'all' || !priorityA ) priorityA = 0;
-                if (customMediaTypeNames?.[idB_base] === b.type || b.type === 'all' || !priorityB ) priorityB = 0;
+                let priorityA = typeOrder[a.catalog.type];
+                let priorityB = typeOrder[b.catalog.type];
+                if (customMediaTypeNames?.[idA_base] === a.catalog.type || a.catalog.type === 'all' || !priorityA ) priorityA = 0;
+                if (customMediaTypeNames?.[idB_base] === b.catalog.type || b.catalog.type === 'all' || !priorityB ) priorityB = 0;
                 
-                return priorityA - priorityB;
+                if (priorityA !== priorityB) return priorityA - priorityB;
+                // Final tie-breaker: maintain original order
+                return a.originalIndex - b.originalIndex;
             }
             return indexA - indexB; 
         }
         if (indexA !== undefined) return -1; 
         if (indexB !== undefined) return 1;  
-        const nameCompare = (a.name || '').localeCompare(b.name || '');
-        if (nameCompare !== 0) return nameCompare;
-        return (a.type || '').localeCompare(b.type || ''); 
+        // For items not in listOrder, maintain original order (stable sort)
+        return a.originalIndex - b.originalIndex;
     });
-  } else { 
-    tempGeneratedCatalogs.sort((a, b) => {
-        const nameCompare = (a.name || '').localeCompare(b.name || '');
-        if (nameCompare !== 0) return nameCompare;
-        return (a.type || '').localeCompare(b.type || '');
-    });
+    
+    // Extract the sorted catalogs
+    tempGeneratedCatalogs = catalogsWithIndex.map(item => item.catalog);
+    
+    console.log(`[AddonBuilder] Applied custom list ordering (${userConfig.listOrder.length} items in order)`);
+  } else {
+    console.log(`[AddonBuilder] No custom list ordering - preserving natural order (append to bottom)`);
+    // No sorting whatsoever - catalogs remain in the exact order they were added
   }
 
   // Add search catalogs - create separate movie/series catalogs (multi search disabled)

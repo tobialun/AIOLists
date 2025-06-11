@@ -1428,18 +1428,11 @@ document.addEventListener('DOMContentLoaded', function() {
       if (data.configHash) {
           state.configHash = data.configHash;
           
-          // Update Trakt connection state
-          state.userConfig.traktAccessToken = 'connected'; // Don't store actual token
-          state.userConfig.traktRefreshToken = 'connected';
-          state.userConfig.traktExpiresAt = new Date(Date.now() + 86400000).toISOString(); // 24 hours from now
-          if (data.uuid) state.userConfig.traktUuid = data.uuid;
-          
-          updateURL();
-          updateStremioButtonHref();
-          updateTraktUI(true); // Explicitly update UI before reloading
-          
-          showNotification('connections', 'Successfully connected to Trakt!', 'success');
-          await loadConfiguration(); 
+                updateURL();
+      updateStremioButtonHref();
+      
+      showNotification('connections', 'Successfully connected to Trakt!', 'success');
+      await loadConfiguration(); 
       } else {
           throw new Error("Received success from server but no new config hash.");
       }
@@ -2977,13 +2970,12 @@ function startNameEditing(listItemElement, list) {
       
       // Update state
       state.configHash = data.configHash;
-      // Don't override the backend values - let them persist from the backend response
       
       updateURL();
       updateStremioButtonHref();
       
       // Reload configuration to get the actual session values from backend
-      await loadConfig();
+      await loadConfiguration();
       
       updateTmdbConnectionUI(true, data.username);
       
@@ -3022,12 +3014,6 @@ function startNameEditing(listItemElement, list) {
       
       // Update state
       state.configHash = data.configHash;
-      
-      // Update Trakt connection state
-      state.userConfig.traktAccessToken = 'connected'; // Don't store actual token
-      state.userConfig.traktRefreshToken = 'connected';
-      state.userConfig.traktExpiresAt = new Date(Date.now() + 86400000).toISOString(); // 24 hours from now
-      if (data.uuid) state.userConfig.traktUuid = data.uuid;
       
       updateURL();
       updateStremioButtonHref();

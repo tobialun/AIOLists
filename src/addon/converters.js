@@ -180,9 +180,13 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null, metadataCo
         rpdbLanguage = metadataConfig.tmdbLanguage.split('-')[0];
       }
       
-      console.log(`[RPDB] Fetching posters for ${imdbIds.length} items with language: ${rpdbLanguage || 'default'}`);
+      // Check if using free t0 key which doesn't support language parameters
+      const isFreeT0Key = rpdbApiKey === 't0-free-rpdb';
+      const effectiveLanguage = isFreeT0Key ? null : rpdbLanguage;
       
-      const posterMap = await batchFetchPosters(imdbIds, rpdbApiKey, rpdbLanguage);
+      console.log(`[RPDB] Fetching posters for ${imdbIds.length} items with language: ${effectiveLanguage || 'default'}${isFreeT0Key ? ' (free t0 key - no language support)' : ''}`);
+      
+      const posterMap = await batchFetchPosters(imdbIds, rpdbApiKey, effectiveLanguage);
       
       // Apply RPDB posters to items (RPDB takes priority over metadata source posters)
       Object.entries(posterMap).forEach(([imdbId, posterUrl]) => {
@@ -190,14 +194,12 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null, metadataCo
           const itemIndices = itemImdbIdMap.get(imdbId);
           itemIndices.forEach(index => {
             if (itemsToProcess[index]) {
-              console.log(`[RPDB] Applying poster for ${imdbId}: ${posterUrl}`);
               itemsToProcess[index].poster = posterUrl;
             }
           });
         }
       });
       
-      console.log(`[RPDB] Applied ${Object.keys(posterMap).filter(k => posterMap[k]).length} posters out of ${imdbIds.length} requested`);
     } else {
       console.log(`[RPDB] No valid IMDB IDs found for poster fetching from ${itemsToProcess.length} items`);
     }

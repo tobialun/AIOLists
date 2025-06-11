@@ -15,6 +15,21 @@ const { saveTraktTokens } = require('../utils/remoteStorage');
 
 const manifestCache = new Cache({ defaultTTL: 1 * 60 * 1000 });
 
+// Helper function to create a config copy for storage that excludes sensitive Trakt tokens when using Upstash
+function createConfigForStorage(userConfig) {
+  const configForStorage = { ...userConfig };
+  
+  // Only exclude Trakt tokens from storage if Upstash is configured and we have a traktUuid
+  // This ensures tokens can be retrieved from Upstash when needed
+  if (configForStorage.upstashUrl && configForStorage.traktUuid) {
+    configForStorage.traktAccessToken = null;
+    configForStorage.traktRefreshToken = null;
+    configForStorage.traktExpiresAt = null;
+  }
+  
+  return configForStorage;
+}
+
 function purgeListConfigs(userConfig, listIdPrefixOrExactId, isExactId = false) {
   const idsToRemove = new Set();
 
@@ -93,6 +108,16 @@ module.exports = function(router) {
     try {
       req.userConfig = await decompressConfig(configHash);
       req.configHash = configHash;
+      
+      // If Upstash is configured and we have a traktUuid, try to load Trakt tokens before determining shared status
+      if (req.userConfig.upstashUrl && req.userConfig.traktUuid && !req.userConfig.traktAccessToken) {
+        try {
+          await initTraktApi(req.userConfig);
+        } catch (error) {
+          console.warn('Failed to load Trakt tokens from Upstash during config param processing:', error.message);
+        }
+      }
+      
       req.isPotentiallySharedConfig = (!req.userConfig.apiKey && Object.values(req.userConfig.importedAddons || {}).some(addon => addon.isMDBListUrlImport)) ||
                                      (!req.userConfig.traktAccessToken && Object.values(req.userConfig.importedAddons || {}).some(addon => addon.isTraktPublicList)) ||
                                      (!req.userConfig.traktAccessToken && (req.userConfig.listOrder || []).some(id => id.startsWith('trakt_') && !id.startsWith('traktpublic_')));
@@ -591,18 +616,25 @@ module.exports = function(router) {
   router.get('/:configHash/config', (req, res) => {
     const configToSend = JSON.parse(JSON.stringify(req.userConfig));
     
-    // Remove all sensitive data before sending to frontend
-    delete configToSend.apiKey;
-    delete configToSend.rpdbApiKey;
-    delete configToSend.tmdbBearerToken;
-    delete configToSend.tmdbSessionId;
-    delete configToSend.tmdbAccountId;
-    delete configToSend.traktAccessToken;
-    delete configToSend.traktRefreshToken;
-    delete configToSend.traktExpiresAt;
-    delete configToSend.traktUuid;
-    delete configToSend.upstashUrl;
-    delete configToSend.upstashToken;
+    // Always remove tmdbBearerToken if it's available from environment
+    if (TMDB_BEARER_TOKEN) {
+      delete configToSend.tmdbBearerToken;
+    }
+    
+    // Only remove sensitive data if this is a potentially shared config
+    if (req.isPotentiallySharedConfig) {
+      delete configToSend.apiKey;
+      delete configToSend.rpdbApiKey;
+      delete configToSend.tmdbBearerToken;
+      delete configToSend.tmdbSessionId;
+      delete configToSend.tmdbAccountId;
+      delete configToSend.traktAccessToken;
+      delete configToSend.traktRefreshToken;
+      delete configToSend.traktExpiresAt;
+      delete configToSend.traktUuid;
+      delete configToSend.upstashUrl;
+      delete configToSend.upstashToken;
+    }
     
     // Remove internal sort options that shouldn't be exposed
     delete configToSend.availableSortOptions;
@@ -676,7 +708,7 @@ module.exports = function(router) {
 
       if (configChanged) {
         req.userConfig.lastUpdated = new Date().toISOString();
-        const newConfigHash = await compressConfig(req.userConfig);
+        const newConfigHash = await compressConfig(createConfigForStorage(req.userConfig));
         manifestCache.clear();
         return res.json({ success: true, configHash: newConfigHash });
       }
@@ -694,6 +726,7 @@ module.exports = function(router) {
         req.userConfig.upstashUrl = upstashUrl || '';
         req.userConfig.upstashToken = upstashToken || '';
 
+        // Save Trakt tokens to Upstash but keep them in the active session
         if (upstashUrl && upstashToken && req.userConfig.traktAccessToken && req.userConfig.traktUuid) {
             const tokensToSave = {
                 accessToken: req.userConfig.traktAccessToken,
@@ -701,13 +734,15 @@ module.exports = function(router) {
                 expiresAt: req.userConfig.traktExpiresAt
             };
             await saveTraktTokens(req.userConfig, tokensToSave);
-            req.userConfig.traktAccessToken = null;
-            req.userConfig.traktRefreshToken = null;
-            req.userConfig.traktExpiresAt = null;
+            // Don't remove Trakt tokens from the active session - they'll be removed only from storage
+            
+            // Immediately verify that tokens are accessible from Upstash
+            await initTraktApi(req.userConfig);
         }
         
         req.userConfig.lastUpdated = new Date().toISOString();
-        const newConfigHash = await compressConfig(req.userConfig);
+        
+        const newConfigHash = await compressConfig(createConfigForStorage(req.userConfig));
         manifestCache.clear();
         res.json({ success: true, configHash: newConfigHash });
     } catch (error) {
@@ -1702,6 +1737,36 @@ module.exports = function(router) {
         }
       }
 
+      // Auto-populate listOrder if empty to preserve natural order and allow appending new lists
+      if ((!req.userConfig.listOrder || req.userConfig.listOrder.length === 0) && processedLists.length > 0) {
+          // Create initial order with random catalog first (if exists), then natural order
+          const randomCatalogList = processedLists.filter(list => list.id === 'random_mdblist_catalog');
+          const otherLists = processedLists.filter(list => list.id !== 'random_mdblist_catalog');
+          
+          // Preserve natural order from API responses (no sorting)
+          req.userConfig.listOrder = [
+              ...randomCatalogList.map(list => list.id),
+              ...otherLists.map(list => list.id)
+          ];
+          
+          configChangedByThisRequest = true;
+          console.log(`[API] Auto-populated listOrder with ${req.userConfig.listOrder.length} items in natural order`);
+      } else if (req.userConfig.listOrder && req.userConfig.listOrder.length > 0) {
+          // Check for new lists that aren't in the current order and append them
+          const currentOrderSet = new Set(req.userConfig.listOrder.map(String));
+          const newLists = processedLists.filter(list => !currentOrderSet.has(String(list.id)));
+          
+          if (newLists.length > 0) {
+              // Append new lists to the end of the current order
+              req.userConfig.listOrder = [
+                  ...req.userConfig.listOrder,
+                  ...newLists.map(list => list.id)
+              ];
+              configChangedByThisRequest = true;
+              console.log(`[API] Appended ${newLists.length} new lists to existing order: ${newLists.map(l => l.id).join(', ')}`);
+          }
+      }
+
       // Sort processedLists based on userConfig.listOrder
       if (req.userConfig.listOrder && req.userConfig.listOrder.length > 0) {
           const orderMap = new Map(req.userConfig.listOrder.map((id, index) => [String(id), index]));
@@ -1715,7 +1780,7 @@ module.exports = function(router) {
               if (b.id === 'random_mdblist_catalog' && a.id !== 'random_mdblist_catalog') return 1;
               return (a.name || '').localeCompare(b.name || '');
           });
-      } else { // Default sort if no listOrder specified
+      } else { // Default sort if no listOrder specified (fallback - should rarely happen now)
           processedLists.sort((a, b) => {
               if (a.id === 'random_mdblist_catalog' && b.id !== 'random_mdblist_catalog') return -1;
               if (b.id === 'random_mdblist_catalog' && a.id !== 'random_mdblist_catalog') return 1;
@@ -1742,16 +1807,10 @@ module.exports = function(router) {
       };
     
       if (configChangedByThisRequest) {
-        const configToSave = { ...req.userConfig };
+        // Update the lastUpdated timestamp on the active config
+        req.userConfig.lastUpdated = new Date().toISOString();
         
-        if (configToSave.upstashUrl) {
-            configToSave.traktAccessToken = null;
-            configToSave.traktRefreshToken = null;
-            configToSave.traktExpiresAt = null;
-        }
-
-        configToSave.lastUpdated = new Date().toISOString();
-        const newConfigHash = await compressConfig(configToSave);
+                 const newConfigHash = await compressConfig(createConfigForStorage(req.userConfig));
         responsePayload.newConfigHash = newConfigHash;
         
         if (req.configHash !== newConfigHash) {

@@ -103,6 +103,9 @@ function createShareableConfig(config) {
 
   delete shareableConfig.apiKey;
   delete shareableConfig.rpdbApiKey;
+  delete shareableConfig.tmdbBearerToken;
+  delete shareableConfig.tmdbSessionId;
+  delete shareableConfig.tmdbAccountId;
   delete shareableConfig.traktAccessToken;
   delete shareableConfig.traktRefreshToken;
   delete shareableConfig.traktExpiresAt;
