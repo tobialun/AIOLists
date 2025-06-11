@@ -1035,7 +1035,7 @@ module.exports = function(router) {
       }
 
       if (customMediaType && customMediaType.trim()) {
-        req.userConfig.customMediaTypeNames[String(listId)] = customMediaType.trim();
+        req.userConfig.customMediaTypeNames[String(listId)] = customMediaType.trim().toLowerCase();
       } else {
         delete req.userConfig.customMediaTypeNames[String(listId)];
       }
@@ -1406,7 +1406,8 @@ module.exports = function(router) {
       if (req.userConfig.enableRandomListFeature && req.userConfig.apiKey) {
         const manifestListId = 'random_mdblist_catalog';
         const customTypeName = req.userConfig.customMediaTypeNames?.[manifestListId];
-        let effectiveMediaTypeDisplay = customTypeName || 'All';
+        let effectiveMediaTypeDisplay = customTypeName ? 
+            customTypeName.charAt(0).toUpperCase() + customTypeName.slice(1) : 'All';
 
         const randomCatalogUIEntry = {
             id: manifestListId,
@@ -1543,16 +1544,17 @@ module.exports = function(router) {
       const isUserMerged = actualCanBeMerged ? (req.userConfig.mergedLists?.[manifestListId] !== false) : false;
       let defaultSort = { sort: (list.source === 'trakt') ? 'rank' : 'default', order: (list.source === 'trakt') ? 'asc' : 'desc' };
       if (list.source === 'trakt' && list.isTraktWatchlist) { defaultSort = { sort: 'added', order: 'desc' }; }
-      const customTypeName = req.userConfig.customMediaTypeNames?.[manifestListId];
-      let effectiveMediaTypeDisplay;
-      if (customTypeName) {
-          effectiveMediaTypeDisplay = customTypeName;
-      } else {
-          if (determinedHasMovies && determinedHasShows) effectiveMediaTypeDisplay = 'All';
-          else if (determinedHasMovies) effectiveMediaTypeDisplay = 'Movie';
-          else if (determinedHasShows) effectiveMediaTypeDisplay = 'Series';
-          else effectiveMediaTypeDisplay = 'N/A';
-      }
+                      const customTypeName = req.userConfig.customMediaTypeNames?.[manifestListId];
+                let effectiveMediaTypeDisplay;
+                if (customTypeName) {
+                    // Capitalize first letter for display while keeping storage lowercase
+                    effectiveMediaTypeDisplay = customTypeName.charAt(0).toUpperCase() + customTypeName.slice(1);
+                } else {
+                    if (determinedHasMovies && determinedHasShows) effectiveMediaTypeDisplay = 'All';
+                    else if (determinedHasMovies) effectiveMediaTypeDisplay = 'Movie';
+                    else if (determinedHasShows) effectiveMediaTypeDisplay = 'Series';
+                    else effectiveMediaTypeDisplay = 'N/A';
+                }
       // Set tag image based on source
       let tagImage = null;
       if (list.source === 'trakt') {
@@ -1597,7 +1599,8 @@ module.exports = function(router) {
                 const customTypeName = req.userConfig.customMediaTypeNames?.[addonGroupId];
                 let effectiveMediaTypeDisplay;
                 if (customTypeName) {
-                    effectiveMediaTypeDisplay = customTypeName;
+                    // Capitalize first letter for display while keeping storage lowercase
+                    effectiveMediaTypeDisplay = customTypeName.charAt(0).toUpperCase() + customTypeName.slice(1);
                 } else {
                     if (urlImportHasMovies && urlImportHasShows) effectiveMediaTypeDisplay = 'All';
                     else if (urlImportHasMovies) effectiveMediaTypeDisplay = 'Movie';
@@ -1659,7 +1662,8 @@ module.exports = function(router) {
                 let effectiveMediaTypeDisplay;
 
                 if (customTypeName) {
-                    effectiveMediaTypeDisplay = customTypeName;
+                    // Capitalize first letter for display while keeping storage lowercase
+                    effectiveMediaTypeDisplay = customTypeName.charAt(0).toUpperCase() + customTypeName.slice(1);
                 } else {
                     if (catTypeLower && !['movie', 'series', 'tv', 'all'].includes(catTypeLower)) {
                          effectiveMediaTypeDisplay = catTypeLower.charAt(0).toUpperCase() + catTypeLower.slice(1);

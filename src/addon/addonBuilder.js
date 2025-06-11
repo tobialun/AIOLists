@@ -220,7 +220,7 @@ async function createAddon(userConfig) {
   // Add types from customMediaTypeNames (user overrides)
   Object.values(userConfig.customMediaTypeNames || {}).forEach(type => {
       if (type && typeof type === 'string') {
-          allKnownTypes.add(type.toLowerCase());
+          allKnownTypes.add(type);
       }
   });
 
@@ -275,8 +275,8 @@ async function createAddon(userConfig) {
   if (enableRandomListFeature && randomMDBListUsernames && randomMDBListUsernames.length > 0) {
     const randomCatalogId = 'random_mdblist_catalog';
     let randomCatalogDisplayName = getManifestCatalogName(randomCatalogId, "Discovery", customListNames);
-     if (customMediaTypeNames?.[randomCatalogId]?.trim()){
-        randomCatalogDisplayName = customMediaTypeNames[randomCatalogId].trim();
+     if (customMediaTypeNames?.[randomCatalogId]){
+        randomCatalogDisplayName = customMediaTypeNames[randomCatalogId];
      }
     
     // Add note to name if no API key is available (will use public JSON)
@@ -290,7 +290,7 @@ async function createAddon(userConfig) {
     }
     tempGeneratedCatalogs.push({
         id: randomCatalogId,
-        type: customMediaTypeNames?.[randomCatalogId]?.trim() || 'all',
+        type: customMediaTypeNames?.[randomCatalogId] || 'all',
         name: randomCatalogDisplayName,
         extra: randomCatalogExtra,
         extraSupported: randomCatalogExtra.map(e => e.name)
@@ -353,7 +353,7 @@ async function createAddon(userConfig) {
     };
 
     if (isImportedSubCatalog) {
-        const manifestCatalogType = customMediaTypeNames?.[currentListId]?.trim() || listSourceInfo.type;
+        const manifestCatalogType = customMediaTypeNames?.[currentListId] || listSourceInfo.type;
 
         if (!manifestCatalogType) {
           console.warn(`[AIOLists AddonBuilder] Manifest catalog type for imported sub-catalog ${currentListId} is undefined (source type: ${listSourceInfo.type}). Skipping.`);
@@ -438,7 +438,7 @@ async function createAddon(userConfig) {
     }
 
     const sourceIsStructurallyMergeable = sourceHasMovies && sourceHasShows;
-    const customUserDefinedType = customMediaTypeNames?.[currentListId]?.trim();
+    const customUserDefinedType = customMediaTypeNames?.[currentListId];
     
     if (!sourceHasMovies && !sourceHasShows && !customUserDefinedType) {
         // If no content and no custom type, don't add catalog (unless it's explicitly an 'all' type list with no content yet)

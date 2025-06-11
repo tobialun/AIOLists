@@ -1641,9 +1641,8 @@ document.addEventListener('DOMContentLoaded', function() {
         (e) => { e.stopPropagation(); toggleListVisibility(li, String(list.id)); },
         isHiddenInManifest ? 'Click to Show in Stremio Manifest' : 'Click to Hide from Stremio Manifest'
     );
-     if (apiKeyMissing && state.isPotentiallySharedConfig && isRandomCatalog && !state.userConfig.apiKey) {
-        visibilityToggleBtn.style.display = 'none';
-     } else if (apiKeyMissing && state.isPotentiallySharedConfig && !isRandomCatalog) {
+     // Hide visibility toggle for random lists or when API key is missing for shared configs
+     if (isRandomCatalog || (apiKeyMissing && state.isPotentiallySharedConfig)) {
         visibilityToggleBtn.style.display = 'none';
      }
     
@@ -1671,7 +1670,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     let sortControlsContainer = null;
     const isSpecialTraktNonSortable = list.isTraktTrending || list.isTraktPopular || list.isTraktRecommendations;
-    const isSortableList = (list.source === 'mdblist' || list.source === 'mdblist_url' ||
+    const isMDBListUrlWithoutApiKey = list.source === 'mdblist_url' && !state.userConfig.apiKey;
+    const isSortableList = (list.source === 'mdblist' || (list.source === 'mdblist_url' && !isMDBListUrlWithoutApiKey) ||
                            (list.source === 'trakt' && (list.isTraktList || list.isTraktWatchlist)) ||
                            list.source === 'trakt_public' || list.id === 'random_mdblist_catalog')
                            && !isSpecialTraktNonSortable;
