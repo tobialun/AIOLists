@@ -591,18 +591,25 @@ module.exports = function(router) {
   router.get('/:configHash/config', (req, res) => {
     const configToSend = JSON.parse(JSON.stringify(req.userConfig));
     
-    // Remove all sensitive data before sending to frontend
-    delete configToSend.apiKey;
-    delete configToSend.rpdbApiKey;
-    delete configToSend.tmdbBearerToken;
-    delete configToSend.tmdbSessionId;
-    delete configToSend.tmdbAccountId;
-    delete configToSend.traktAccessToken;
-    delete configToSend.traktRefreshToken;
-    delete configToSend.traktExpiresAt;
-    delete configToSend.traktUuid;
-    delete configToSend.upstashUrl;
-    delete configToSend.upstashToken;
+    // Always remove tmdbBearerToken if it's available from environment
+    if (TMDB_BEARER_TOKEN) {
+      delete configToSend.tmdbBearerToken;
+    }
+    
+    // Only remove sensitive data if this is a potentially shared config
+    if (req.isPotentiallySharedConfig) {
+      delete configToSend.apiKey;
+      delete configToSend.rpdbApiKey;
+      delete configToSend.tmdbBearerToken;
+      delete configToSend.tmdbSessionId;
+      delete configToSend.tmdbAccountId;
+      delete configToSend.traktAccessToken;
+      delete configToSend.traktRefreshToken;
+      delete configToSend.traktExpiresAt;
+      delete configToSend.traktUuid;
+      delete configToSend.upstashUrl;
+      delete configToSend.upstashToken;
+    }
     
     // Remove internal sort options that shouldn't be exposed
     delete configToSend.availableSortOptions;
@@ -1702,6 +1709,36 @@ module.exports = function(router) {
         }
       }
 
+      // Auto-populate listOrder if empty to preserve natural order and allow appending new lists
+      if ((!req.userConfig.listOrder || req.userConfig.listOrder.length === 0) && processedLists.length > 0) {
+          // Create initial order with random catalog first (if exists), then natural order
+          const randomCatalogList = processedLists.filter(list => list.id === 'random_mdblist_catalog');
+          const otherLists = processedLists.filter(list => list.id !== 'random_mdblist_catalog');
+          
+          // Preserve natural order from API responses (no sorting)
+          req.userConfig.listOrder = [
+              ...randomCatalogList.map(list => list.id),
+              ...otherLists.map(list => list.id)
+          ];
+          
+          configChangedByThisRequest = true;
+          console.log(`[API] Auto-populated listOrder with ${req.userConfig.listOrder.length} items in natural order`);
+      } else if (req.userConfig.listOrder && req.userConfig.listOrder.length > 0) {
+          // Check for new lists that aren't in the current order and append them
+          const currentOrderSet = new Set(req.userConfig.listOrder.map(String));
+          const newLists = processedLists.filter(list => !currentOrderSet.has(String(list.id)));
+          
+          if (newLists.length > 0) {
+              // Append new lists to the end of the current order
+              req.userConfig.listOrder = [
+                  ...req.userConfig.listOrder,
+                  ...newLists.map(list => list.id)
+              ];
+              configChangedByThisRequest = true;
+              console.log(`[API] Appended ${newLists.length} new lists to existing order: ${newLists.map(l => l.id).join(', ')}`);
+          }
+      }
+
       // Sort processedLists based on userConfig.listOrder
       if (req.userConfig.listOrder && req.userConfig.listOrder.length > 0) {
           const orderMap = new Map(req.userConfig.listOrder.map((id, index) => [String(id), index]));
@@ -1715,7 +1752,7 @@ module.exports = function(router) {
               if (b.id === 'random_mdblist_catalog' && a.id !== 'random_mdblist_catalog') return 1;
               return (a.name || '').localeCompare(b.name || '');
           });
-      } else { // Default sort if no listOrder specified
+      } else { // Default sort if no listOrder specified (fallback - should rarely happen now)
           processedLists.sort((a, b) => {
               if (a.id === 'random_mdblist_catalog' && b.id !== 'random_mdblist_catalog') return -1;
               if (b.id === 'random_mdblist_catalog' && a.id !== 'random_mdblist_catalog') return 1;

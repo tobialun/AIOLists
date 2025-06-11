@@ -98,17 +98,21 @@ async function fetchPosterFromRPDB(imdbId, rpdbApiKey, language = null) {
     return null;
   }
   
-  const cacheKey = getPosterCacheKey(imdbId, rpdbApiKey, language);
+  // Check if this is the free t0 API key which doesn't support language parameters
+  const isFreeT0Key = rpdbApiKey === 't0-free-rpdb';
+  const effectiveLanguage = isFreeT0Key ? null : language;
+  
+  const cacheKey = getPosterCacheKey(imdbId, rpdbApiKey, effectiveLanguage);
   const cachedPoster = posterCache.get(cacheKey);
   if (cachedPoster) {
     return cachedPoster === 'null' ? null : cachedPoster;
   }
   
   try {
-    // Build URL with optional language parameter
+    // Build URL with optional language parameter (skip for free t0 key)
     let url = `https://api.ratingposterdb.com/${rpdbApiKey}/imdb/poster-default/${imdbId}.jpg`;
-    if (language) {
-      url += `?lang=${language}`;
+    if (effectiveLanguage && !isFreeT0Key) {
+      url += `?lang=${effectiveLanguage}`;
     }
     
     try {
@@ -119,8 +123,8 @@ async function fetchPosterFromRPDB(imdbId, rpdbApiKey, language = null) {
       if (headError.response?.status === 404) {
         // Try medium poster as fallback
         let mediumUrl = `https://api.ratingposterdb.com/${rpdbApiKey}/imdb/poster-medium/${imdbId}.jpg`;
-        if (language) {
-          mediumUrl += `?lang=${language}`;
+        if (effectiveLanguage && !isFreeT0Key) {
+          mediumUrl += `?lang=${effectiveLanguage}`;
         }
         
         try {
@@ -128,9 +132,9 @@ async function fetchPosterFromRPDB(imdbId, rpdbApiKey, language = null) {
           posterCache.set(cacheKey, mediumUrl);
           return mediumUrl;
         } catch (mediumHeadError) {
-          // If language-specific poster not found, try without language
-          if (language) {
-            console.log(`RPDB poster with language ${language} not found for ${imdbId}, trying default`);
+          // If language-specific poster not found and not using free t0 key, try without language
+          if (effectiveLanguage && !isFreeT0Key) {
+            console.log(`RPDB poster with language ${effectiveLanguage} not found for ${imdbId}, trying default`);
             const defaultUrl = `https://api.ratingposterdb.com/${rpdbApiKey}/imdb/poster-default/${imdbId}.jpg`;
             try {
               await axios.head(defaultUrl, { timeout: 10000, validateStatus: status => status === 200 });
