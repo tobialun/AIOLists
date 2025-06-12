@@ -652,6 +652,47 @@ async function fetchTmdbMetadata(tmdbId, type, language = 'en-US', userBearerTok
     
     const data = response.data;
     
+    // For series, also fetch season and episode data
+    if (type === 'series' && data.number_of_seasons) {
+      try {
+        console.log(`[TMDB] Fetching episode data for series ${tmdbId} with ${data.number_of_seasons} seasons`);
+        
+        // Fetch episode data for all seasons (limit to first 10 seasons for performance)
+        const maxSeasons = Math.min(data.number_of_seasons, 10);
+        const seasonPromises = [];
+        
+        for (let seasonNum = 0; seasonNum <= maxSeasons; seasonNum++) {
+          // Skip season 0 if it has no episodes or if there are too many seasons
+          if (seasonNum === 0 && data.number_of_seasons > 5) continue;
+          
+          seasonPromises.push(
+            axios.get(`${TMDB_BASE_URL_V3}/tv/${tmdbId}/season/${seasonNum}`, {
+              params: { language: language },
+              headers: {
+                'accept': 'application/json',
+                'Authorization': `Bearer ${userBearerToken || DEFAULT_TMDB_BEARER_TOKEN}`
+              },
+              timeout: TMDB_REQUEST_TIMEOUT
+            }).catch(error => {
+              console.warn(`[TMDB] Failed to fetch season ${seasonNum} for series ${tmdbId}:`, error.message);
+              return null;
+            })
+          );
+        }
+        
+        const seasonResponses = await Promise.all(seasonPromises);
+        const validSeasons = seasonResponses.filter(response => response && response.data);
+        
+        // Add episode data to the main data object
+        data.seasons_with_episodes = validSeasons.map(response => response.data);
+        
+        console.log(`[TMDB] Successfully fetched episode data for ${validSeasons.length} seasons of series ${tmdbId}`);
+      } catch (error) {
+        console.warn(`[TMDB] Failed to fetch episode data for series ${tmdbId}:`, error.message);
+        // Continue without episode data if fetching fails
+      }
+    }
+
     // Convert TMDB format to Stremio-compatible format
     const stremioMeta = convertTmdbToStremioFormat(data, type);
     
@@ -701,7 +742,30 @@ function convertTmdbToStremioFormat(tmdbData, type) {
   const releaseDate = isMovie ? tmdbData.release_date : tmdbData.first_air_date;
   const releaseYear = releaseDate ? releaseDate.split('-')[0] : undefined;
   const releasedFormatted = releaseDate ? `${releaseDate}T00:00:00.000Z` : undefined;
+
+  // Format year and releaseInfo for series to match Cinemeta format
+  let formattedYear = releaseYear;
+  let formattedReleaseInfo = releaseYear;
   
+  if (!isMovie && releaseYear) {
+    // For series, check if it's still ongoing or ended
+    const lastAirDate = tmdbData.last_air_date;
+    const status = tmdbData.status;
+    
+    if (status === 'Returning Series' || status === 'In Production' || !lastAirDate) {
+      // Ongoing series - format as "1999-"
+      formattedYear = `${releaseYear}-`;
+      formattedReleaseInfo = `${releaseYear}-`;
+    } else if (lastAirDate && lastAirDate !== releaseDate) {
+      // Ended series - format as "1999-2009"
+      const endYear = lastAirDate.split('-')[0];
+      if (endYear !== releaseYear) {
+        formattedYear = `${releaseYear}-${endYear}`;
+        formattedReleaseInfo = `${releaseYear}-${endYear}`;
+      }
+    }
+  }
+
   // Get logos from TMDB images
   let logo = undefined;
   if (tmdbData.images?.logos && tmdbData.images.logos.length > 0) {
@@ -717,6 +781,54 @@ function convertTmdbToStremioFormat(tmdbData, type) {
     photo: person.profile_path ? `https://image.tmdb.org/t/p/w276_and_h350_face${person.profile_path}` : undefined
   })) || [];
 
+
+  // Process episodes for series
+  let videos = [];
+  if (!isMovie && tmdbData.seasons_with_episodes) {
+    console.log(`[TMDB] Processing episodes for series ${tmdbData.id}`);
+    
+    tmdbData.seasons_with_episodes.forEach(season => {
+      if (season.episodes && Array.isArray(season.episodes)) {
+        season.episodes.forEach(episode => {
+          // Use IMDB ID for episode IDs if available, otherwise use TMDB format
+          const episodeId = imdbId && imdbId.startsWith('tt') ? 
+            `${imdbId}:${season.season_number}:${episode.episode_number}` :
+            `${tmdbId}:${season.season_number}:${episode.episode_number}`;
+          
+          // Format air date if available
+          let airDateFormatted = null;
+          if (episode.air_date) {
+            airDateFormatted = `${episode.air_date}T00:00:00.001Z`;
+          }
+          
+          videos.push({
+            id: episodeId,
+            name: episode.name || `Episode ${episode.episode_number}`,
+            season: season.season_number,
+            number: episode.episode_number,
+            episode: episode.episode_number,
+            thumbnail: episode.still_path ? `https://image.tmdb.org/t/p/w500${episode.still_path}` : null,
+            overview: episode.overview || "",
+            description: episode.overview || "",
+            rating: episode.vote_average ? episode.vote_average.toString() : "0",
+            firstAired: airDateFormatted,
+            released: airDateFormatted
+          });
+        });
+      }
+    });
+    
+    // Sort episodes by season and episode number
+    videos.sort((a, b) => {
+      if (a.season !== b.season) {
+        return a.season - b.season;
+      }
+      return a.episode - b.episode;
+    });
+    
+    console.log(`[TMDB] Processed ${videos.length} episodes for series ${tmdbData.id}`);
+  }
+
   // Build comprehensive metadata object similar to Cinemeta structure
   const metadata = {
     id: tmdbId,
@@ -726,8 +838,8 @@ function convertTmdbToStremioFormat(tmdbData, type) {
     description: tmdbData.overview || "",
     poster: tmdbData.poster_path ? `https://image.tmdb.org/t/p/w500${tmdbData.poster_path}` : undefined,
     background: tmdbData.backdrop_path ? `https://image.tmdb.org/t/p/w1280${tmdbData.backdrop_path}` : undefined,
-    releaseInfo: releaseYear,
-    year: releaseYear,
+    releaseInfo: formattedReleaseInfo,
+    year: formattedYear,
     released: releasedFormatted,
     runtime: isMovie ? 
       (tmdbData.runtime ? `${tmdbData.runtime} min` : undefined) :
@@ -743,7 +855,7 @@ function convertTmdbToStremioFormat(tmdbData, type) {
       (tmdbData.origin_country?.[0] || 'Unknown'),
     trailers: trailers.length > 0 ? trailerVideos.map(video => ({ source: video.key, type: 'Trailer' })) : undefined,
     trailerStreams: trailerStreams.length > 0 ? trailerStreams : undefined,
-    videos: [], // Cinemeta compatibility - empty array for now
+    videos: videos, // Cinemeta compatibility - empty array for now
     status: !isMovie ? tmdbData.status : undefined,
     tmdbId: tmdbData.id,
     moviedb_id: tmdbData.id, // Cinemeta compatibility
@@ -850,16 +962,17 @@ function convertTmdbToStremioFormat(tmdbData, type) {
   // Add slug for Stremio compatibility
   if (metadata.name && metadata.releaseInfo) {
     const slugTitle = metadata.name.toLowerCase()
-      .replace(/[^a-z0-9\s-]/g, '')
+      .replace(/[^\w\s-]/g, '')
       .replace(/\s+/g, '-')
       .replace(/-+/g, '-')
-      .trim('-');
+      .replace(/^-+|-+$/g, '');
     
     // Use IMDB ID for slug if available, otherwise use TMDB ID
     const idForSlug = imdbId && imdbId.startsWith('tt') ? 
       imdbId.replace('tt', '') : 
       tmdbData.id;
-    metadata.slug = `${type}/${slugTitle}-${idForSlug}`;
+      const finalSlugTitle = slugTitle || 'content';
+      metadata.slug = `${type}/${finalSlugTitle}-${idForSlug}`;
   }
   
   return metadata;
