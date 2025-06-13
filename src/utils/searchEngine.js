@@ -5,6 +5,9 @@ const CINEMETA_BASE = 'https://v3-cinemeta.strem.io';
 const TMDB_BASE_URL_V3 = 'https://api.themoviedb.org/3';
 const TMDB_REQUEST_TIMEOUT = 15000;
 
+// Cache for external IDs to avoid excessive API calls
+const externalIdCache = new Map();
+
 /**
  * Search content across multiple sources
  * @param {Object} params - Search parameters
@@ -75,9 +78,35 @@ async function searchContent({ query, type = 'all', sources = ['cinemeta'], limi
       }
     }
 
+    // Enhance TMDB results with full metadata if TMDB language is configured
+    const tmdbLanguage = userConfig.tmdbLanguage;
+    const tmdbBearerToken = userConfig.tmdbBearerToken || TMDB_BEARER_TOKEN;
+    const metadataSource = userConfig.metadataSource;
+    
+    // Apply enhancement if:
+    // 1. TMDB language is set and different from English, OR
+    // 2. User has set TMDB as their preferred metadata source (regardless of language)
+    const shouldEnhanceTmdbResults = tmdbBearerToken && (
+      (tmdbLanguage && tmdbLanguage !== 'en-US') || 
+      (metadataSource === 'tmdb')
+    );
+    
+    let finalResults = uniqueResults;
+    
+    if (shouldEnhanceTmdbResults) {
+      const effectiveLanguage = tmdbLanguage || 'en-US';
+      console.log(`[Search] Enhancing search results with TMDB metadata (language: ${effectiveLanguage}, source preference: ${metadataSource})`);
+      finalResults = await enhanceSearchResultsWithTmdbLanguage(uniqueResults, effectiveLanguage, tmdbBearerToken, userConfig);
+      console.log(`[Search] Enhanced ${finalResults.length} results with TMDB metadata`);
+    } else if (userConfig.rpdbApiKey) {
+      // Apply RPDB posters even when not enhancing with TMDB language
+      console.log(`[Search] Applying RPDB posters to search results (${uniqueResults.length} results)`);
+      finalResults = await applyRpdbPostersToSearchResults(uniqueResults, userConfig);
+    }
+
     return {
-      results: uniqueResults.slice(0, limit),
-      totalResults: uniqueResults.length,
+      results: finalResults.slice(0, limit),
+      totalResults: finalResults.length,
       sources: successfulSources
     };
 
@@ -183,7 +212,7 @@ async function searchTMDBMulti(query, limit, userConfig) {
           // Get external IDs to find IMDb ID
           const externalIds = await getTMDBExternalIds(item.id, item.media_type, userConfig.tmdbBearerToken || TMDB_BEARER_TOKEN);
           
-          results.push(convertTMDBItemToStremioFormat(item, item.media_type, externalIds.imdb_id));
+          results.push(convertTMDBItemToStremioFormat(item, item.media_type, externalIds.imdb_id, language));
         } catch (error) {
           console.error(`Error processing TMDB multi result:`, error.message);
         }
@@ -369,7 +398,7 @@ async function searchTMDBContent(query, type, limit, bearerToken, language) {
           // Get external IDs to find IMDb ID
           const externalIds = await getTMDBExternalIds(item.id, searchType, bearerToken);
           
-          results.push(convertTMDBItemToStremioFormat(item, searchType, externalIds.imdb_id));
+          results.push(convertTMDBItemToStremioFormat(item, searchType, externalIds.imdb_id, language));
         }
       }
     } catch (error) {
@@ -452,7 +481,7 @@ async function searchTMDBByPerson(query, type, limit, bearerToken, language) {
             // Get external IDs for each credit
             const externalIds = await getTMDBExternalIds(credit.id, credit.media_type, bearerToken);
             
-            const convertedItem = convertTMDBItemToStremioFormat(credit, credit.media_type, externalIds.imdb_id);
+            const convertedItem = convertTMDBItemToStremioFormat(credit, credit.media_type, externalIds.imdb_id, language);
             
             // Add person context
             convertedItem.foundVia = `${person.name} (${credit.job || 'Cast'})`;
@@ -496,30 +525,73 @@ async function getTMDBExternalIds(tmdbId, mediaType, bearerToken) {
 }
 
 /**
- * Convert TMDB item to Stremio format
+ * Convert TMDB item to Stremio format with enhanced metadata handling
  * @param {Object} item - TMDB item
  * @param {string} mediaType - 'movie' or 'tv'
  * @param {string} imdbId - IMDb ID
+ * @param {string} language - Language code for proper metadata formatting
  * @returns {Object} Stremio formatted item
  */
-function convertTMDBItemToStremioFormat(item, mediaType, imdbId) {
+function convertTMDBItemToStremioFormat(item, mediaType, imdbId, language = 'en-US') {
   const isMovie = mediaType === 'movie';
+  
+  // Format release year and date information
+  const releaseDate = isMovie ? item.release_date : item.first_air_date;
+  const releaseYear = releaseDate ? releaseDate.split('-')[0] : undefined;
+  
+  // Enhanced year formatting for series (ongoing vs ended)
+  let formattedYear = releaseYear;
+  if (!isMovie && releaseYear) {
+    const lastAirDate = item.last_air_date;
+    const status = item.status;
+    
+    if (status === 'Returning Series' || status === 'In Production' || !lastAirDate) {
+      formattedYear = `${releaseYear}-`; // Ongoing series
+    } else if (lastAirDate && lastAirDate !== releaseDate) {
+      const endYear = lastAirDate.split('-')[0];
+      if (endYear !== releaseYear) {
+        formattedYear = `${releaseYear}-${endYear}`; // Ended series
+      }
+    }
+  }
+  
+  // Enhanced genre handling - convert genre_ids to names if available
+  let genres = undefined;
+  if (item.genres && Array.isArray(item.genres)) {
+    genres = item.genres.map(g => g.name || g);
+  } else if (item.genre_ids && Array.isArray(item.genre_ids)) {
+    // For search results, TMDB API sometimes returns genre_ids instead of genre objects
+    // We could map these to genre names, but for now we'll leave it undefined
+    // since the enhancement function will fetch full metadata
+    genres = undefined;
+  }
   
   return {
     id: imdbId || `tmdb:${item.id}`,
+    imdb_id: imdbId, // Always include imdb_id for cross-referencing
     type: isMovie ? 'movie' : 'series',
     name: isMovie ? item.title : item.name,
     poster: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : undefined,
     background: item.backdrop_path ? `https://image.tmdb.org/t/p/w1280${item.backdrop_path}` : undefined,
-    description: item.overview,
-    releaseInfo: isMovie ? 
-      (item.release_date ? item.release_date.split('-')[0] : undefined) :
-      (item.first_air_date ? item.first_air_date.split('-')[0] : undefined),
+    description: item.overview || '',
+    releaseInfo: formattedYear,
+    year: formattedYear,
+    released: releaseDate ? `${releaseDate}T00:00:00.000Z` : undefined,
     imdbRating: item.vote_average ? item.vote_average.toFixed(1) : undefined,
-    genres: item.genre_ids ? undefined : item.genres?.map(g => g.name), // genre_ids would need additional lookup
+    genres: genres,
+    // TMDB specific fields for reference
     tmdbId: item.id,
     tmdbRating: item.vote_average,
-    popularity: item.popularity
+    popularity: item.popularity || 0,
+    // Additional metadata fields that might be available
+    status: !isMovie ? item.status : undefined,
+    originalLanguage: item.original_language,
+    // Preserve adult content flag
+    adult: item.adult,
+    // Country information
+    country: isMovie ? 
+      (item.production_countries?.[0]?.name || item.origin_country?.[0] || undefined) :
+      (item.origin_country?.[0] || undefined)
   };
 }
 
@@ -602,6 +674,232 @@ async function searchTrakt(query, type, limit, userConfig) {
   }
 }
 
+/**
+ * Apply RPDB posters to search results
+ * @param {Array} results - Search results
+ * @param {Object} userConfig - User configuration
+ * @returns {Promise<Array>} Results with RPDB posters applied
+ */
+async function applyRpdbPostersToSearchResults(results, userConfig) {
+  if (!userConfig.rpdbApiKey || !results.length) {
+    return results;
+  }
+
+  try {
+    // Extract IMDB IDs from search results
+    const imdbIds = [];
+    const itemImdbIdMap = new Map();
+    
+    results.forEach((item, index) => {
+      let imdbId = null;
+      
+      // Priority 1: Direct IMDB ID in item.id
+      if (item.id && item.id.startsWith('tt')) {
+        imdbId = item.id;
+      }
+      // Priority 2: IMDB ID in imdb_id field
+      else if (item.imdb_id && item.imdb_id.startsWith('tt')) {
+        imdbId = item.imdb_id;
+      }
+      
+      if (imdbId) {
+        imdbIds.push(imdbId);
+        if (!itemImdbIdMap.has(imdbId)) {
+          itemImdbIdMap.set(imdbId, []);
+        }
+        itemImdbIdMap.get(imdbId).push(index);
+      }
+    });
+    
+    if (imdbIds.length === 0) {
+      console.log('[Search] No IMDB IDs found for RPDB poster fetching');
+      return results;
+    }
+
+    console.log(`[Search] Fetching RPDB posters for ${imdbIds.length} search results`);
+    
+    const { batchFetchPosters } = require('../utils/posters');
+    
+    // Extract language from user config for RPDB posters
+    let rpdbLanguage = null;
+    if (userConfig.tmdbLanguage && userConfig.tmdbLanguage !== 'en-US') {
+      rpdbLanguage = userConfig.tmdbLanguage.split('-')[0];
+    }
+    
+    // Check if using free t0 key which doesn't support language parameters
+    const isFreeT0Key = userConfig.rpdbApiKey === 't0-free-rpdb';
+    const effectiveLanguage = isFreeT0Key ? null : rpdbLanguage;
+    
+    const posterMap = await batchFetchPosters(imdbIds, userConfig.rpdbApiKey, effectiveLanguage);
+    
+    // Apply RPDB posters to results (create copy to avoid mutations)
+    const enhancedResults = results.map(item => ({ ...item }));
+    
+    Object.entries(posterMap).forEach(([imdbId, posterUrl]) => {
+      if (posterUrl && itemImdbIdMap.has(imdbId)) {
+        const itemIndices = itemImdbIdMap.get(imdbId);
+        itemIndices.forEach(index => {
+          if (enhancedResults[index]) {
+            enhancedResults[index].poster = posterUrl;
+          }
+        });
+      }
+    });
+    
+    const appliedPosters = Object.values(posterMap).filter(url => url).length;
+    console.log(`[Search] Applied ${appliedPosters} RPDB posters to search results`);
+    
+    return enhancedResults;
+    
+  } catch (error) {
+    console.error('[Search] Error applying RPDB posters:', error.message);
+    return results; // Return original results on error
+  }
+}
+
+/**
+ * Enhance search results with TMDB metadata in the user's preferred language
+ * @param {Array} results - Search results to enhance
+ * @param {string} language - TMDB language code
+ * @param {string} bearerToken - TMDB Bearer token
+ * @param {Object} userConfig - User configuration
+ * @returns {Promise<Array>} Enhanced results
+ */
+async function enhanceSearchResultsWithTmdbLanguage(results, language, bearerToken, userConfig) {
+  if (!results.length || !language || !bearerToken) {
+    return results;
+  }
+
+  const enhancedResults = [];
+  const CONCURRENCY_LIMIT = 5; // Process 5 items at a time to avoid overwhelming the API
+
+  // Split results into chunks for concurrent processing
+  const chunks = [];
+  for (let i = 0; i < results.length; i += CONCURRENCY_LIMIT) {
+    chunks.push(results.slice(i, i + CONCURRENCY_LIMIT));
+  }
+
+  for (const chunk of chunks) {
+    const chunkPromises = chunk.map(async (item) => {
+      try {
+        // Only enhance items that have IMDb IDs and aren't already fully enhanced
+        const imdbId = item.id?.startsWith('tt') ? item.id : item.imdb_id;
+        if (!imdbId || !imdbId.startsWith('tt')) {
+          return item; // Return unchanged if no IMDb ID
+        }
+
+        // Skip enhancement if item already has comprehensive metadata (likely from TMDB source)
+        if (item.tmdbId && item.genres && Array.isArray(item.genres) && item.genres.length > 0) {
+          console.log(`[Search] Skipping enhancement for "${item.name}" - already has comprehensive metadata`);
+          return item;
+        }
+
+        // Convert IMDb ID to TMDB ID and get enhanced metadata
+        const { convertImdbToTmdbId, fetchTmdbMetadata } = require('../integrations/tmdb');
+        const tmdbResult = await convertImdbToTmdbId(imdbId, bearerToken);
+        
+        if (tmdbResult && tmdbResult.tmdbId) {
+          const enhancedMetadata = await fetchTmdbMetadata(
+            tmdbResult.tmdbId, 
+            tmdbResult.type, 
+            language, 
+            bearerToken
+          );
+          
+          if (enhancedMetadata) {
+            // Merge enhanced metadata with original search result, ensuring TMDB metadata takes priority
+            // Use TMDB ID format when language is configured for better metadata serving
+            const usesTmdbId = language && language !== 'en-US' && enhancedMetadata.tmdbId;
+            const finalId = usesTmdbId ? `tmdb:${enhancedMetadata.tmdbId}` : imdbId;
+            
+            const enhanced = {
+              ...item, // Start with original item
+              ...enhancedMetadata, // Override with enhanced metadata (this should take priority for most fields)
+              // Use TMDB ID format when language preference is set
+              id: finalId,
+              imdb_id: imdbId, // Always preserve IMDb ID for cross-referencing
+              // Preserve search-specific fields that shouldn't be overridden
+              foundVia: item.foundVia,
+              score: item.score,
+              searchSource: item.searchSource || 'enhanced',
+              // Ensure critical TMDB fields are not accidentally overridden by original item
+              name: enhancedMetadata.name || item.name,
+              description: enhancedMetadata.description || item.description,
+              genres: enhancedMetadata.genres || item.genres,
+              cast: enhancedMetadata.cast || item.cast,
+              director: enhancedMetadata.director || item.director,
+              writer: enhancedMetadata.writer || item.writer,
+              poster: enhancedMetadata.poster || item.poster,
+              background: enhancedMetadata.background || item.background,
+              year: enhancedMetadata.year || item.year,
+              releaseInfo: enhancedMetadata.releaseInfo || item.releaseInfo,
+              country: enhancedMetadata.country || item.country,
+              runtime: enhancedMetadata.runtime || item.runtime,
+              status: enhancedMetadata.status || item.status
+            };
+            
+            console.log(`[Search] Enhanced "${enhanced.name}" with ${language} metadata:`);
+            console.log(`  - Description: ${enhanced.description ? enhanced.description.substring(0, 50) + '...' : 'N/A'}`);
+            console.log(`  - Genres: ${enhanced.genres?.length || 0} (${enhanced.genres?.join(', ') || 'N/A'})`);
+            console.log(`  - Cast: ${enhanced.cast?.length || 0} members`);
+            console.log(`  - ID format: ${finalId} (was: ${imdbId}, TMDB: ${enhancedMetadata.tmdbId})`);
+            if (usesTmdbId) {
+              console.log(`  - Using TMDB ID format for language-specific metadata serving`);
+            }
+            
+            // Apply RPDB posters if configured and we have an IMDb ID
+            if (userConfig.rpdbApiKey && imdbId && imdbId.startsWith('tt')) {
+              try {
+                const { batchFetchPosters } = require('../utils/posters');
+                
+                // Extract language from metadata config for RPDB posters
+                let rpdbLanguage = null;
+                if (language && language !== 'en-US') {
+                  // Convert TMDB language format (e.g., 'en-US') to RPDB language format (e.g., 'en')
+                  rpdbLanguage = language.split('-')[0];
+                }
+                
+                // Check if using free t0 key which doesn't support language parameters
+                const isFreeT0Key = userConfig.rpdbApiKey === 't0-free-rpdb';
+                const effectiveLanguage = isFreeT0Key ? null : rpdbLanguage;
+                
+                console.log(`[Search] Fetching RPDB poster for ${imdbId} with language: ${effectiveLanguage || 'default'}`);
+                
+                const posterMap = await batchFetchPosters([imdbId], userConfig.rpdbApiKey, effectiveLanguage);
+                const rpdbPoster = posterMap[imdbId];
+                
+                if (rpdbPoster) {
+                  enhanced.poster = rpdbPoster;
+                  console.log(`  - Applied RPDB poster: ${rpdbPoster.substring(0, 50)}...`);
+                }
+              } catch (error) {
+                console.warn(`[Search] Failed to fetch RPDB poster for ${imdbId}:`, error.message);
+              }
+            }
+            
+            return enhanced;
+          }
+        }
+        
+        return item; // Return unchanged if enhancement failed
+      } catch (error) {
+        console.warn(`[Search] Failed to enhance result for ${item.id || item.name}:`, error.message);
+        return item; // Return unchanged if enhancement failed
+      }
+    });
+
+    const chunkResults = await Promise.all(chunkPromises);
+    enhancedResults.push(...chunkResults);
+    
+    // Small delay between chunks to be respectful to the API
+    if (chunk !== chunks[chunks.length - 1]) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+
+  return enhancedResults;
+}
+
 module.exports = {
   searchContent,
   searchCinemeta,
@@ -609,5 +907,7 @@ module.exports = {
   searchTrakt,
   searchMulti,
   searchTMDBMulti,
-  searchTraktMulti
+  searchTraktMulti,
+  enhanceSearchResultsWithTmdbLanguage,
+  applyRpdbPostersToSearchResults
 }; 

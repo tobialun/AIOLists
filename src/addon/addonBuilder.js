@@ -192,7 +192,7 @@ async function createAddon(userConfig) {
   await initTraktApi(userConfig);
   const manifest = {
     id: 'org.stremio.aiolists',
-    version: `1.2.2-${Date.now()}`,
+    version: `1.2.3-${Date.now()}`,
     name: 'AIOLists',
     description: 'Manage all your lists in one place.',
     resources: ['catalog', 'meta'],
@@ -684,28 +684,49 @@ async function createAddon(userConfig) {
     // No sorting whatsoever - catalogs remain in the exact order they were added
   }
 
-  // Add search catalogs - create separate movie/series catalogs (multi search disabled)
-  const searchCatalogExtra = [
-    { name: "search", isRequired: true },
-    { name: "genre", isRequired: false, options: availableGenres }
-  ];
+  // Add search catalogs only if search sources are configured
+  const userSearchSources = userConfig.searchSources || ['cinemeta'];
+  let hasValidSearchSources = false;
   
-  // Create separate movie/series catalogs
-  tempGeneratedCatalogs.push({
-    id: 'aiolists_search',
-    type: 'movie',
-    name: 'Search Movies',
-    extra: searchCatalogExtra,
-    extraSupported: searchCatalogExtra.map(e => e.name)
-  });
+  // Check if any valid search sources are enabled
+  if (userSearchSources.includes('cinemeta')) {
+    hasValidSearchSources = true;
+  }
+  if (userSearchSources.includes('trakt')) {
+    hasValidSearchSources = true;
+  }
+  if (userSearchSources.includes('tmdb') && (userConfig.tmdbBearerToken || require('../config').TMDB_BEARER_TOKEN)) {
+    hasValidSearchSources = true;
+  }
   
-  tempGeneratedCatalogs.push({
-    id: 'aiolists_search',
-    type: 'series', 
-    name: 'Search Series',
-    extra: searchCatalogExtra,
-    extraSupported: searchCatalogExtra.map(e => e.name)
-  });
+  // Only add search catalogs if there are valid search sources
+  if (hasValidSearchSources) {
+    const searchCatalogExtra = [
+      { name: "search", isRequired: true },
+      { name: "genre", isRequired: false, options: availableGenres }
+    ];
+    
+    // Create separate movie/series catalogs
+    tempGeneratedCatalogs.push({
+      id: 'aiolists_search',
+      type: 'movie',
+      name: 'Search Movies',
+      extra: searchCatalogExtra,
+      extraSupported: searchCatalogExtra.map(e => e.name)
+    });
+    
+    tempGeneratedCatalogs.push({
+      id: 'aiolists_search',
+      type: 'series', 
+      name: 'Search Series',
+      extra: searchCatalogExtra,
+      extraSupported: searchCatalogExtra.map(e => e.name)
+    });
+    
+    console.log(`[AddonBuilder] Added search catalogs with sources: ${userSearchSources.join(', ')}`);
+  } else {
+    console.log(`[AddonBuilder] No valid search sources configured - search catalogs disabled`);
+  }
   
   manifest.catalogs = tempGeneratedCatalogs;
   const builder = new addonBuilder(manifest);
@@ -882,8 +903,13 @@ async function createAddon(userConfig) {
       // Use user's preferred language for episode names and metadata
       const metaLanguage = tmdbLanguage;
       
-      // Handle TMDB IDs differently based on source preference
-      if (id.startsWith('tmdb:') || (metadataSource === 'tmdb' && tmdbBearerToken)) {
+      // Handle TMDB IDs differently based on source preference or language settings
+      // Use TMDB if: 1) Direct TMDB ID, 2) User prefers TMDB source, 3) User has non-English TMDB language set
+      const shouldUseTmdb = id.startsWith('tmdb:') || 
+                           (metadataSource === 'tmdb' && tmdbBearerToken) ||
+                           (tmdbBearerToken && tmdbLanguage && tmdbLanguage !== 'en-US');
+      
+      if (shouldUseTmdb) {
         let tmdbId, tmdbType, originalImdbId;
         
         if (id.startsWith('tmdb:')) {
@@ -1038,7 +1064,7 @@ async function createAddon(userConfig) {
       }];
       
       const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
-      const enrichedItems = await enrichItemsWithMetadata(itemForEnrichment, 'cinemeta', false, 'en-US', null);
+      const enrichedItems = await enrichItemsWithMetadata(itemForEnrichment, metadataSource, hasTmdbOAuth, tmdbLanguage, tmdbBearerToken);
       
       if (enrichedItems && enrichedItems.length > 0) {
         const enrichedItem = enrichedItems[0];
