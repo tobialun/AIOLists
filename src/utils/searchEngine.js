@@ -98,6 +98,10 @@ async function searchContent({ query, type = 'all', sources = ['cinemeta'], limi
       console.log(`[Search] Enhancing search results with TMDB metadata (language: ${effectiveLanguage}, source preference: ${metadataSource})`);
       finalResults = await enhanceSearchResultsWithTmdbLanguage(uniqueResults, effectiveLanguage, tmdbBearerToken, userConfig);
       console.log(`[Search] Enhanced ${finalResults.length} results with TMDB metadata`);
+    } else if (userConfig.rpdbApiKey) {
+      // Apply RPDB posters even when not enhancing with TMDB language
+      console.log(`[Search] Applying RPDB posters to search results (${uniqueResults.length} results)`);
+      finalResults = await applyRpdbPostersToSearchResults(uniqueResults, userConfig);
     }
 
     return {
@@ -671,6 +675,89 @@ async function searchTrakt(query, type, limit, userConfig) {
 }
 
 /**
+ * Apply RPDB posters to search results
+ * @param {Array} results - Search results
+ * @param {Object} userConfig - User configuration
+ * @returns {Promise<Array>} Results with RPDB posters applied
+ */
+async function applyRpdbPostersToSearchResults(results, userConfig) {
+  if (!userConfig.rpdbApiKey || !results.length) {
+    return results;
+  }
+
+  try {
+    // Extract IMDB IDs from search results
+    const imdbIds = [];
+    const itemImdbIdMap = new Map();
+    
+    results.forEach((item, index) => {
+      let imdbId = null;
+      
+      // Priority 1: Direct IMDB ID in item.id
+      if (item.id && item.id.startsWith('tt')) {
+        imdbId = item.id;
+      }
+      // Priority 2: IMDB ID in imdb_id field
+      else if (item.imdb_id && item.imdb_id.startsWith('tt')) {
+        imdbId = item.imdb_id;
+      }
+      
+      if (imdbId) {
+        imdbIds.push(imdbId);
+        if (!itemImdbIdMap.has(imdbId)) {
+          itemImdbIdMap.set(imdbId, []);
+        }
+        itemImdbIdMap.get(imdbId).push(index);
+      }
+    });
+    
+    if (imdbIds.length === 0) {
+      console.log('[Search] No IMDB IDs found for RPDB poster fetching');
+      return results;
+    }
+
+    console.log(`[Search] Fetching RPDB posters for ${imdbIds.length} search results`);
+    
+    const { batchFetchPosters } = require('../utils/posters');
+    
+    // Extract language from user config for RPDB posters
+    let rpdbLanguage = null;
+    if (userConfig.tmdbLanguage && userConfig.tmdbLanguage !== 'en-US') {
+      rpdbLanguage = userConfig.tmdbLanguage.split('-')[0];
+    }
+    
+    // Check if using free t0 key which doesn't support language parameters
+    const isFreeT0Key = userConfig.rpdbApiKey === 't0-free-rpdb';
+    const effectiveLanguage = isFreeT0Key ? null : rpdbLanguage;
+    
+    const posterMap = await batchFetchPosters(imdbIds, userConfig.rpdbApiKey, effectiveLanguage);
+    
+    // Apply RPDB posters to results (create copy to avoid mutations)
+    const enhancedResults = results.map(item => ({ ...item }));
+    
+    Object.entries(posterMap).forEach(([imdbId, posterUrl]) => {
+      if (posterUrl && itemImdbIdMap.has(imdbId)) {
+        const itemIndices = itemImdbIdMap.get(imdbId);
+        itemIndices.forEach(index => {
+          if (enhancedResults[index]) {
+            enhancedResults[index].poster = posterUrl;
+          }
+        });
+      }
+    });
+    
+    const appliedPosters = Object.values(posterMap).filter(url => url).length;
+    console.log(`[Search] Applied ${appliedPosters} RPDB posters to search results`);
+    
+    return enhancedResults;
+    
+  } catch (error) {
+    console.error('[Search] Error applying RPDB posters:', error.message);
+    return results; // Return original results on error
+  }
+}
+
+/**
  * Enhance search results with TMDB metadata in the user's preferred language
  * @param {Array} results - Search results to enhance
  * @param {string} language - TMDB language code
@@ -759,6 +846,37 @@ async function enhanceSearchResultsWithTmdbLanguage(results, language, bearerTok
             if (usesTmdbId) {
               console.log(`  - Using TMDB ID format for language-specific metadata serving`);
             }
+            
+            // Apply RPDB posters if configured and we have an IMDb ID
+            if (userConfig.rpdbApiKey && imdbId && imdbId.startsWith('tt')) {
+              try {
+                const { batchFetchPosters } = require('../utils/posters');
+                
+                // Extract language from metadata config for RPDB posters
+                let rpdbLanguage = null;
+                if (language && language !== 'en-US') {
+                  // Convert TMDB language format (e.g., 'en-US') to RPDB language format (e.g., 'en')
+                  rpdbLanguage = language.split('-')[0];
+                }
+                
+                // Check if using free t0 key which doesn't support language parameters
+                const isFreeT0Key = userConfig.rpdbApiKey === 't0-free-rpdb';
+                const effectiveLanguage = isFreeT0Key ? null : rpdbLanguage;
+                
+                console.log(`[Search] Fetching RPDB poster for ${imdbId} with language: ${effectiveLanguage || 'default'}`);
+                
+                const posterMap = await batchFetchPosters([imdbId], userConfig.rpdbApiKey, effectiveLanguage);
+                const rpdbPoster = posterMap[imdbId];
+                
+                if (rpdbPoster) {
+                  enhanced.poster = rpdbPoster;
+                  console.log(`  - Applied RPDB poster: ${rpdbPoster.substring(0, 50)}...`);
+                }
+              } catch (error) {
+                console.warn(`[Search] Failed to fetch RPDB poster for ${imdbId}:`, error.message);
+              }
+            }
+            
             return enhanced;
           }
         }
@@ -790,5 +908,6 @@ module.exports = {
   searchMulti,
   searchTMDBMulti,
   searchTraktMulti,
-  enhanceSearchResultsWithTmdbLanguage
+  enhanceSearchResultsWithTmdbLanguage,
+  applyRpdbPostersToSearchResults
 }; 
