@@ -807,10 +807,10 @@ function convertTmdbToStremioFormat(tmdbData, type) {
             season: season.season_number,
             number: episode.episode_number,
             episode: episode.episode_number,
-            thumbnail: episode.still_path ? `https://image.tmdb.org/t/p/w500${episode.still_path}` : null,
+            thumbnail: episode.still_path ? `https://image.tmdb.org/t/p/w500${episode.still_path}` : undefined,
             overview: episode.overview || "",
             description: episode.overview || "",
-            rating: episode.vote_average ? episode.vote_average.toString() : "0",
+            rating: episode.vote_average ? parseFloat(episode.vote_average).toFixed(1) : "0",
             firstAired: airDateFormatted,
             released: airDateFormatted
           });
@@ -843,7 +843,7 @@ function convertTmdbToStremioFormat(tmdbData, type) {
     released: releasedFormatted,
     runtime: isMovie ? 
       (tmdbData.runtime ? `${tmdbData.runtime} min` : undefined) :
-      (tmdbData.episode_run_time?.[0] ? `${tmdbData.episode_run_time[0]} min` : undefined),
+      (tmdbData.episode_run_time?.[0] ? tmdbData.episode_run_time[0] : undefined),
     genres: tmdbData.genres?.map(genre => genre.name) || [],
     genre: tmdbData.genres?.map(genre => genre.name) || [], // Cinemeta uses 'genre' as well
     cast: cast.length > 0 ? cast : undefined,
@@ -878,7 +878,7 @@ function convertTmdbToStremioFormat(tmdbData, type) {
     
     // Enhanced behavior hints for better Stremio integration
     behaviorHints: {
-      defaultVideoId: imdbId && imdbId.startsWith('tt') ? imdbId : tmdbId,
+      defaultVideoId: !isMovie ? null : (imdbId && imdbId.startsWith('tt') ? imdbId : tmdbId),
       hasScheduledVideos: !isMovie, // TV shows have scheduled videos
       p2p: false,
       configurable: false,
@@ -960,19 +960,13 @@ function convertTmdbToStremioFormat(tmdbData, type) {
   }
   
   // Add slug for Stremio compatibility
-  if (metadata.name && metadata.releaseInfo) {
-    const slugTitle = metadata.name.toLowerCase()
-      .replace(/[^\w\s-]/g, '')
-      .replace(/\s+/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-+|-+$/g, '');
-    
-    // Use IMDB ID for slug if available, otherwise use TMDB ID
-    const idForSlug = imdbId && imdbId.startsWith('tt') ? 
-      imdbId.replace('tt', '') : 
-      tmdbData.id;
-      const finalSlugTitle = slugTitle || 'content';
-      metadata.slug = `${type}/${finalSlugTitle}-${idForSlug}`;
+  if (metadata.name && imdbId && imdbId.startsWith('tt')) {
+    // Use IMDB ID for slug to match expected format (series/name-imdbNumber)
+    const imdbNumber = imdbId.replace('tt', '');
+    metadata.slug = `${type}/${metadata.name}-${imdbNumber}`;
+  } else if (metadata.name) {
+    // Fallback to TMDB ID if no IMDB ID
+    metadata.slug = `${type}/content-${tmdbData.id}`;
   }
   
   return metadata;

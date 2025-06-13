@@ -879,8 +879,8 @@ async function createAddon(userConfig) {
       console.log(`[MetaHandler] tmdbBearerToken available: ${!!tmdbBearerToken}`);
       console.log(`[MetaHandler] hasTmdbOAuth: ${hasTmdbOAuth}`);
       
-      // Always use English for meta requests to ensure Stremio compatibility
-      const metaLanguage = 'en-US';
+      // Use user's preferred language for episode names and metadata
+      const metaLanguage = tmdbLanguage;
       
       // Handle TMDB IDs differently based on source preference
       if (id.startsWith('tmdb:') || (metadataSource === 'tmdb' && tmdbBearerToken)) {
@@ -961,9 +961,48 @@ async function createAddon(userConfig) {
                 }
               }
               
+              // Format fields to match Stremio's expected format
+              
+              // Format runtime for series (convert minutes to "Xh Ymin" format)
+              if (tmdbType === 'series' && tmdbMeta.runtime) {
+                const runtimeMinutes = parseInt(tmdbMeta.runtime);
+                if (runtimeMinutes && !isNaN(runtimeMinutes)) {
+                  const hours = Math.floor(runtimeMinutes / 60);
+                  const minutes = runtimeMinutes % 60;
+                  if (hours > 0) {
+                    tmdbMeta.runtime = `${hours}h${minutes > 0 ? minutes + 'min' : ''}`;
+                  } else {
+                    tmdbMeta.runtime = `${minutes}min`;
+                  }
+                }
+              }
+              
+              // Episode ratings should already be properly formatted by TMDB integration
+              // No additional processing needed here
+              
+              // Format slug to match expected pattern
+              if (tmdbMeta.name && tmdbMeta.imdb_id) {
+                const imdbNumber = tmdbMeta.imdb_id.replace('tt', '');
+                tmdbMeta.slug = `${tmdbType}/${tmdbMeta.name}-${imdbNumber}`;
+              }
+              
+              // Writer field should already be available from TMDB conversion
+              // No need to extract again if it's already present
+              
+              // Clean up extra TMDB-specific fields that shouldn't be in Stremio format
+              const fieldsToRemove = [
+                'tmdbId', 'moviedb_id', 'tmdbRating', 'tmdbVotes', 
+                'popularity', 'popularities', 'credits'
+              ];
+              fieldsToRemove.forEach(field => {
+                if (tmdbMeta.hasOwnProperty(field)) {
+                  delete tmdbMeta[field];
+                }
+              });
+              
               // Enhance behavioral hints for better Stremio integration
               tmdbMeta.behaviorHints = {
-                defaultVideoId: tmdbMeta.imdb_id || tmdbMeta.id,
+                defaultVideoId: null, // Set to null for series as per expected format
                 hasScheduledVideos: tmdbType === 'series',
                 p2p: false,
                 configurable: false,
