@@ -963,16 +963,19 @@ async function createAddon(userConfig) {
               
               // Format fields to match Stremio's expected format
               
-              // Format runtime for series (convert minutes to "Xh Ymin" format)
+              // Format runtime for series (convert minutes to proper format)
               if (tmdbType === 'series' && tmdbMeta.runtime) {
                 const runtimeMinutes = parseInt(tmdbMeta.runtime);
                 if (runtimeMinutes && !isNaN(runtimeMinutes)) {
                   const hours = Math.floor(runtimeMinutes / 60);
                   const minutes = runtimeMinutes % 60;
                   if (hours > 0) {
-                    tmdbMeta.runtime = `${hours}h${minutes > 0 ? minutes + 'min' : ''}`;
+                    // Format as "hh:mm" for durations over an hour
+                    const paddedMinutes = minutes.toString().padStart(2, '0');
+                    tmdbMeta.runtime = `${hours}:${paddedMinutes}`;
                   } else {
-                    tmdbMeta.runtime = `${minutes}min`;
+                    // Format as "XX min" for durations under an hour
+                    tmdbMeta.runtime = `${minutes} min`;
                   }
                 }
               }
