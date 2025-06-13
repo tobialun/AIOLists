@@ -23,6 +23,15 @@ AIOLists is a stateless open source list management addon for Stremio. The proje
 - **Discovery Lists:** Randomly selected MDBList from a set list of users, a new random list is delivered everytime you refresh the catalog.
 - **Share Your Setup:** Generate a shareable hash of your AIOLists configuration (list order, names, imported addons) to share with others.
 
+## Planned Features in Order
+- Speed up the loading time of lists in Stremio
+- Support for Streams/TV lists from external addons
+- Merged search
+- Support for PIN-less Trakt connection
+- Maybe features:
+    - Switching Profiles
+    - Native Trakt persistance
+
 # Trakt Persistance
 
 Due to the stateless nature of this addon Trakt keys can't automatically update when they expire. I have added an option to make Trakt persistant through Upstash. You can create a free account on there. Here's a short guide:
@@ -39,7 +48,6 @@ Your Trakt tokens are now stored in the redis db and will automatically refresh 
 
 If you find this project useful, the best way to support me is to **star this repository** on GitHub!
 
-
 # Environment Configuration
 
 AIOLists supports several environment variables for advanced configuration:
@@ -49,29 +57,19 @@ AIOLists supports several environment variables for advanced configuration:
 Create a `.env` file in the root directory with the following variables:
 
 ```bash
-# Trakt Configuration
-TRAKT_CLIENT_ID=your_trakt_client_id_here
-TRAKT_REDIRECT_URI=your_redirect_uri_here
-
 # TMDB Configuration  
 TMDB_REDIRECT_URI=your_tmdb_redirect_uri_here
 TMDB_BEARER_TOKEN=your_tmdb_bearer_token_here
-
-# Server Configuration
-PORT=3000
-NODE_ENV=development
 ```
 
 ### Configuration Details
 
-- **TRAKT_CLIENT_ID**: Your Trakt API client ID. If not provided, defaults to the built-in client ID.
-- **TRAKT_REDIRECT_URI**: Redirect URI for Trakt OAuth. Defaults to `urn:ietf:wg:oauth:2.0:oob` for manual code entry.
 - **TMDB_REDIRECT_URI**: Redirect URI for TMDB OAuth. When set, users will be redirected after authentication.
 - **TMDB_BEARER_TOKEN**: Your TMDB Read Access Token. When set, the bearer token field is hidden in the UI and this token is used automatically.
 
 ### Automatic Redirect Behavior
 
-When both `TMDB_BEARER_TOKEN` and redirect URIs are configured, the "Connect to Trakt" and "Connect to TMDB" buttons will redirect users directly to the authentication pages instead of showing manual steps.
+When both `TMDB_BEARER_TOKEN` and redirect URIs are configured, the "Connect to TMDB" button will redirect users directly to the authentication pages instead of showing manual steps.
 
 # Deployment
 
@@ -88,7 +86,8 @@ The easiest way to host this project for free is through hugging face.
     ENV PORT=7860
     ```
 6. Press "Commit new file to main"
-7. Wait for it to finish building and you should have your own instance.
+7. Go to settings and add your TMDB_REDIRECT_URI (username-projectname.hf.space) and TMDB_BEARER_TOKEN
+8. Wait for it to finish building and you should have your own instance.
 
 ## Deploying on Railway, Render, Fly.io, etc.
 
