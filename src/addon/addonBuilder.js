@@ -882,8 +882,13 @@ async function createAddon(userConfig) {
       // Use user's preferred language for episode names and metadata
       const metaLanguage = tmdbLanguage;
       
-      // Handle TMDB IDs differently based on source preference
-      if (id.startsWith('tmdb:') || (metadataSource === 'tmdb' && tmdbBearerToken)) {
+      // Handle TMDB IDs differently based on source preference or language settings
+      // Use TMDB if: 1) Direct TMDB ID, 2) User prefers TMDB source, 3) User has non-English TMDB language set
+      const shouldUseTmdb = id.startsWith('tmdb:') || 
+                           (metadataSource === 'tmdb' && tmdbBearerToken) ||
+                           (tmdbBearerToken && tmdbLanguage && tmdbLanguage !== 'en-US');
+      
+      if (shouldUseTmdb) {
         let tmdbId, tmdbType, originalImdbId;
         
         if (id.startsWith('tmdb:')) {
@@ -1038,7 +1043,7 @@ async function createAddon(userConfig) {
       }];
       
       const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
-      const enrichedItems = await enrichItemsWithMetadata(itemForEnrichment, 'cinemeta', false, 'en-US', null);
+      const enrichedItems = await enrichItemsWithMetadata(itemForEnrichment, metadataSource, hasTmdbOAuth, tmdbLanguage, tmdbBearerToken);
       
       if (enrichedItems && enrichedItems.length > 0) {
         const enrichedItem = enrichedItems[0];
