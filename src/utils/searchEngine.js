@@ -1007,15 +1007,23 @@ async function searchTMDBMultiMerged(query, limit, userConfig) {
         try {
           const fullMetadata = await fetchTmdbMetadata(item.id, mediaType, language, bearerToken);
           if (fullMetadata) {
-            // Merge enhanced metadata
+            // Use TMDB ID format when language is configured for better metadata serving
+            const usesTmdbId = language && language !== 'en-US' && fullMetadata.tmdbId;
+            const finalId = usesTmdbId ? `tmdb:${fullMetadata.tmdbId}` : (resultItem.imdb_id || `tmdb:${item.id}`);
+            
+            // Merge enhanced metadata with proper ID handling
             Object.assign(resultItem, {
               ...fullMetadata,
-              // Preserve search-specific fields
-              id: resultItem.id,
+              // Use proper ID format for language-specific metadata serving
+              id: finalId,
               imdb_id: resultItem.imdb_id || fullMetadata.imdb_id,
               searchSource: 'tmdb-multi',
               foundVia: 'merged-search'
             });
+            
+            if (usesTmdbId) {
+              console.log(`[TMDB Merged Search] Using TMDB ID format for ${language}: ${finalId}`);
+            }
           }
         } catch (error) {
           console.warn(`[TMDB Merged Search] Failed to get full metadata for TMDB:${item.id}:`, error.message);
