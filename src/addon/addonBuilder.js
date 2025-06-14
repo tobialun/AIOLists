@@ -962,8 +962,7 @@ async function createAddon(userConfig) {
   // Only add traditional search catalogs if there are valid search sources
   if (hasValidSearchSources) {
     const searchCatalogExtra = [
-      { name: "search", isRequired: true },
-      { name: "genre", isRequired: false, options: availableGenres }
+      { name: "search", isRequired: true }
     ];
     
     // Create separate movie/series catalogs for traditional search with unique IDs
@@ -1005,8 +1004,7 @@ async function createAddon(userConfig) {
   
   if (hasValidMergedSearchSources) {
     const mergedSearchCatalogExtra = [
-      { name: "search", isRequired: true },
-      { name: "genre", isRequired: false, options: availableGenres }
+      { name: "search", isRequired: true }
     ];
     
     // Create merged search catalog (combines movies and series)
@@ -1034,8 +1032,7 @@ async function createAddon(userConfig) {
   
   if (animeSearchEnabled) {
     const animeSearchCatalogExtra = [
-      { name: "search", isRequired: true },
-      { name: "genre", isRequired: false, options: availableGenres }
+      { name: "search", isRequired: true }
     ];
     
     // Create anime search catalog
