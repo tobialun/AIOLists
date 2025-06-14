@@ -28,7 +28,11 @@ function getManifestCacheKey(userConfig) {
     enableRandomListFeature: userConfig.enableRandomListFeature,
     metadataSource: userConfig.metadataSource,
     tmdbLanguage: userConfig.tmdbLanguage, // Include language in cache key
-    tmdbBearerToken: !!userConfig.tmdbBearerToken // Include token presence in cache key
+    tmdbBearerToken: !!userConfig.tmdbBearerToken, // Include token presence in cache key
+    // Include search settings in cache key - CRITICAL for search catalog generation
+    searchSources: userConfig.searchSources || [],
+    mergedSearchSources: userConfig.mergedSearchSources || [],
+    animeSearchEnabled: userConfig.animeSearchEnabled || false
   };
   return JSON.stringify(cacheableConfig);
 }
@@ -307,22 +311,18 @@ async function createAddon(userConfig) {
 
   const allKnownTypes = new Set(['movie', 'series', 'all']);
 
-  // Add search type if search functionality is enabled
-  const searchSources = userConfig.searchSources || ['cinemeta'];
+  // Add search types only if search functionality is enabled
+  const searchSources = userConfig.searchSources || []; // Don't default to cinemeta
   const mergedSearchSources = userConfig.mergedSearchSources || [];
   
-  // Add search types based on configuration
-  if (searchSources.length > 0) {
-    // Traditional search is enabled, no additional type needed (uses movie/series)
-  }
-  
-  const mergedSearchSourcesForTypes = userConfig.mergedSearchSources || [];
-  if (mergedSearchSourcesForTypes.includes('tmdb') && (userConfig.tmdbBearerToken || require('../config').TMDB_BEARER_TOKEN)) {
+  // Only add 'search' type if merged search is actually enabled
+  if (mergedSearchSources.includes('tmdb') && (userConfig.tmdbBearerToken || require('../config').TMDB_BEARER_TOKEN)) {
     allKnownTypes.add('search'); // For merged search
     console.log(`[AddonBuilder] Added 'search' type to manifest for merged search`);
   }
   
-  if (userConfig.animeSearchEnabled) {
+  // Only add 'anime' type if anime search is actually enabled
+  if (userConfig.animeSearchEnabled === true) {
     allKnownTypes.add('anime'); // For anime search
     console.log(`[AddonBuilder] Added 'anime' type to manifest for anime search`);
   }
@@ -446,7 +446,13 @@ async function createAddon(userConfig) {
         return;
     }
 
+    // Skip hidden lists entirely - they should not appear in the manifest
     const isHidden = hiddenListsSet.has(currentListId);
+    if (isHidden) {
+        console.log(`[AddonBuilder] Skipping hidden list ${currentListId} from manifest`);
+        return;
+    }
+
     let originalName = listSourceInfo.name;
     let displayName = getManifestCatalogName(currentListId, originalName, customListNames);
 
@@ -462,7 +468,7 @@ async function createAddon(userConfig) {
         catalogExtraForThisList.push({
             name: "genre",
             options: genreOpts,
-            isRequired: isHidden
+            isRequired: false // Hidden lists are now completely excluded, so this is always false
         });
     }
 

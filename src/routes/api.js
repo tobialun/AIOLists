@@ -1316,7 +1316,10 @@ module.exports = function(router) {
       console.log(`[LISTS] Updated hidden lists: [${hiddenLists.join(', ')}]`);
       
       const newConfigHash = await updateConfigLightweight(req.userConfig, {}, 'list visibility update');
-      console.log('[LISTS] List visibility updated without manifest rebuild');
+      
+      // Clear manifest cache since visibility changes affect what appears in the manifest
+      clearManifestCache('list visibility update');
+      console.log('[LISTS] List visibility updated and manifest cache cleared');
       res.json({ success: true, configHash: newConfigHash, message: 'List visibility updated' });
     } catch (error) {
         console.error('[LISTS] Failed to update list visibility:', error);
