@@ -213,16 +213,43 @@ async function searchTMDBMulti(query, limit, userConfig) {
     });
 
     if (response.data && response.data.results) {
-      const items = response.data.results
-        .filter(item => item.media_type === 'movie' || item.media_type === 'tv') // Filter out person results
-        .slice(0, limit);
+      // Process all results, including person results
+      const processedItems = [];
+      
+      for (const item of response.data.results) {
+        if (item.media_type === 'movie' || item.media_type === 'tv') {
+          // Direct movie/TV result
+          processedItems.push(item);
+        } else if (item.media_type === 'person' && item.known_for && Array.isArray(item.known_for)) {
+          // Person result - extract their known_for items
+          console.log(`[TMDB Multi Search] Found person: ${item.name}, extracting ${item.known_for.length} known_for items`);
+          
+          for (const knownForItem of item.known_for) {
+            if (knownForItem.media_type === 'movie' || knownForItem.media_type === 'tv') {
+              // Add person context to the item
+              knownForItem.foundVia = `${item.name} (${item.known_for_department || 'Known for'})`;
+              processedItems.push(knownForItem);
+            }
+          }
+        }
+      }
+      
+      // Limit results and process
+      const items = processedItems.slice(0, limit);
       
       for (const item of items) {
         try {
           // Get external IDs to find IMDb ID
           const externalIds = await getTMDBExternalIds(item.id, item.media_type, userConfig.tmdbBearerToken || TMDB_BEARER_TOKEN);
           
-          results.push(convertTMDBItemToStremioFormat(item, item.media_type, externalIds.imdb_id, language));
+          const convertedItem = convertTMDBItemToStremioFormat(item, item.media_type, externalIds.imdb_id, language);
+          
+          // Preserve person context if available
+          if (item.foundVia) {
+            convertedItem.foundVia = item.foundVia;
+          }
+          
+          results.push(convertedItem);
         } catch (error) {
           console.error(`Error processing TMDB multi result:`, error.message);
         }
@@ -952,13 +979,30 @@ async function searchTMDBMultiMerged(query, limit, userConfig) {
     const { convertImdbToTmdbId, fetchTmdbMetadata } = require('../integrations/tmdb');
 
     // Process each result with metadata enrichment
-    for (const item of response.data.results.slice(0, limit)) {
-      try {
-        // Skip person results in merged search
-        if (item.media_type === 'person') {
-          continue;
+    const processedItems = [];
+    
+    // First, extract all items (including known_for from person results)
+    for (const item of response.data.results) {
+      if (item.media_type === 'movie' || item.media_type === 'tv') {
+        // Direct movie/TV result
+        processedItems.push(item);
+      } else if (item.media_type === 'person' && item.known_for && Array.isArray(item.known_for)) {
+        // Person result - extract their known_for items
+        console.log(`[TMDB Merged Search] Found person: ${item.name}, extracting ${item.known_for.length} known_for items`);
+        
+        for (const knownForItem of item.known_for) {
+          if (knownForItem.media_type === 'movie' || knownForItem.media_type === 'tv') {
+            // Add person context to the item
+            knownForItem.foundVia = `${item.name} (${item.known_for_department || 'Known for'})`;
+            processedItems.push(knownForItem);
+          }
         }
-
+      }
+    }
+    
+    // Now process the items with metadata enrichment
+    for (const item of processedItems.slice(0, limit)) {
+      try {
         // Convert TMDB format to our internal format
         const mediaType = item.media_type === 'tv' ? 'series' : 'movie';
         let imdbId = null;
@@ -1000,7 +1044,7 @@ async function searchTMDBMultiMerged(query, limit, userConfig) {
             return genreMap[id] || `Genre ${id}`;
           }) : [],
           searchSource: 'tmdb-multi',
-          foundVia: 'merged-search'
+          foundVia: item.foundVia || 'merged-search' // Preserve person context if available
         };
 
         // Enrich with full TMDB metadata if possible
@@ -1018,7 +1062,7 @@ async function searchTMDBMultiMerged(query, limit, userConfig) {
               id: finalId,
               imdb_id: resultItem.imdb_id || fullMetadata.imdb_id,
               searchSource: 'tmdb-multi',
-              foundVia: 'merged-search'
+              foundVia: resultItem.foundVia || 'merged-search' // Preserve person context
             });
             
             if (usesTmdbId) {
