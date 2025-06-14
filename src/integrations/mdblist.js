@@ -1,6 +1,6 @@
 // src/integrations/mdblist.js
 const axios = require('axios');
-const { ITEMS_PER_PAGE } = require('../config');
+const { ITEMS_PER_PAGE, MDB_LIST_CONCURRENT_REQUESTS } = require('../config');
 const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
 
 // Helper function for delay
@@ -21,20 +21,32 @@ async function validateMDBListKey(apiKey) {
 
 async function fetchAllLists(apiKey) {
   if (!apiKey) return [];
+  
+  const fetchStartTime = Date.now();
+  console.log(`[MDBLIST PERF] Starting fetch of all MDBList lists`);
+  
   let allLists = [];
   const listEndpoints = [
     { url: `https://api.mdblist.com/lists/user?apikey=${apiKey}`, type: 'L' },
     { url: `https://api.mdblist.com/external/lists/user?apikey=${apiKey}`, type: 'E' }
   ];
+  
+  // Use parallel requests with concurrency control
+  const MDBLIST_FETCH_CONCURRENCY = MDB_LIST_CONCURRENT_REQUESTS;
 
   for (const endpoint of listEndpoints) {
+    const endpointStartTime = Date.now();
+    console.log(`[MDBLIST PERF] Fetching ${endpoint.type} lists...`);
+    
     let currentRetries = 0;
     let success = false;
     while (currentRetries < MAX_RETRIES && !success) {
       try {
         const response = await axios.get(endpoint.url, { timeout: 15000 });
         if (response.data && Array.isArray(response.data)) {
+          const listCount = response.data.length;
           allLists.push(...response.data.map(list => ({ ...list, listType: endpoint.type, name: list.name })));
+          console.log(`[MDBLIST PERF] Fetched ${listCount} ${endpoint.type} lists in ${Date.now() - endpointStartTime}ms`);
         }
         success = true;
       } catch (err) {
@@ -55,6 +67,9 @@ async function fetchAllLists(apiKey) {
     }
   }
   allLists.push({ id: 'watchlist', name: 'My Watchlist', listType: 'W', isWatchlist: true });
+  
+  const fetchEndTime = Date.now();
+  console.log(`[MDBLIST PERF] All MDBList lists fetch completed in ${fetchEndTime - fetchStartTime}ms (${allLists.length} total lists)`);
   return allLists;
 }
 

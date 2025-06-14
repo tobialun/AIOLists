@@ -25,8 +25,9 @@ AIOLists is a stateless open source list management addon for Stremio. The proje
 
 ## Planned Features in Order
 - Speed up the loading time of lists in Stremio
-- Support for Streams/TV lists from external addons
 - Merged search
+- Randomize option for lists without sort options.
+- Support for Streams/TV lists from external addons
 - Support for PIN-less Trakt connection
 - Maybe features:
     - Switching Profiles

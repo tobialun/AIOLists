@@ -1,6 +1,7 @@
 // src/utils/posters.js
 const axios = require('axios');
 const Cache = require('./cache'); // Corrected path
+const { POSTER_BATCH_SIZE } = require('../config');
 
 // Create a cache instance for posters with 1 week TTL
 const posterCache = new Cache({ defaultTTL: 7 * 24 * 3600 * 1000 }); // 1 week
@@ -57,6 +58,9 @@ async function validateRPDBKey(rpdbApiKey) {
 async function batchFetchPosters(imdbIds, rpdbApiKey, language = null) {
   if (!rpdbApiKey || !imdbIds?.length) return {};
   
+  const posterStartTime = Date.now();
+  console.log(`[POSTER PERF] Starting poster fetch for ${imdbIds.length} items`);
+  
   const results = {};
   const uncachedIds = [];
   
@@ -70,19 +74,43 @@ async function batchFetchPosters(imdbIds, rpdbApiKey, language = null) {
     }
   }
   
-  if (!uncachedIds.length) return results;
+  console.log(`[POSTER PERF] Found ${imdbIds.length - uncachedIds.length} cached posters, fetching ${uncachedIds.length} new ones`);
   
-  const fetchPromises = uncachedIds.map(async (imdbId) => {
-    try {
-      const poster = await fetchPosterFromRPDB(imdbId, rpdbApiKey, language);
-      results[imdbId] = poster;
-    } catch (error) {
-      console.error(`Error fetching poster for ${imdbId}:`, error.message);
-      results[imdbId] = null;
+  if (!uncachedIds.length) {
+    console.log(`[POSTER PERF] All posters were cached, completed in ${Date.now() - posterStartTime}ms`);
+    return results;
+  }
+  
+  // Process in batches to respect API limits
+  const batchSize = POSTER_BATCH_SIZE || 50;
+  const batches = [];
+  for (let i = 0; i < uncachedIds.length; i += batchSize) {
+    batches.push(uncachedIds.slice(i, i + batchSize));
+  }
+  
+  for (const batch of batches) {
+    const batchStartTime = Date.now();
+    const fetchPromises = batch.map(async (imdbId) => {
+      try {
+        const poster = await fetchPosterFromRPDB(imdbId, rpdbApiKey, language);
+        results[imdbId] = poster;
+      } catch (error) {
+        console.error(`Error fetching poster for ${imdbId}:`, error.message);
+        results[imdbId] = null;
+      }
+    });
+    
+    await Promise.all(fetchPromises);
+    console.log(`[POSTER PERF] Batch of ${batch.length} posters completed in ${Date.now() - batchStartTime}ms`);
+    
+    // Small delay between batches to be respectful to RPDB API
+    if (batch !== batches[batches.length - 1]) {
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
-  });
+  }
   
-  await Promise.all(fetchPromises);
+  const posterEndTime = Date.now();
+  console.log(`[POSTER PERF] Total poster fetch completed in ${posterEndTime - posterStartTime}ms for ${imdbIds.length} items`);
   return results;
 }
 
