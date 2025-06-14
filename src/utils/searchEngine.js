@@ -12,8 +12,8 @@ const externalIdCache = new Map();
  * Search content across multiple sources
  * @param {Object} params - Search parameters
  * @param {string} params.query - Search query
- * @param {string} params.type - Content type ('movie', 'series', 'all')
- * @param {Array} params.sources - Search sources (['cinemeta', 'trakt', 'tmdb', 'multi'])
+ * @param {string} params.type - Content type ('movie', 'series', 'all', 'search', 'anime')
+ * @param {Array} params.sources - Search sources (['cinemeta', 'trakt', 'tmdb', 'multi', 'anime'])
  * @param {number} params.limit - Maximum results
  * @param {Object} params.userConfig - User configuration
  * @returns {Promise<Object>} Search results
@@ -21,6 +21,16 @@ const externalIdCache = new Map();
 async function searchContent({ query, type = 'all', sources = ['cinemeta'], limit = 50, userConfig = {} }) {
   if (!query || query.trim().length < 2) {
     return { results: [], totalResults: 0, sources: [] };
+  }
+
+  // Handle anime search specifically
+  if (type === 'anime' || sources.includes('anime')) {
+    return await searchAnime(query, limit, userConfig);
+  }
+
+  // Handle merged multi search
+  if (sources.includes('multi') && sources.length === 1) {
+    return await searchTMDBMultiMerged(query, limit, userConfig);
   }
 
   const searchPromises = [];
@@ -900,6 +910,268 @@ async function enhanceSearchResultsWithTmdbLanguage(results, language, bearerTok
   return enhancedResults;
 }
 
+/**
+ * TMDB merged multi search using /search/multi endpoint - specifically for merged search functionality
+ * @param {string} query - Search query
+ * @param {number} limit - Maximum results
+ * @param {Object} userConfig - User configuration
+ * @returns {Promise<Object>} TMDB merged multi search results
+ */
+async function searchTMDBMultiMerged(query, limit, userConfig) {
+  const language = userConfig.tmdbLanguage || 'en-US';
+  const bearerToken = userConfig.tmdbBearerToken || TMDB_BEARER_TOKEN;
+
+  if (!bearerToken) {
+    console.error('[TMDB Merged Search] No TMDB Bearer token available');
+    return { results: [], totalResults: 0, sources: ['tmdb-multi'] };
+  }
+
+  try {
+    console.log(`[TMDB Merged Search] Searching for "${query}" with language: ${language}`);
+    
+    const response = await axios.get(`${TMDB_BASE_URL_V3}/search/multi`, {
+      params: {
+        query: query,
+        language: language,
+        page: 1,
+        include_adult: false
+      },
+      headers: {
+        'accept': 'application/json',
+        'Authorization': `Bearer ${bearerToken}`
+      },
+      timeout: TMDB_REQUEST_TIMEOUT
+    });
+
+    if (!response.data || !Array.isArray(response.data.results)) {
+      console.error('[TMDB Merged Search] Invalid response from TMDB');
+      return { results: [], totalResults: 0, sources: ['tmdb-multi'] };
+    }
+
+    const results = [];
+    const { convertImdbToTmdbId, fetchTmdbMetadata } = require('../integrations/tmdb');
+
+    // Process each result with metadata enrichment
+    for (const item of response.data.results.slice(0, limit)) {
+      try {
+        // Skip person results in merged search
+        if (item.media_type === 'person') {
+          continue;
+        }
+
+        // Convert TMDB format to our internal format
+        const mediaType = item.media_type === 'tv' ? 'series' : 'movie';
+        let imdbId = null;
+
+        // Try to get IMDB ID from TMDB external IDs
+        try {
+          const externalIds = await getTMDBExternalIds(item.id, item.media_type, bearerToken);
+          if (externalIds && externalIds.imdb_id) {
+            imdbId = externalIds.imdb_id;
+          }
+        } catch (error) {
+          console.warn(`[TMDB Merged Search] Failed to get IMDB ID for TMDB:${item.id}:`, error.message);
+        }
+
+        // Create the result item
+        const resultItem = {
+          id: imdbId || `tmdb:${item.id}`,
+          imdb_id: imdbId,
+          tmdbId: item.id,
+          type: mediaType,
+          name: item.title || item.name,
+          poster: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null,
+          background: item.backdrop_path ? `https://image.tmdb.org/t/p/w1280${item.backdrop_path}` : null,
+          description: item.overview,
+          releaseInfo: item.release_date ? item.release_date.split('-')[0] : 
+                       (item.first_air_date ? item.first_air_date.split('-')[0] : null),
+          year: item.release_date ? item.release_date.split('-')[0] : 
+                (item.first_air_date ? item.first_air_date.split('-')[0] : null),
+          genres: item.genre_ids ? item.genre_ids.map(id => {
+            // Convert genre IDs to names - this is a simplified mapping
+            const genreMap = {
+              28: 'Action', 12: 'Adventure', 16: 'Animation', 35: 'Comedy', 80: 'Crime',
+              99: 'Documentary', 18: 'Drama', 10751: 'Family', 14: 'Fantasy', 36: 'History',
+              27: 'Horror', 10402: 'Music', 9648: 'Mystery', 10749: 'Romance', 878: 'Sci-Fi',
+              10770: 'TV Movie', 53: 'Thriller', 10752: 'War', 37: 'Western',
+              10759: 'Action & Adventure', 10762: 'Kids', 10763: 'News', 10764: 'Reality',
+              10765: 'Sci-Fi & Fantasy', 10766: 'Soap', 10767: 'Talk', 10768: 'War & Politics'
+            };
+            return genreMap[id] || `Genre ${id}`;
+          }) : [],
+          searchSource: 'tmdb-multi',
+          foundVia: 'merged-search'
+        };
+
+        // Enrich with full TMDB metadata if possible
+        try {
+          const fullMetadata = await fetchTmdbMetadata(item.id, mediaType, language, bearerToken);
+          if (fullMetadata) {
+            // Use TMDB ID format when language is configured for better metadata serving
+            const usesTmdbId = language && language !== 'en-US' && fullMetadata.tmdbId;
+            const finalId = usesTmdbId ? `tmdb:${fullMetadata.tmdbId}` : (resultItem.imdb_id || `tmdb:${item.id}`);
+            
+            // Merge enhanced metadata with proper ID handling
+            Object.assign(resultItem, {
+              ...fullMetadata,
+              // Use proper ID format for language-specific metadata serving
+              id: finalId,
+              imdb_id: resultItem.imdb_id || fullMetadata.imdb_id,
+              searchSource: 'tmdb-multi',
+              foundVia: 'merged-search'
+            });
+            
+            if (usesTmdbId) {
+              console.log(`[TMDB Merged Search] Using TMDB ID format for ${language}: ${finalId}`);
+            }
+          }
+        } catch (error) {
+          console.warn(`[TMDB Merged Search] Failed to get full metadata for TMDB:${item.id}:`, error.message);
+        }
+
+        results.push(resultItem);
+      } catch (error) {
+        console.warn(`[TMDB Merged Search] Failed to process item:`, error.message);
+      }
+    }
+
+    // Apply RPDB posters if configured
+    let finalResults = results;
+    if (userConfig.rpdbApiKey) {
+      finalResults = await applyRpdbPostersToSearchResults(results, userConfig);
+    }
+
+    console.log(`[TMDB Merged Search] Found ${finalResults.length} results for "${query}"`);
+
+    return {
+      results: finalResults,
+      totalResults: finalResults.length,
+      sources: ['tmdb-multi']
+    };
+
+  } catch (error) {
+    console.error('[TMDB Merged Search] Error in TMDB merged search:', error.message);
+    return { results: [], totalResults: 0, sources: ['tmdb-multi'] };
+  }
+}
+
+/**
+ * Anime search using Kitsu API
+ * @param {string} query - Search query
+ * @param {number} limit - Maximum results
+ * @param {Object} userConfig - User configuration
+ * @returns {Promise<Object>} Anime search results
+ */
+async function searchAnime(query, limit, userConfig) {
+  if (!query || query.trim().length < 2) {
+    return { results: [], totalResults: 0, sources: ['anime'] };
+  }
+
+  try {
+    console.log(`[Anime Search] Searching for "${query}"`);
+    
+    const response = await axios.get(`https://anime-kitsu.strem.fun/catalog/anime/kitsu-anime-list/search=${encodeURIComponent(query)}.json`, {
+      timeout: 15000,
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'AIOLists-Stremio-Addon/1.0'
+      }
+    });
+
+    if (!response.data || !Array.isArray(response.data.metas)) {
+      console.error('[Anime Search] Invalid response from Kitsu API');
+      return { results: [], totalResults: 0, sources: ['anime'] };
+    }
+
+    const results = [];
+    
+    // Process each result and convert to our standard format
+    for (const item of response.data.metas.slice(0, limit)) {
+      try {
+        // Convert Kitsu format to our internal format
+        const resultItem = {
+          id: item.imdb_id || item.id, // Prefer IMDB ID if available
+          imdb_id: item.imdb_id,
+          kitsu_id: item.kitsu_id,
+          type: item.type,
+          animeType: item.animeType,
+          name: item.name,
+          aliases: item.aliases,
+          poster: item.poster,
+          background: item.background,
+          description: item.description,
+          releaseInfo: item.releaseInfo,
+          runtime: item.runtime,
+          imdbRating: item.imdbRating,
+          genres: item.genres,
+          logo: item.logo,
+          trailers: item.trailers,
+          links: item.links,
+          searchSource: 'anime',
+          foundVia: 'anime-search'
+        };
+
+        // Enrich with additional metadata if we have IMDB ID
+        if (item.imdb_id && item.imdb_id.startsWith('tt')) {
+          try {
+            // Use metadata enrichment to get additional details
+            const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
+            const enrichedItems = await enrichItemsWithMetadata(
+              [{ ...resultItem, id: item.imdb_id }], 
+              userConfig.metadataSource || 'cinemeta',
+              false, // No TMDB OAuth needed for basic enrichment
+              userConfig.tmdbLanguage || 'en-US',
+              userConfig.tmdbBearerToken
+            );
+
+            if (enrichedItems && enrichedItems.length > 0) {
+              const enriched = enrichedItems[0];
+              // Merge enriched data while preserving anime-specific fields
+              Object.assign(resultItem, {
+                ...enriched,
+                // Preserve anime-specific fields
+                kitsu_id: item.kitsu_id,
+                animeType: item.animeType,
+                aliases: item.aliases,
+                searchSource: 'anime',
+                foundVia: 'anime-search',
+                // Prefer anime poster if available, otherwise use enriched
+                poster: item.poster || enriched.poster,
+                // Prefer anime description if available
+                description: item.description || enriched.description
+              });
+            }
+          } catch (error) {
+            console.warn(`[Anime Search] Failed to enrich anime item ${item.imdb_id}:`, error.message);
+          }
+        }
+
+        results.push(resultItem);
+      } catch (error) {
+        console.warn(`[Anime Search] Failed to process anime item:`, error.message);
+      }
+    }
+
+    // Apply RPDB posters if configured
+    let finalResults = results;
+    if (userConfig.rpdbApiKey) {
+      finalResults = await applyRpdbPostersToSearchResults(results, userConfig);
+    }
+
+    console.log(`[Anime Search] Found ${finalResults.length} anime results for "${query}"`);
+
+    return {
+      results: finalResults,
+      totalResults: finalResults.length,
+      sources: ['anime']
+    };
+
+  } catch (error) {
+    console.error('[Anime Search] Error in anime search:', error.message);
+    return { results: [], totalResults: 0, sources: ['anime'] };
+  }
+}
+
 module.exports = {
   searchContent,
   searchCinemeta,
@@ -908,6 +1180,8 @@ module.exports = {
   searchMulti,
   searchTMDBMulti,
   searchTraktMulti,
+  searchTMDBMultiMerged,
+  searchAnime,
   enhanceSearchResultsWithTmdbLanguage,
   applyRpdbPostersToSearchResults
 }; 

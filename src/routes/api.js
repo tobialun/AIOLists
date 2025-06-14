@@ -17,6 +17,7 @@ const manifestCache = new Cache({ defaultTTL: 1 * 60 * 1000 });
 
 // Helper function to create a config copy for storage that excludes sensitive Trakt tokens when using Upstash
 function createConfigForStorage(userConfig) {
+  console.log('[CONFIG] Creating config for storage');
   const configForStorage = { ...userConfig };
   
   // Only exclude Trakt tokens from storage if Upstash is configured and we have a traktUuid
@@ -28,6 +29,28 @@ function createConfigForStorage(userConfig) {
   }
   
   return configForStorage;
+}
+
+// Helper function to update config without rebuilding manifest
+async function updateConfigLightweight(userConfig, changes, changeDescription) {
+  console.log(`[CONFIG] Lightweight update: ${changeDescription}`);
+  console.log(`[CONFIG] Changes applied:`, Object.keys(changes));
+  
+  // Apply changes to user config
+  Object.assign(userConfig, changes);
+  userConfig.lastUpdated = new Date().toISOString();
+  
+  // Generate new config hash
+  const newConfigHash = await compressConfig(userConfig);
+  console.log(`[CONFIG] Generated new config hash: ${newConfigHash.substring(0, 20)}...`);
+  
+  return newConfigHash;
+}
+
+// Helper function to clear manifest cache and log it
+function clearManifestCache(reason) {
+  console.log(`[MANIFEST] Clearing manifest cache due to: ${reason}`);
+  manifestCache.clear();
 }
 
 function purgeListConfigs(userConfig, listIdPrefixOrExactId, isExactId = false) {
@@ -108,6 +131,18 @@ module.exports = function(router) {
     try {
       req.userConfig = await decompressConfig(configHash);
       req.configHash = configHash;
+      
+      // Ensure new search features are available for existing configurations
+      const { defaultConfig } = require('../config');
+      if (typeof req.userConfig.mergedSearchSources === 'undefined') {
+        req.userConfig.mergedSearchSources = defaultConfig.mergedSearchSources;
+      }
+      if (typeof req.userConfig.animeSearchEnabled === 'undefined') {
+        req.userConfig.animeSearchEnabled = defaultConfig.animeSearchEnabled;
+      }
+      if (typeof req.userConfig.searchSources === 'undefined') {
+        req.userConfig.searchSources = defaultConfig.searchSources;
+      }
       
       // If Upstash is configured and we have a traktUuid, try to load Trakt tokens before determining shared status
       if (req.userConfig.upstashUrl && req.userConfig.traktUuid && !req.userConfig.traktAccessToken) {
@@ -252,12 +287,24 @@ module.exports = function(router) {
 
   router.post('/:configHash/config', async (req, res) => {
     try {
-      const { searchSources } = req.body;
+      const { searchSources, mergedSearchSources, animeSearchEnabled } = req.body;
       
+      // Handle traditional search sources
       if (searchSources && Array.isArray(searchSources)) {
         // Temporarily disable 'multi' search option
         const validSources = searchSources.filter(s => ['cinemeta', 'trakt', 'tmdb'].includes(s));
         req.userConfig.searchSources = validSources;
+      }
+
+      // Handle merged search sources
+      if (mergedSearchSources && Array.isArray(mergedSearchSources)) {
+        const validMergedSources = mergedSearchSources.filter(s => ['tmdb'].includes(s));
+        req.userConfig.mergedSearchSources = validMergedSources;
+      }
+
+      // Handle anime search enabled
+      if (typeof animeSearchEnabled === 'boolean') {
+        req.userConfig.animeSearchEnabled = animeSearchEnabled;
       }
 
       req.userConfig.lastUpdated = new Date().toISOString();
@@ -275,18 +322,55 @@ module.exports = function(router) {
     res.sendFile(path.join(__dirname, '..', '..', 'public', 'index.html'));
   });
 
+  // New endpoint to prepare manifest for Install/Copy actions
+  router.post('/:configHash/prepare-manifest', async (req, res) => {
+    try {
+      console.log('[MANIFEST] Preparing manifest for Install/Copy action');
+      console.log('[MANIFEST] Starting full manifest generation with list fetching');
+      
+      const cacheKey = `manifest_${req.configHash}`;
+      manifestCache.delete(cacheKey); // Force fresh generation
+      
+      const startTime = Date.now();
+      const addonInterface = await createAddon(req.userConfig);
+      const endTime = Date.now();
+      
+      console.log(`[MANIFEST] Manifest generation completed in ${endTime - startTime}ms`);
+      console.log(`[MANIFEST] Generated manifest with ${addonInterface.manifest.catalogs.length} catalogs`);
+      
+      manifestCache.set(cacheKey, addonInterface);
+      
+      res.json({ 
+        success: true, 
+        manifest: addonInterface.manifest,
+        generationTime: endTime - startTime,
+        catalogCount: addonInterface.manifest.catalogs.length
+      });
+    } catch (error) {
+      console.error('[MANIFEST] Error preparing manifest:', error);
+      res.status(500).json({ error: 'Failed to prepare manifest', details: error.message });
+    }
+  });
+
   router.get('/:configHash/manifest.json', async (req, res) => {
     try {
+      console.log('[MANIFEST] Serving manifest.json');
       const cacheKey = `manifest_${req.configHash}`;
       let addonInterface = manifestCache.get(cacheKey);
       if (!addonInterface) {
+        console.log('[MANIFEST] No cached manifest found, generating new one');
+        const startTime = Date.now();
         addonInterface = await createAddon(req.userConfig);
+        const endTime = Date.now();
+        console.log(`[MANIFEST] Fresh manifest generated in ${endTime - startTime}ms`);
         manifestCache.set(cacheKey, addonInterface);
+      } else {
+        console.log('[MANIFEST] Serving cached manifest');
       }
       setCacheHeaders(res, null);
       res.json(addonInterface.manifest);
     } catch (error) {
-      console.error('Error serving manifest:', error);
+      console.error('[MANIFEST] Error serving manifest:', error);
       res.status(500).json({ error: 'Failed to serve manifest' });
     }
   });
@@ -314,8 +398,8 @@ module.exports = function(router) {
       skip = isNaN(skip) ? 0 : skip;
       genre = genre || null;
   
-      // Handle search catalog specially
-      if (catalogId === 'aiolists_search') {
+      // Handle search catalogs specially  
+      if (catalogId === 'aiolists_search_movies' || catalogId === 'aiolists_search_series' || catalogId === 'aiolists_merged_search' || catalogId === 'aiolists_anime_search') {
         let searchQuery = req.query.search;
         
         // Extract search query from extra params if not in query string
@@ -331,49 +415,79 @@ module.exports = function(router) {
         }
 
         try {
-          // Determine search sources based on user configuration
-          const userSearchSources = req.userConfig.searchSources || ['cinemeta'];
-          let sources = [];
-          
-          // Individual search sources mode (multi search is disabled)
-          if (userSearchSources.includes('cinemeta')) {
-            sources.push('cinemeta');
-          }
-          if (userSearchSources.includes('trakt')) {
-            sources.push('trakt');
-          }
-          if (userSearchSources.includes('tmdb') && (req.userConfig.tmdbBearerToken || req.userConfig.tmdbSessionId)) {
-            sources.push('tmdb');
-          }
-          
-          // Default to Cinemeta if no valid sources
-          if (sources.length === 0) {
-            sources = ['cinemeta'];
-          }
-          
           const { searchContent } = require('../utils/searchEngine');
-          
-          // Use the catalog type for search
-          const searchType = catalogType || 'all';
-          
-          const searchResults = await searchContent({
-            query: searchQuery.trim(),
-            type: searchType,
-            sources: sources,
-            limit: 50,
-            userConfig: req.userConfig
-          });
+          let searchResults;
+
+          if (catalogId === 'aiolists_merged_search') {
+            // Merged search using TMDB multi search
+            console.log(`[API Search] Handling merged search for "${searchQuery}"`);
+            
+            searchResults = await searchContent({
+              query: searchQuery.trim(),
+              type: 'search', // Use search type for merged search
+              sources: ['multi'], // Use multi source for merged search
+              limit: 50,
+              userConfig: req.userConfig
+            });
+          } else if (catalogId === 'aiolists_anime_search') {
+            // Anime search using Kitsu API
+            console.log(`[API Search] Handling anime search for "${searchQuery}"`);
+            
+            searchResults = await searchContent({
+              query: searchQuery.trim(),
+              type: 'anime', // Use anime type for anime search
+              sources: ['anime'], // Use anime source for anime search
+              limit: 50,
+              userConfig: req.userConfig
+            });
+          } else {
+            // Traditional movie/series search
+            console.log(`[API Search] Handling traditional search for "${searchQuery}"`);
+            
+            // Determine search sources based on user configuration
+            const userSearchSources = req.userConfig.searchSources || [];
+            let sources = [];
+            
+            // Individual search sources mode (multi search is disabled)
+            if (userSearchSources.includes('cinemeta')) {
+              sources.push('cinemeta');
+            }
+            if (userSearchSources.includes('trakt')) {
+              sources.push('trakt');
+            }
+            if (userSearchSources.includes('tmdb') && (req.userConfig.tmdbBearerToken || req.userConfig.tmdbSessionId)) {
+              sources.push('tmdb');
+            }
+            
+            // If no valid sources are configured, return empty results
+            if (sources.length === 0) {
+              console.log(`[API Search] No valid search sources configured, returning empty results`);
+              return res.json({ metas: [] });
+            }
+            
+            // Use the catalog type for search
+            const searchType = catalogType || 'all';
+            
+            searchResults = await searchContent({
+              query: searchQuery.trim(),
+              type: searchType,
+              sources: sources,
+              limit: 50,
+              userConfig: req.userConfig
+            });
+          }
 
           // Filter results by type and genre if specified
           let filteredMetas = searchResults.results || [];
           
-          // Filter by type if specified
-          if (catalogType && catalogType !== 'all') {
+          // Filter by type if specified (only for traditional search)
+          if (catalogId === 'aiolists_search' && catalogType && catalogType !== 'all' && catalogType !== 'search') {
             filteredMetas = filteredMetas.filter(result => result.type === catalogType);
           }
 
           // Filter by genre if specified
           if (genre && genre !== 'All') {
+            const beforeFilter = filteredMetas.length;
             filteredMetas = filteredMetas.filter(result => {
               if (!result.genres) return false;
               const itemGenres = Array.isArray(result.genres) ? result.genres : [result.genres];
@@ -381,6 +495,7 @@ module.exports = function(router) {
                 String(g).toLowerCase() === String(genre).toLowerCase()
               );
             });
+            console.log(`[API Search] Genre filter "${genre}": ${beforeFilter} -> ${filteredMetas.length} results`);
           }
 
           return res.json({ 
@@ -389,7 +504,7 @@ module.exports = function(router) {
           });
 
         } catch (error) {
-          console.error(`Error in search catalog for "${searchQuery}":`, error);
+          console.error(`[API Search] Error in search catalog "${catalogId}" for "${searchQuery}":`, error);
           return res.json({ metas: [] });
         }
       }
@@ -861,15 +976,112 @@ module.exports = function(router) {
         req.userConfig.traktRefreshToken = null;
         req.userConfig.traktExpiresAt = null;
 
+        // Purge Trakt-related list configurations and metadata
         purgeListConfigs(req.userConfig, 'trakt_');
+        
+        // Clean up list order entries for Trakt lists
+        if (req.userConfig.listOrder && Array.isArray(req.userConfig.listOrder)) {
+          req.userConfig.listOrder = req.userConfig.listOrder.filter(listId => !listId.startsWith('trakt_'));
+        }
+        
+        // Clean up lists metadata for Trakt lists
+        if (req.userConfig.listsMetadata) {
+          Object.keys(req.userConfig.listsMetadata).forEach(key => {
+            if (key.startsWith('trakt_')) {
+              delete req.userConfig.listsMetadata[key];
+            }
+          });
+        }
 
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
-        manifestCache.clear();
+        clearManifestCache('Trakt disconnected');
         res.json({ success: true, configHash: newConfigHash, message: 'Disconnected from Trakt.' });
     } catch (error) {
         console.error('Error in /trakt/disconnect:', error);
         res.status(500).json({ error: 'Failed to disconnect from Trakt', details: error.message });
+    }
+  });
+
+  // Add MDBList disconnect endpoint
+  router.post('/:configHash/mdblist/disconnect', async (req, res) => {
+    try {
+        req.userConfig.apiKey = null;
+
+        // Purge MDBList-related list configurations and metadata
+        purgeListConfigs(req.userConfig, 'aiolists-');
+        
+        // Clean up list order entries for MDBList lists
+        if (req.userConfig.listOrder && Array.isArray(req.userConfig.listOrder)) {
+          req.userConfig.listOrder = req.userConfig.listOrder.filter(listId => 
+            !listId.startsWith('aiolists-') || listId === 'aiolists_search_movies' || listId === 'aiolists_search_series' || listId === 'aiolists_merged_search' || listId === 'aiolists_anime_search'
+          );
+        }
+        
+        // Clean up lists metadata for MDBList lists
+        if (req.userConfig.listsMetadata) {
+          Object.keys(req.userConfig.listsMetadata).forEach(key => {
+            if (key.startsWith('aiolists-')) {
+              delete req.userConfig.listsMetadata[key];
+            }
+          });
+        }
+
+        req.userConfig.lastUpdated = new Date().toISOString();
+        const newConfigHash = await compressConfig(req.userConfig);
+        clearManifestCache('MDBList disconnected');
+        res.json({ success: true, configHash: newConfigHash, message: 'Disconnected from MDBList.' });
+    } catch (error) {
+        console.error('Error in /mdblist/disconnect:', error);
+        res.status(500).json({ error: 'Failed to disconnect from MDBList', details: error.message });
+    }
+  });
+
+  // Add TMDB disconnect endpoint 
+  router.post('/:configHash/tmdb/disconnect', async (req, res) => {
+    try {
+        req.userConfig.tmdbSessionId = null;
+        req.userConfig.tmdbAccountId = null;
+        
+        // Only clear user-provided bearer token, not environment token
+        req.userConfig.tmdbBearerToken = null;
+        
+        // Reset metadata source if it was set to TMDB
+        if (req.userConfig.metadataSource === 'tmdb') {
+          req.userConfig.metadataSource = 'cinemeta';
+        }
+
+        // Purge TMDB-related list configurations and metadata
+        purgeListConfigs(req.userConfig, 'tmdb_');
+        
+        // Clean up list order entries for TMDB lists
+        if (req.userConfig.listOrder && Array.isArray(req.userConfig.listOrder)) {
+          req.userConfig.listOrder = req.userConfig.listOrder.filter(listId => !listId.startsWith('tmdb_'));
+        }
+        
+        // Clean up lists metadata for TMDB lists
+        if (req.userConfig.listsMetadata) {
+          Object.keys(req.userConfig.listsMetadata).forEach(key => {
+            if (key.startsWith('tmdb_')) {
+              delete req.userConfig.listsMetadata[key];
+            }
+          });
+        }
+
+        req.userConfig.lastUpdated = new Date().toISOString();
+        const newConfigHash = await compressConfig(req.userConfig);
+        clearManifestCache('TMDB disconnected');
+        
+        // Check if environment TMDB bearer token is still available
+        const hasEnvToken = !!require('../config').TMDB_BEARER_TOKEN;
+        const message = hasEnvToken ? 
+          'Disconnected from TMDB OAuth. TMDB features still available via environment Bearer Token.' :
+          'Disconnected from TMDB. Metadata source reset to Cinemeta.';
+          
+        res.json({ success: true, configHash: newConfigHash, message });
+    } catch (error) {
+        console.error('Error in /tmdb/disconnect:', error);
+        res.status(500).json({ error: 'Failed to disconnect from TMDB', details: error.message });
     }
   });
 
@@ -1042,26 +1254,30 @@ module.exports = function(router) {
 
   router.post('/:configHash/lists/names', async (req, res) => {
     try {
+      console.log('[LISTS] Updating list names (lightweight)');
       const { listId, customName } = req.body;
       if (!listId) return res.status(400).json({ error: 'List ID required' });
       if (!req.userConfig.customListNames) req.userConfig.customListNames = {};
       if (customName && customName.trim()) {
         req.userConfig.customListNames[String(listId)] = customName.trim();
+        console.log(`[LISTS] Set custom name for list ${listId}: "${customName.trim()}"`);
       } else {
         delete req.userConfig.customListNames[String(listId)];
+        console.log(`[LISTS] Removed custom name for list: ${listId}`);
       }
-      req.userConfig.lastUpdated = new Date().toISOString();
-      const newConfigHash = await compressConfig(req.userConfig);
-      manifestCache.clear();
+      
+      const newConfigHash = await updateConfigLightweight(req.userConfig, {}, 'custom list name update');
+      console.log('[LISTS] List names updated without manifest rebuild');
       res.json({ success: true, configHash: newConfigHash, message: 'List name updated' });
     } catch (error) {
-        console.error('Failed to update list name:', error);
+        console.error('[LISTS] Failed to update list name:', error);
         res.status(500).json({ error: 'Failed to update list name' });
     }
   });
 
   router.post('/:configHash/lists/mediatype', async (req, res) => {
     try {
+      console.log('[LISTS] Updating list media type (lightweight)');
       const { listId, customMediaType } = req.body;
       if (!listId) return res.status(400).json({ error: 'List ID required for custom media type.' });
 
@@ -1071,22 +1287,24 @@ module.exports = function(router) {
 
       if (customMediaType && customMediaType.trim()) {
         req.userConfig.customMediaTypeNames[String(listId)] = customMediaType.trim().toLowerCase();
+        console.log(`[LISTS] Set custom media type for list ${listId}: "${customMediaType.trim().toLowerCase()}"`);
       } else {
         delete req.userConfig.customMediaTypeNames[String(listId)];
+        console.log(`[LISTS] Removed custom media type for list: ${listId}`);
       }
 
-      req.userConfig.lastUpdated = new Date().toISOString();
-      const newConfigHash = await compressConfig(req.userConfig);
-      manifestCache.clear();
+      const newConfigHash = await updateConfigLightweight(req.userConfig, {}, 'custom media type update');
+      console.log('[LISTS] List media type updated without manifest rebuild');
       res.json({ success: true, configHash: newConfigHash, message: 'Custom media type display name updated' });
     } catch (error) {
-      console.error('Failed to update custom media type name:', error);
+      console.error('[LISTS] Failed to update custom media type name:', error);
       res.status(500).json({ error: 'Failed to update custom media type name' });
     }
   });
 
   router.post('/:configHash/lists/visibility', async (req, res) => {
     try {
+      console.log('[LISTS] Updating list visibility (lightweight)');
       const { hiddenLists } = req.body;
       if (!Array.isArray(hiddenLists)) return res.status(400).json({ error: 'Hidden lists must be an array of strings.' });
       
@@ -1095,12 +1313,13 @@ module.exports = function(router) {
       }
       
       req.userConfig.hiddenLists = hiddenLists.map(String);
-      req.userConfig.lastUpdated = new Date().toISOString();
-      const newConfigHash = await compressConfig(req.userConfig);
-      manifestCache.clear();
+      console.log(`[LISTS] Updated hidden lists: [${hiddenLists.join(', ')}]`);
+      
+      const newConfigHash = await updateConfigLightweight(req.userConfig, {}, 'list visibility update');
+      console.log('[LISTS] List visibility updated without manifest rebuild');
       res.json({ success: true, configHash: newConfigHash, message: 'List visibility updated' });
     } catch (error) {
-        console.error('Failed to update list visibility:', error);
+        console.error('[LISTS] Failed to update list visibility:', error);
         res.status(500).json({ error: 'Failed to update list visibility' });
     }
   });
@@ -1199,22 +1418,25 @@ module.exports = function(router) {
 
   router.post('/:configHash/lists/sort', async (req, res) => {
     try {
+      console.log('[LISTS] Updating sort preferences (lightweight)');
       const { listId, sort, order } = req.body;
       if (!listId || !sort) return res.status(400).json({ error: 'List ID (originalId) and sort field required' });
       if (!req.userConfig.sortPreferences) req.userConfig.sortPreferences = {};
       req.userConfig.sortPreferences[String(listId)] = { sort, order: order || 'desc' };
-      req.userConfig.lastUpdated = new Date().toISOString();
-      const newConfigHash = await compressConfig(req.userConfig);
-      manifestCache.clear();
+      console.log(`[LISTS] Set sort for list ${listId}: ${sort} ${order || 'desc'}`);
+      
+      const newConfigHash = await updateConfigLightweight(req.userConfig, {}, 'sort preferences update');
+      console.log('[LISTS] Sort preferences updated without manifest rebuild');
       res.json({ success: true, configHash: newConfigHash, message: 'Sort preferences updated' });
     } catch (error) {
-        console.error('Failed to update sort preferences:', error);
+        console.error('[LISTS] Failed to update sort preferences:', error);
         res.status(500).json({ error: 'Failed to update sort preferences' });
     }
   });
 
   router.post('/:configHash/lists/merge', async (req, res) => {
     try {
+      console.log('[LISTS] Updating list merge preference (lightweight)');
 
       if (req.userConfig.upstashUrl) {
         await initTraktApi(req.userConfig);
@@ -1247,21 +1469,21 @@ module.exports = function(router) {
             delete req.userConfig.mergedLists;
           }
         }
+        console.log(`[LISTS] Set list ${listId} to merged state`);
       } else { // User wants to split (merged === false)
         if (!req.userConfig.mergedLists) {
           req.userConfig.mergedLists = {};
         }
         req.userConfig.mergedLists[String(listId)] = false;
+        console.log(`[LISTS] Set list ${listId} to split state`);
       }
-      req.userConfig.lastUpdated = new Date().toISOString();
-  
-      const newConfigHash = await compressConfig(req.userConfig);
-      if (req.configHash !== newConfigHash) {
-          manifestCache.clear();
-      }
+      
+      const newConfigHash = await updateConfigLightweight(req.userConfig, {}, 'list merge preference update');
+      console.log('[LISTS] List merge preference updated without manifest rebuild');
   
       res.json({ success: true, configHash: newConfigHash, message: `List ${merged ? 'merged' : 'split'}` });
     } catch (error) {
+      console.error('[LISTS] Failed to update list merge preference:', error);
       res.status(500).json({ error: 'Failed to update list merge preference' });
     }
   });
@@ -1397,13 +1619,44 @@ module.exports = function(router) {
     }
   });
 
+  // Lightweight lists endpoint - doesn't fetch lists from external APIs
+  router.get('/:configHash/lists-lightweight', async (req, res) => {
+    try {
+      console.log('[LISTS] Loading lists (lightweight - no API calls)');
+      
+      // Initialize Trakt API if needed (this is fast)
+      if (req.userConfig.traktUuid || req.userConfig.traktAccessToken) {
+        await initTraktApi(req.userConfig);
+      }
+
+      // Return cached/stored list information without fetching from external APIs
+      console.log('[LISTS] Returning cached list configuration without external API calls');
+      
+      res.json({
+        success: true,
+        lists: [], // Empty for lightweight mode
+        importedAddons: req.userConfig.importedAddons || {},
+        listsMetadata: req.userConfig.listsMetadata || {},
+        customMediaTypeNames: req.userConfig.customMediaTypeNames || {},
+        isPotentiallySharedConfig: req.isPotentiallySharedConfig || false,
+        randomMDBListUsernames: req.userConfig.randomMDBListUsernames || [],
+        message: 'Lightweight mode - use /lists-full for complete list data'
+      });
+    } catch (error) {
+      console.error('[LISTS] Error in lightweight lists endpoint:', error);
+      res.status(500).json({ success: false, error: 'Failed to load lists configuration' });
+    }
+  });
+
   router.get('/:configHash/lists', async (req, res) => {
     try {
+      console.log('[LISTS] Loading lists (full - with external API calls)');
       const initialListsMetadataJson = JSON.stringify(req.userConfig.listsMetadata || {});
       const initialTraktAccessToken = req.userConfig.traktAccessToken;
       let configChangedByThisRequest = false;
         
       if (req.userConfig.traktUuid || req.userConfig.traktAccessToken) {
+        console.log('[LISTS] Initializing Trakt API');
         await initTraktApi(req.userConfig); // This is the key change
   
         if (req.userConfig.traktAccessToken !== initialTraktAccessToken) {
@@ -1413,22 +1666,28 @@ module.exports = function(router) {
 
     let allUserLists = [];
     if (req.userConfig.apiKey) {
+        console.log('[LISTS] Fetching MDBList lists');
         const mdbLists = await fetchAllMDBLists(req.userConfig.apiKey);
         allUserLists.push(...mdbLists.map(l => ({...l, source: 'mdblist'})));
+        console.log(`[LISTS] Fetched ${mdbLists.length} MDBList lists`);
     }
 
     if (req.userConfig.traktAccessToken) {
+      console.log('[LISTS] Fetching Trakt lists');
       const traktLists = await fetchTraktLists(req.userConfig); 
       allUserLists.push(...traktLists.map(l => ({...l, source: 'trakt'})));
+      console.log(`[LISTS] Fetched ${traktLists.length} Trakt lists`);
   }
 
     // Fetch from TMDB
+    console.log('[LISTS] Fetching TMDB lists');
     const { fetchTmdbLists } = require('../integrations/tmdb');
     const tmdbResult = await fetchTmdbLists(req.userConfig);
     
     // Add TMDB lists to the main lists if OAuth is connected
     if (tmdbResult.isConnected && tmdbResult.lists && tmdbResult.lists.length > 0) {
       allUserLists.push(...tmdbResult.lists.map(l => ({...l, source: 'tmdb'})));
+      console.log(`[LISTS] Fetched ${tmdbResult.lists.length} TMDB lists`);
     }
 
 
@@ -1894,28 +2153,7 @@ module.exports = function(router) {
     }
   });
 
-  router.post('/:configHash/tmdb/disconnect', async (req, res) => {
-    try {
-      req.userConfig.tmdbBearerToken = null;
-      req.userConfig.tmdbSessionId = null;
-      req.userConfig.tmdbAccountId = null;
-      
-      // Only revert to default metadata source if no environment Bearer Token is available
-      if (req.userConfig.metadataSource === 'tmdb' && !TMDB_BEARER_TOKEN) {
-        req.userConfig.metadataSource = 'cinemeta';
-      }
-      
-      req.userConfig.lastUpdated = new Date().toISOString();
-      
-      const newConfigHash = await compressConfig(req.userConfig);
-      manifestCache.clear();
-      
-      res.json({ success: true, configHash: newConfigHash, message: 'Disconnected from TMDB' });
-    } catch (error) {
-      console.error('Error in /tmdb/disconnect:', error);
-      res.status(500).json({ error: 'Failed to disconnect from TMDB', details: error.message });
-    }
-  });
+
 
   router.post('/tmdb/validate', async (req, res) => {
     try {
@@ -2056,4 +2294,71 @@ module.exports = function(router) {
       res.status(500).json({ error: 'Failed to get debug info', details: error.message });
     }
   });
+
+  // Debug endpoint for search configuration
+  router.get('/debug/search-config', (req, res) => {
+    const userConfig = req.userConfig || {};
+    
+    const debugInfo = {
+      searchSources: userConfig.searchSources || [],
+      mergedSearchSources: userConfig.mergedSearchSources || [],
+      animeSearchEnabled: userConfig.animeSearchEnabled || false,
+      hasTmdbBearerToken: !!(userConfig.tmdbBearerToken || TMDB_BEARER_TOKEN),
+      hasEnvBearerToken: !!TMDB_BEARER_TOKEN,
+      hasUserBearerToken: !!userConfig.tmdbBearerToken,
+      
+      // Configuration validation
+      validation: {
+        traditionalSearchValid: (userConfig.searchSources || []).length > 0,
+        mergedSearchValid: (userConfig.mergedSearchSources || []).includes('tmdb') && 
+                            !!(userConfig.tmdbBearerToken || TMDB_BEARER_TOKEN),
+        animeSearchValid: !!userConfig.animeSearchEnabled,
+      },
+      
+      // Expected manifest types
+      expectedTypes: {
+        base: ['movie', 'series', 'all'],
+        search: (userConfig.mergedSearchSources || []).includes('tmdb') && 
+                !!(userConfig.tmdbBearerToken || TMDB_BEARER_TOKEN) ? ['search'] : [],
+        anime: userConfig.animeSearchEnabled ? ['anime'] : []
+      }
+    };
+    
+    res.json({
+      success: true,
+      debug: debugInfo,
+      recommendations: {
+        forTmdbMultiSearch: !debugInfo.validation.mergedSearchValid ? 
+          'Set mergedSearchSources to ["tmdb"] and ensure TMDB Bearer Token is configured' : 'Configuration OK',
+        forAnimeSearch: !debugInfo.validation.animeSearchValid ? 
+          'Set animeSearchEnabled to true' : 'Configuration OK'
+      }
+    });
+  });
+
+  // Temporary endpoint to fix search configuration
+  router.post('/debug/fix-search-config', (req, res) => {
+    const userConfig = req.userConfig || {};
+    
+    // Enable all search features with TMDB bearer token available
+    userConfig.searchSources = ['cinemeta', 'tmdb'];  // Enable traditional search
+    userConfig.mergedSearchSources = ['tmdb'];        // Enable TMDB Multi Search  
+    userConfig.animeSearchEnabled = true;             // Enable Anime Search
+    
+    // Save the updated configuration
+    req.userConfig = userConfig;
+    
+    res.json({
+      success: true,
+      message: 'Search configuration has been fixed!',
+      updated: {
+        searchSources: userConfig.searchSources,
+        mergedSearchSources: userConfig.mergedSearchSources,
+        animeSearchEnabled: userConfig.animeSearchEnabled
+      },
+      instructions: 'Now refresh your addon manifest to see all search catalogs.'
+    });
+  });
+
+  return router;
 };

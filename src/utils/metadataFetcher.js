@@ -1,6 +1,7 @@
 // src/utils/metadataFetcher.js
 const axios = require('axios');
 const { batchFetchPosters } = require('./posters');
+const { METADATA_BATCH_SIZE } = require('../config');
 
 // Import TMDB functions that use the built-in Bearer token
 const { 
@@ -9,18 +10,30 @@ const {
 } = require('../integrations/tmdb');
 
 const CINEMETA_BASE = 'https://v3-cinemeta.strem.io';
-const BATCH_SIZE = 50;
+const BATCH_SIZE = METADATA_BATCH_SIZE || 50;
 
 // Fetch metadata from Cinemeta for a chunk of IMDB IDs
 async function fetchCinemetaChunk(imdbIdChunk, type) {
+  const CINEMETA_TIMEOUT = 5000; // Reduced timeout for faster failure
+  
   try {
     const promises = imdbIdChunk.map(async (imdbId) => {
       try {
-        const response = await axios.get(`${CINEMETA_BASE}/meta/${type}/${imdbId}.json`, {
-          timeout: 15000
-        });
+        // Add circuit breaker - fail fast if Cinemeta is slow
+        const response = await Promise.race([
+          axios.get(`${CINEMETA_BASE}/meta/${type}/${imdbId}.json`, {
+            timeout: CINEMETA_TIMEOUT
+          }),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Circuit breaker timeout')), CINEMETA_TIMEOUT + 1000)
+          )
+        ]);
+        
         return { imdbId, data: response.data?.meta };
       } catch (error) {
+        if (error.message.includes('Circuit breaker timeout')) {
+          console.warn(`[METADATA PERF] Circuit breaker triggered for ${imdbId} (Cinemeta too slow)`);
+        }
         return { imdbId, data: null };
       }
     });
@@ -53,18 +66,32 @@ async function fetchCinemetaChunk(imdbIdChunk, type) {
 async function enrichItemsWithMetadata(items, metadataSource = 'cinemeta', hasTmdbOAuth = false, tmdbLanguage = 'en-US', tmdbBearerToken = null) {
   if (!items || items.length === 0) return [];
   
+  // Skip enrichment if metadataSource is 'none' (used for lightweight checks during manifest generation)
+  if (metadataSource === 'none') {
+    console.log(`[METADATA PERF] Skipping metadata enrichment (source: none) for ${items.length} items`);
+    return items;
+  }
+  
+  const enrichStartTime = Date.now();
+  console.log(`[METADATA PERF] Starting metadata enrichment for ${items.length} items`);
   console.log(`[DEBUG] Metadata enrichment called with: source="${metadataSource}", language="${tmdbLanguage}", hasToken=${!!tmdbBearerToken}, hasTmdbOAuth=${hasTmdbOAuth}`);
   console.log(`[DEBUG] tmdbBearerToken value: ${tmdbBearerToken ? 'SET' : 'NULL/UNDEFINED'}`);
   
   // Use TMDB enrichment if requested and we have either OAuth or bearer token
   if (metadataSource === 'tmdb' && (hasTmdbOAuth || tmdbBearerToken)) {
     try {
-      console.log(`[DEBUG] Using TMDB enrichment for ${items.length} items`);
-      return await enrichItemsWithTMDB(items, tmdbLanguage, tmdbBearerToken);
+      console.log(`[DEBUG] Using TMDB enrichment for ${items.length} items with enhanced concurrency`);
+      const result = await enrichItemsWithTMDB(items, tmdbLanguage, tmdbBearerToken);
+      const enrichEndTime = Date.now();
+      console.log(`[METADATA PERF] TMDB enrichment completed in ${enrichEndTime - enrichStartTime}ms for ${items.length} items`);
+      return result;
     } catch (error) {
       console.error('[DEBUG] TMDB enrichment failed:', error.message);
       console.log(`[DEBUG] Using Cinemeta enrichment for ${items.length} items (fallback)`);
-      return await enrichItemsWithCinemeta(items);
+      const result = await enrichItemsWithCinemeta(items);
+      const enrichEndTime = Date.now();
+      console.log(`[METADATA PERF] Cinemeta fallback enrichment completed in ${enrichEndTime - enrichStartTime}ms for ${items.length} items`);
+      return result;
     }
   }
   
@@ -72,17 +99,26 @@ async function enrichItemsWithMetadata(items, metadataSource = 'cinemeta', hasTm
   if (metadataSource === 'trakt') {
     try {
       console.log(`[DEBUG] Using Trakt enrichment for ${items.length} items`);
-      return await enrichItemsWithTrakt(items);
+      const result = await enrichItemsWithTrakt(items);
+      const enrichEndTime = Date.now();
+      console.log(`[METADATA PERF] Trakt enrichment completed in ${enrichEndTime - enrichStartTime}ms for ${items.length} items`);
+      return result;
     } catch (error) {
       console.error('[DEBUG] Trakt enrichment failed:', error.message);
       console.log(`[DEBUG] Using Cinemeta enrichment for ${items.length} items (fallback)`);
-      return await enrichItemsWithCinemeta(items);
+      const result = await enrichItemsWithCinemeta(items);
+      const enrichEndTime = Date.now();
+      console.log(`[METADATA PERF] Cinemeta fallback enrichment completed in ${enrichEndTime - enrichStartTime}ms for ${items.length} items`);
+      return result;
     }
   }
   
   // Default to Cinemeta enrichment
   console.log(`[DEBUG] Using Cinemeta enrichment for ${items.length} items (default)`);
-  return await enrichItemsWithCinemeta(items);
+  const result = await enrichItemsWithCinemeta(items);
+  const enrichEndTime = Date.now();
+  console.log(`[METADATA PERF] Cinemeta enrichment completed in ${enrichEndTime - enrichStartTime}ms for ${items.length} items`);
+  return result;
 }
 
 /**
@@ -111,8 +147,9 @@ async function enrichItemsWithTMDB(items, language = 'en-US', userBearerToken = 
   console.log(`[DEBUG] Converting ${imdbIds.length} IMDB IDs to TMDB IDs`);
   
   try {
+    const conversionStartTime = Date.now();
     const imdbToTmdbMap = await batchConvertImdbToTmdbIds(imdbIds, userBearerToken);
-    console.log(`[DEBUG] IMDB to TMDB conversion completed, got ${Object.keys(imdbToTmdbMap).length} results`);
+    console.log(`[DEBUG] IMDB to TMDB conversion completed in ${Date.now() - conversionStartTime}ms, got ${Object.keys(imdbToTmdbMap).length} results`);
     
     // Step 2: Prepare items for TMDB metadata fetch
     const tmdbItems = [];
@@ -132,9 +169,10 @@ async function enrichItemsWithTMDB(items, language = 'en-US', userBearerToken = 
       return items;
     }
     
-    console.log(`[DEBUG] Fetching TMDB metadata for ${tmdbItems.length} items`);
+    console.log(`[DEBUG] Fetching TMDB metadata for ${tmdbItems.length} items with enhanced batching`);
+    const metadataStartTime = Date.now();
     const tmdbMetadataMap = await batchFetchTmdbMetadata(tmdbItems, language, userBearerToken);
-    console.log(`[DEBUG] TMDB metadata fetch completed, got ${Object.keys(tmdbMetadataMap).length} results`);
+    console.log(`[DEBUG] TMDB metadata fetch completed in ${Date.now() - metadataStartTime}ms, got ${Object.keys(tmdbMetadataMap).length} results`);
     
     // Step 3: Merge TMDB metadata with original items and convert IDs to tmdb: format
     const enrichedItems = items.map(item => {
@@ -223,16 +261,34 @@ async function fetchCinemetaBatched(imdbIds, type) {
   
   const allMetadata = {};
   
+  // Use smaller batch size for Cinemeta to avoid overwhelming it
+  const CINEMETA_BATCH_SIZE = Math.min(BATCH_SIZE, 10); // Max 10 at a time for Cinemeta
+  const CINEMETA_DELAY = 150; // Increased delay between batches
+  
+  console.log(`[METADATA PERF] Processing ${imdbIds.length} items in batches of ${CINEMETA_BATCH_SIZE} for Cinemeta`);
+  
   // Process in batches to avoid overwhelming the API
-  for (let i = 0; i < imdbIds.length; i += BATCH_SIZE) {
-    const batch = imdbIds.slice(i, i + BATCH_SIZE);
-    const batchMetadata = await fetchCinemetaChunk(batch, type);
-    Object.assign(allMetadata, batchMetadata);
+  for (let i = 0; i < imdbIds.length; i += CINEMETA_BATCH_SIZE) {
+    const batch = imdbIds.slice(i, i + CINEMETA_BATCH_SIZE);
+    const batchStartTime = Date.now();
     
-    // Small delay between batches to be respectful
-    if (i + BATCH_SIZE < imdbIds.length) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
+    try {
+      const batchMetadata = await fetchCinemetaChunk(batch, type);
+      Object.assign(allMetadata, batchMetadata);
+      
+      const batchEndTime = Date.now();
+      console.log(`[METADATA PERF] Cinemeta batch ${Math.floor(i / CINEMETA_BATCH_SIZE) + 1}/${Math.ceil(imdbIds.length / CINEMETA_BATCH_SIZE)} completed in ${batchEndTime - batchStartTime}ms (${batch.length} items)`);
+      
+      // Adaptive delay based on response time
+      if (i + CINEMETA_BATCH_SIZE < imdbIds.length) {
+        const responseTime = batchEndTime - batchStartTime;
+        const adaptiveDelay = responseTime > 2000 ? CINEMETA_DELAY * 2 : CINEMETA_DELAY;
+        await new Promise(resolve => setTimeout(resolve, adaptiveDelay));
+      }
+    } catch (error) {
+             console.error(`[METADATA PERF] Cinemeta batch failed, continuing with next batch:`, error.message);
+       // Continue with next batch even if this one fails
+     }
   }
   
   return allMetadata;

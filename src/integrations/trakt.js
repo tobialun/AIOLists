@@ -1,6 +1,6 @@
 // src/integrations/trakt.js
 const axios = require('axios');
-const { ITEMS_PER_PAGE, TRAKT_CLIENT_ID, TRAKT_REDIRECT_URI } = require('../config');
+const { ITEMS_PER_PAGE, TRAKT_CLIENT_ID, TRAKT_REDIRECT_URI, TRAKT_CONCURRENT_REQUESTS } = require('../config');
 const { getTraktTokens, saveTraktTokens } = require('../utils/remoteStorage');
 
 const TRAKT_API_URL = 'https://api.trakt.tv';
@@ -130,6 +130,10 @@ async function fetchTraktLists(userConfig) {
     if (!await initTraktApi(userConfig)) {
       return [];
     }
+    
+    const fetchStartTime = Date.now();
+    console.log(`[TRAKT PERF] Starting fetch of Trakt lists`);
+    
     try {
       const response = await axios.get(`${TRAKT_API_URL}/users/me/lists`, {
         headers: {
@@ -151,7 +155,11 @@ async function fetchTraktLists(userConfig) {
         { id: 'trakt_popular_movies', name: 'Popular Movies', isTraktPopular: true, listType: 'T', hasMovies: true, hasShows: false },
         { id: 'trakt_popular_shows', name: 'Popular Shows', isTraktPopular: true, listType: 'T', hasMovies: false, hasShows: true }
       ];
-      return [...lists, ...specialLists.map(sl => ({ ...sl, updated: new Date().toISOString() }))];
+      
+      const allLists = [...lists, ...specialLists.map(sl => ({ ...sl, updated: new Date().toISOString() }))];
+      const fetchEndTime = Date.now();
+      console.log(`[TRAKT PERF] Trakt lists fetch completed in ${fetchEndTime - fetchStartTime}ms (${allLists.length} total lists)`);
+      return allLists;
     } catch (error) {
       console.error("[TraktIntegration] Exception fetching Trakt lists:", error.message);
       return [];

@@ -11,7 +11,7 @@
 
 const axios = require('axios');
 const Cache = require('../utils/cache');
-const { ITEMS_PER_PAGE, TMDB_REDIRECT_URI, TMDB_BEARER_TOKEN } = require('../config');
+const { ITEMS_PER_PAGE, TMDB_REDIRECT_URI, TMDB_BEARER_TOKEN, TMDB_CONCURRENT_REQUESTS } = require('../config');
 
 // Create a cache instance for TMDB data with 24 hour TTL
 const tmdbCache = new Cache({ defaultTTL: 24 * 3600 * 1000 }); // 24 hours
@@ -394,7 +394,9 @@ async function processListItems(items, userConfig, genre) {
   
   if (itemsWithTmdbIds.length > 0) {
     // Fetch external IDs with concurrency control to avoid overwhelming the API
-    const CONCURRENCY_LIMIT = 5;
+    const CONCURRENCY_LIMIT = TMDB_CONCURRENT_REQUESTS || 5;
+    console.log(`[TMDB PERF] Processing ${itemsWithTmdbIds.length} items with concurrency ${CONCURRENCY_LIMIT}`);
+    
     const chunks = [];
     for (let i = 0; i < itemsWithTmdbIds.length; i += CONCURRENCY_LIMIT) {
       chunks.push(itemsWithTmdbIds.slice(i, i + CONCURRENCY_LIMIT));
@@ -582,7 +584,7 @@ async function batchConvertImdbToTmdbIds(imdbIds, userBearerToken = DEFAULT_TMDB
   if (uncachedIds.length === 0) return results;
   
   // Process uncached IDs in parallel with concurrency control
-  const CONCURRENCY_LIMIT = 20; // Process 5 requests at a time
+  const CONCURRENCY_LIMIT = TMDB_CONCURRENT_REQUESTS || 15; // Use config value for consistency, optimized for conversion
   
   const processChunk = async (chunk) => {
     const chunkPromises = chunk.map(async (imdbId) => {
@@ -612,7 +614,7 @@ async function batchConvertImdbToTmdbIds(imdbIds, userBearerToken = DEFAULT_TMDB
     
     // Small delay between chunks to be respectful to the API
     if (chunk !== chunks[chunks.length - 1]) {
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 100)); // Reduced from 200ms to 100ms
     }
   }
   
@@ -982,7 +984,7 @@ function convertTmdbToStremioFormat(tmdbData, type) {
 async function batchFetchTmdbMetadata(items, language = 'en-US', userBearerToken = DEFAULT_TMDB_BEARER_TOKEN) {
   if (!items?.length) return {};
   
-  const CONCURRENCY_LIMIT = 8; // Process 8 requests at a time
+  const CONCURRENCY_LIMIT = TMDB_CONCURRENT_REQUESTS || 12; // Use config value, increased from 8
   const results = {};
   
   const processChunk = async (chunk) => {
@@ -1024,7 +1026,7 @@ async function batchFetchTmdbMetadata(items, language = 'en-US', userBearerToken
     
     // Small delay between chunks to respect API rate limits
     if (chunk !== chunks[chunks.length - 1]) {
-      await new Promise(resolve => setTimeout(resolve, 150));
+      await new Promise(resolve => setTimeout(resolve, 100)); // Reduced from 150ms to 100ms
     }
   }
   

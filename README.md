@@ -24,10 +24,11 @@ AIOLists is a stateless open source list management addon for Stremio. The proje
 - **Share Your Setup:** Generate a shareable hash of your AIOLists configuration (list order, names, imported addons) to share with others.
 
 ## Planned Features in Order
-- Speed up the loading time of lists in Stremio
+- ~~Speed up the loading time of lists in Stremio~~
+- ~~Merged and Anime Search~~
 - Support for Streams/TV lists from external addons
-- Merged search
-- Support for PIN-less Trakt connection
+- Randomize option for lists without sort options
+- Better TMDB list support
 - Maybe features:
     - Switching Profiles
     - Native Trakt persistance

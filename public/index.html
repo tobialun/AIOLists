@@ -169,16 +169,15 @@
       </div>
     </div>
 
-    <!-- Search Section -->
     <div class="search-section api-section">
         <div class="section-header">
             <h2>Search/Metadata</h2>
             <span id="searchNotification" class="section-notification"></span>
         </div>
-        <p class="info-text">Configure search providers and metadata source for your Stremio addon.</p>
+        <p class="info-text">Split search aggregates all results from selected providers into two lists. Merged search is one list (movies/series).</p>
         
         <div class="form-group">
-            <label for="searchSources">Search&nbsp;Providers</label>
+            <label for="searchSources">Split&nbsp;Search</label>
             <div class="checkbox-group search-options">
                 <label class="checkbox-label">
                     <input type="checkbox" id="searchCinemeta"> Cinemeta
@@ -188,6 +187,24 @@
                 </label>
                 <label class="checkbox-label">
                     <input type="checkbox" id="searchTmdb"> TMDB
+                </label>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="mergedSearchSources">Merged&nbsp;Search</label>
+            <div class="checkbox-group search-options">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="mergedSearchTmdb"> TMDB Multi Search
+                </label>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="extraSearchOptions">Anime&nbsp;Search</label>
+            <div class="checkbox-group search-options">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="animeSearchEnabled"> Kitsu
                 </label>
             </div>
         </div>
