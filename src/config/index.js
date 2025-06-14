@@ -50,7 +50,9 @@ const defaultConfig = {
   disableGenreFilter: false,
   enableRandomListFeature: false,
   randomMDBListUsernames: ['showtime416', 'garycrawfordgc', 'linaspurinis', 'hdlists'],
-  searchSources: ['cinemeta'], 
+  searchSources: ['cinemeta'], // Traditional movie/series search sources
+  mergedSearchSources: ['tmdb'], // New merged search sources - enabled by default with TMDB
+  animeSearchEnabled: true, // Enable anime search - enabled by default 
   availableSortOptions: [
     { value: 'default', label: 'Default' },
     { value: 'rank', label: 'Rank' },

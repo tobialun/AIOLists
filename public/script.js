@@ -358,6 +358,8 @@ document.addEventListener('DOMContentLoaded', function() {
     searchCinemeta: document.getElementById('searchCinemeta'),
     searchTrakt: document.getElementById('searchTrakt'),
     searchTmdb: document.getElementById('searchTmdb'),
+    mergedSearchTmdb: document.getElementById('mergedSearchTmdb'),
+    animeSearchEnabled: document.getElementById('animeSearchEnabled'),
     searchNotification: document.getElementById('searchNotification')
   };
 
@@ -794,6 +796,8 @@ document.addEventListener('DOMContentLoaded', function() {
     elements.searchCinemeta?.addEventListener('change', saveSearchPreferences);
     elements.searchTrakt?.addEventListener('change', saveSearchPreferences);
     elements.searchTmdb?.addEventListener('change', saveSearchPreferences);
+    elements.mergedSearchTmdb?.addEventListener('change', saveSearchPreferences);
+    elements.animeSearchEnabled?.addEventListener('change', saveSearchPreferences);
     elements.searchMulti?.addEventListener('change', handleMultiSearchToggle);
     
     // TMDB OAuth event listeners (handled in showTmdbAuthContainer when needed)
@@ -2220,8 +2224,129 @@ function startNameEditing(listItemElement, list) {
   }
 
   window.disconnectMDBList = async function() {
-    updateApiKeyUI(elements.apiKeyInput, '', 'mdblist', null, false);
-    await validateAndSaveApiKeys('', elements.rpdbApiKeyInput.value.trim(), '');
+    try {
+      const response = await fetch(`/${state.configHash}/mdblist/disconnect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to disconnect MDBList');
+      }
+      
+      // Update the config hash and reload everything
+      state.configHash = data.configHash;
+      updateURL();
+      updateStremioButtonHref();
+      
+      // Update UI
+      updateApiKeyUI(elements.apiKeyInput, '', 'mdblist', null, false);
+      
+      // Reload configuration and lists
+      await loadConfig();
+      await loadUserListsAndAddons();
+      
+      showNotification('connections', 'Disconnected from MDBList and cleaned up all lists.', 'success');
+    } catch (error) {
+      console.error('MDBList Disconnect Error:', error);
+      showNotification('connections', `MDBList Disconnect Error: ${error.message}`, 'error', true);
+    }
+  };
+
+  window.disconnectTrakt = async function() {
+    try {
+      const response = await fetch(`/${state.configHash}/trakt/disconnect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || 'Failed to disconnect Trakt');
+      
+      // Update the config hash and reload everything
+      state.configHash = data.configHash;
+      updateURL();
+      updateStremioButtonHref();
+      
+      // Update UI
+      updateTraktUI(false);
+      
+      // Update user config state
+      state.userConfig.traktAccessToken = null;
+      state.userConfig.traktRefreshToken = null;
+      state.userConfig.traktExpiresAt = null;
+      state.userConfig.traktUuid = null;
+      
+      // Reload lists only (don't reload full config which would reset other API key UIs)
+      await loadUserListsAndAddons();
+      
+      showNotification('connections', 'Disconnected from Trakt and cleaned up all lists.', 'success');
+    } catch (error) { 
+      console.error('Trakt Disconnect Error:', error); 
+      showNotification('connections', `Trakt Disconnect Error: ${error.message}`, 'error', true); 
+    }
+  };
+
+  window.disconnectTMDB = async function() {
+    try {
+      const response = await fetch(`/${state.configHash}/tmdb/disconnect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to disconnect TMDB');
+      }
+      
+      // Update the config hash and reload everything
+      state.configHash = data.configHash;
+      updateURL();
+      updateStremioButtonHref();
+      
+      // Update UI
+      updateTmdbConnectionUI(false);
+      
+      // Update user config state
+      state.userConfig.tmdbSessionId = null;
+      state.userConfig.tmdbAccountId = null;
+      state.userConfig.tmdbUsername = null;
+      // Only clear user-provided bearer token, not environment token
+      if (!state.env?.hasTmdbBearerToken) {
+        state.userConfig.tmdbBearerToken = null;
+      }
+      // Reset metadata source if it was set to TMDB and no environment token
+      if (state.userConfig.metadataSource === 'tmdb' && !state.env?.hasTmdbBearerToken) {
+        state.userConfig.metadataSource = 'cinemeta';
+        if (elements.metadataSourceSelect) {
+          elements.metadataSourceSelect.value = 'cinemeta';
+        }
+      }
+      
+      // Reload lists only (don't reload full config which would reset other API key UIs)
+      await loadUserListsAndAddons();
+      
+      const message = data.message || (state.env?.hasTmdbBearerToken ? 
+        'Disconnected from TMDB OAuth. TMDB features still available via environment Bearer Token.' :
+        'Disconnected from TMDB. Metadata source reset to Cinemeta.');
+        
+      showNotification('connections', message, 'success');
+    } catch (error) {
+      console.error('TMDB Disconnect Error:', error);
+      showNotification('connections', `TMDB Disconnect Error: ${error.message}`, 'error', true);
+    }
+  };
+
+  window.disconnectRPDB = function() {
+    const rpdbApiKeyInput = document.getElementById('rpdbApiKey');
+    const rpdbConnected = document.getElementById('rpdbConnected');
+    
+    if (rpdbApiKeyInput) rpdbApiKeyInput.value = '';
+    if (rpdbConnected) rpdbConnected.style.display = 'none';
+    
+    state.userConfig.rpdbApiKey = '';
+    handleApiKeyInput(rpdbApiKeyInput, 'rpdb');
   };
 
   // Make connectToTmdb globally available
@@ -2438,174 +2563,6 @@ function startNameEditing(listItemElement, list) {
     updateSearchSourcesUI();
   }
 
-  window.disconnectTMDB = async function() {
-    try {
-      const response = await fetch(`/${state.configHash}/tmdb/disconnect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Failed to disconnect TMDB');
-      }
-      
-      state.configHash = data.configHash;
-      state.userConfig.tmdbSessionId = null;
-      state.userConfig.tmdbAccountId = null;
-      state.userConfig.tmdbBearerToken = null;
-      
-      // Clear the Bearer Token input field
-      const tmdbBearerTokenInput = document.getElementById('tmdbBearerToken');
-      if (tmdbBearerTokenInput && !state.env?.hasTmdbBearerToken) {
-        tmdbBearerTokenInput.value = '';
-      }
-      
-      // Only reset metadata source to Cinemeta if no environment Bearer Token is available
-      if (state.userConfig.metadataSource === 'tmdb' && !state.env?.hasTmdbBearerToken) {
-        state.userConfig.metadataSource = 'cinemeta';
-        if (elements.metadataSourceSelect) {
-          elements.metadataSourceSelect.value = 'cinemeta';
-        }
-      }
-      
-      updateURL();
-      updateStremioButtonHref();
-      updateTmdbConnectionUI(false);
-      
-      const message = state.env?.hasTmdbBearerToken ? 
-        'Disconnected from TMDB OAuth. TMDB features still available via environment Bearer Token.' :
-        'Disconnected from TMDB. Metadata source reset to Cinemeta.';
-      showNotification('connections', message, 'success');
-      await loadUserListsAndAddons();
-    } catch (error) {
-      console.error('TMDB Disconnect Error:', error);
-      showNotification('connections', `TMDB Disconnect Error: ${error.message}`, 'error', true);
-    }
-  };
-
-
-
-  window.disconnectRPDB = function() {
-    const rpdbApiKeyInput = document.getElementById('rpdbApiKey');
-    const rpdbConnected = document.getElementById('rpdbConnected');
-    
-    if (rpdbApiKeyInput) rpdbApiKeyInput.value = '';
-    if (rpdbConnected) rpdbConnected.style.display = 'none';
-    
-    state.userConfig.rpdbApiKey = '';
-    handleApiKeyInput(rpdbApiKeyInput, 'rpdb');
-  };
-
-  window.disconnectTrakt = async function() {
-    try {
-        const response = await fetch(`/${state.configHash}/trakt/disconnect`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' } });
-        const data = await response.json();
-        if (!response.ok || !data.success) throw new Error(data.error || 'Failed to disconnect Trakt');
-
-        state.configHash = data.configHash;
-        state.userConfig.traktAccessToken = null;
-        state.userConfig.traktRefreshToken = null;
-        state.userConfig.traktExpiresAt = null;
-        state.userConfig.traktUuid = null;
-
-        updateURL(); updateStremioButtonHref(); updateTraktUI(false);
-        showNotification('connections', 'Disconnected from Trakt.', 'success');
-        await loadUserListsAndAddons();
-    } catch (error) { console.error('Trakt Disconnect Error:', error); showNotification('connections', `Trakt Disconnect Error: ${error.message}`, 'error', true); }
-  };
-
-  // Handle metadata source change
-  async function handleMetadataSourceChange() {
-    const newMetadataSource = elements.metadataSourceSelect.value;
-    
-    if (newMetadataSource === 'tmdb') {
-      const hasTmdbBearerToken = state.userConfig.tmdbBearerToken || state.env?.hasTmdbBearerToken;
-      if (!hasTmdbBearerToken) {
-        showNotification('settings', 'TMDB Bearer Token required to use TMDB as metadata source.', 'error');
-        elements.metadataSourceSelect.value = state.userConfig.metadataSource;
-        return;
-      }
-    }
-    
-    await updateMetadataSettings(newMetadataSource, null);
-  }
-
-  // Handle TMDB language change
-  async function handleTmdbLanguageChange() {
-    const newLanguage = elements.tmdbLanguageSelect.dataset.value;
-    await updateMetadataSettings(null, newLanguage);
-  }
-
-  // Update metadata settings on server
-  async function updateMetadataSettings(metadataSource = null, tmdbLanguage = null) {
-    try {
-      const payload = {};
-      if (metadataSource) payload.metadataSource = metadataSource;
-      if (tmdbLanguage) payload.tmdbLanguage = tmdbLanguage;
-      
-      const response = await fetch(`/${state.configHash}/config/metadata`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Failed to update metadata settings');
-      }
-      
-      if (data.configHash && data.configHash !== state.configHash) {
-        state.configHash = data.configHash;
-        updateURL();
-        updateStremioButtonHref();
-      }
-      
-      if (metadataSource) state.userConfig.metadataSource = metadataSource;
-      if (tmdbLanguage) state.userConfig.tmdbLanguage = tmdbLanguage;
-      
-      updateMetadataSourceUI();
-      showNotification('search', 'Metadata settings updated.', 'success');
-    } catch (error) {
-      console.error('Error updating metadata settings:', error);
-      showNotification('settings', `Error: ${error.message}`, 'error', true);
-      // Revert UI changes on error
-      if (elements.metadataSourceSelect) {
-        elements.metadataSourceSelect.value = state.userConfig.metadataSource;
-      }
-      if (elements.tmdbLanguageSelect) {
-        // Find and set the language using the new searchable dropdown format
-        const language = tmdbLanguages.find(lang => lang.iso_639_1 === state.userConfig.tmdbLanguage);
-        if (language) {
-          selectLanguage(language.iso_639_1, language.english_name);
-        }
-      }
-      updateMetadataSourceUI();
-    }
-  }
-
-  // Update metadata source UI
-  function updateMetadataSourceUI() {
-    if (elements.tmdbLanguageGroup) {
-      const showLanguageSettings = state.userConfig.metadataSource === 'tmdb';
-      elements.tmdbLanguageGroup.style.display = showLanguageSettings ? 'flex' : 'none';
-    }
-    
-    // Enable/disable TMDB option based on Bearer Token availability (OAuth not required for metadata)
-    if (elements.metadataSourceSelect) {
-      const tmdbOption = elements.metadataSourceSelect.querySelector('option[value="tmdb"]');
-      if (tmdbOption) {
-        // TMDB is available if user has bearer token OR environment has bearer token
-        const hasTmdbBearerToken = state.userConfig.tmdbBearerToken || state.env?.hasTmdbBearerToken;
-        tmdbOption.disabled = !hasTmdbBearerToken;
-        tmdbOption.textContent = hasTmdbBearerToken ? 'TMDB' : 'TMDB (Bearer Token required)';
-      }
-    }
-    
-
-  }
-
   // Event handlers
   document.addEventListener('DOMContentLoaded', function() {
     // ... existing DOMContentLoaded code ...
@@ -2727,6 +2684,23 @@ function startNameEditing(listItemElement, list) {
       }
     }
 
+    // Handle merged search sources
+    if (state.userConfig.mergedSearchSources) {
+      if (elements.mergedSearchTmdb) {
+        elements.mergedSearchTmdb.checked = state.userConfig.mergedSearchSources.includes('tmdb');
+      }
+    } else {
+      // Default to disabled if no preferences saved
+      if (elements.mergedSearchTmdb) {
+        elements.mergedSearchTmdb.checked = false;
+      }
+    }
+
+    // Handle anime search enabled
+    if (elements.animeSearchEnabled) {
+      elements.animeSearchEnabled.checked = state.userConfig.animeSearchEnabled || false;
+    }
+
     // Trakt search is always available (no connection required)
     if (elements.searchTrakt) {
       elements.searchTrakt.disabled = false;
@@ -2760,6 +2734,36 @@ function startNameEditing(listItemElement, list) {
       }
     }
 
+    // Enable/disable merged search based on TMDB Bearer Token availability
+    if (elements.mergedSearchTmdb) {
+      if (!hasTmdbBearerToken) {
+        elements.mergedSearchTmdb.disabled = true;
+        elements.mergedSearchTmdb.checked = false;
+        const label = elements.mergedSearchTmdb.parentElement;
+        if (label) {
+          label.title = 'TMDB Bearer Token required for merged search';
+          label.style.opacity = '0.6';
+        }
+      } else {
+        elements.mergedSearchTmdb.disabled = false;
+        const label = elements.mergedSearchTmdb.parentElement;
+        if (label) {
+          label.title = '';
+          label.style.opacity = '1';
+        }
+      }
+    }
+
+    // Anime search is always available (no dependencies)
+    if (elements.animeSearchEnabled) {
+      elements.animeSearchEnabled.disabled = false;
+      const label = elements.animeSearchEnabled.parentElement;
+      if (label) {
+        label.title = '';
+        label.style.opacity = '1';
+      }
+    }
+
     // Disable Multi search (temporarily disabled)
     if (elements.searchMulti) {
       elements.searchMulti.disabled = true;
@@ -2780,12 +2784,19 @@ function startNameEditing(listItemElement, list) {
     if (elements.searchTrakt && elements.searchTrakt.checked && !elements.searchTrakt.disabled) searchSources.push('trakt');
     if (elements.searchTmdb && elements.searchTmdb.checked && !elements.searchTmdb.disabled) searchSources.push('tmdb');
 
+    const mergedSearchSources = [];
+    if (elements.mergedSearchTmdb && elements.mergedSearchTmdb.checked && !elements.mergedSearchTmdb.disabled) mergedSearchSources.push('tmdb');
+
+    const animeSearchEnabled = !!(elements.animeSearchEnabled && elements.animeSearchEnabled.checked);
+
     try {
       const response = await fetch(`/api/${state.configHash}/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          searchSources: searchSources
+          searchSources: searchSources,
+          mergedSearchSources: mergedSearchSources,
+          animeSearchEnabled: animeSearchEnabled
         })
       });
 
@@ -2793,6 +2804,8 @@ function startNameEditing(listItemElement, list) {
       if (data.success && data.newConfigHash) {
         state.configHash = data.newConfigHash;
         state.userConfig.searchSources = searchSources; // Update local state
+        state.userConfig.mergedSearchSources = mergedSearchSources; // Update local state
+        state.userConfig.animeSearchEnabled = animeSearchEnabled; // Update local state
         updateURL();
         updateStremioButtonHref();
         showNotification('search', 'Search preferences saved.', 'success');
@@ -3098,5 +3111,95 @@ function startNameEditing(listItemElement, list) {
     }
   }
 
+  // Handle metadata source change
+  async function handleMetadataSourceChange() {
+    const newMetadataSource = elements.metadataSourceSelect.value;
+    
+    if (newMetadataSource === 'tmdb') {
+      const hasTmdbBearerToken = state.userConfig.tmdbBearerToken || state.env?.hasTmdbBearerToken;
+      if (!hasTmdbBearerToken) {
+        showNotification('settings', 'TMDB Bearer Token required to use TMDB as metadata source.', 'error');
+        elements.metadataSourceSelect.value = state.userConfig.metadataSource;
+        return;
+      }
+    }
+    
+    await updateMetadataSettings(newMetadataSource, null);
+  }
+
+  // Handle TMDB language change
+  async function handleTmdbLanguageChange() {
+    const newLanguage = elements.tmdbLanguageSelect.dataset.value;
+    await updateMetadataSettings(null, newLanguage);
+  }
+
+  // Update metadata settings on server
+  async function updateMetadataSettings(metadataSource = null, tmdbLanguage = null) {
+    try {
+      const payload = {};
+      if (metadataSource) payload.metadataSource = metadataSource;
+      if (tmdbLanguage) payload.tmdbLanguage = tmdbLanguage;
+      
+      const response = await fetch(`/${state.configHash}/config/metadata`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to update metadata settings');
+      }
+      
+      if (data.configHash && data.configHash !== state.configHash) {
+        state.configHash = data.configHash;
+        updateURL();
+        updateStremioButtonHref();
+      }
+      
+      if (metadataSource) state.userConfig.metadataSource = metadataSource;
+      if (tmdbLanguage) state.userConfig.tmdbLanguage = tmdbLanguage;
+      
+      updateMetadataSourceUI();
+      showNotification('search', 'Metadata settings updated.', 'success');
+    } catch (error) {
+      console.error('Error updating metadata settings:', error);
+      showNotification('settings', `Error: ${error.message}`, 'error', true);
+      // Revert UI changes on error
+      if (elements.metadataSourceSelect) {
+        elements.metadataSourceSelect.value = state.userConfig.metadataSource;
+      }
+      if (elements.tmdbLanguageSelect) {
+        // Find and set the language using the new searchable dropdown format
+        const language = tmdbLanguages.find(lang => lang.iso_639_1 === state.userConfig.tmdbLanguage);
+        if (language) {
+          selectLanguage(language.iso_639_1, language.english_name);
+        }
+      }
+      updateMetadataSourceUI();
+    }
+  }
+
+  // Update metadata source UI
+  function updateMetadataSourceUI() {
+    if (elements.tmdbLanguageGroup) {
+      const showLanguageSettings = state.userConfig.metadataSource === 'tmdb';
+      elements.tmdbLanguageGroup.style.display = showLanguageSettings ? 'flex' : 'none';
+    }
+    
+    // Enable/disable TMDB option based on Bearer Token availability (OAuth not required for metadata)
+    if (elements.metadataSourceSelect) {
+      const tmdbOption = elements.metadataSourceSelect.querySelector('option[value="tmdb"]');
+      if (tmdbOption) {
+        // TMDB is available if user has bearer token OR environment has bearer token
+        const hasTmdbBearerToken = state.userConfig.tmdbBearerToken || state.env?.hasTmdbBearerToken;
+        tmdbOption.disabled = !hasTmdbBearerToken;
+        tmdbOption.textContent = hasTmdbBearerToken ? 'TMDB' : 'TMDB (Bearer Token required)';
+      }
+    }
+  }
+
   init();
 });
+
+// Event handlers

@@ -132,6 +132,18 @@ module.exports = function(router) {
       req.userConfig = await decompressConfig(configHash);
       req.configHash = configHash;
       
+      // Ensure new search features are available for existing configurations
+      const { defaultConfig } = require('../config');
+      if (typeof req.userConfig.mergedSearchSources === 'undefined') {
+        req.userConfig.mergedSearchSources = defaultConfig.mergedSearchSources;
+      }
+      if (typeof req.userConfig.animeSearchEnabled === 'undefined') {
+        req.userConfig.animeSearchEnabled = defaultConfig.animeSearchEnabled;
+      }
+      if (typeof req.userConfig.searchSources === 'undefined') {
+        req.userConfig.searchSources = defaultConfig.searchSources;
+      }
+      
       // If Upstash is configured and we have a traktUuid, try to load Trakt tokens before determining shared status
       if (req.userConfig.upstashUrl && req.userConfig.traktUuid && !req.userConfig.traktAccessToken) {
         try {
@@ -275,12 +287,24 @@ module.exports = function(router) {
 
   router.post('/:configHash/config', async (req, res) => {
     try {
-      const { searchSources } = req.body;
+      const { searchSources, mergedSearchSources, animeSearchEnabled } = req.body;
       
+      // Handle traditional search sources
       if (searchSources && Array.isArray(searchSources)) {
         // Temporarily disable 'multi' search option
         const validSources = searchSources.filter(s => ['cinemeta', 'trakt', 'tmdb'].includes(s));
         req.userConfig.searchSources = validSources;
+      }
+
+      // Handle merged search sources
+      if (mergedSearchSources && Array.isArray(mergedSearchSources)) {
+        const validMergedSources = mergedSearchSources.filter(s => ['tmdb'].includes(s));
+        req.userConfig.mergedSearchSources = validMergedSources;
+      }
+
+      // Handle anime search enabled
+      if (typeof animeSearchEnabled === 'boolean') {
+        req.userConfig.animeSearchEnabled = animeSearchEnabled;
       }
 
       req.userConfig.lastUpdated = new Date().toISOString();
@@ -374,8 +398,8 @@ module.exports = function(router) {
       skip = isNaN(skip) ? 0 : skip;
       genre = genre || null;
   
-      // Handle search catalog specially
-      if (catalogId === 'aiolists_search') {
+      // Handle search catalogs specially  
+      if (catalogId === 'aiolists_search_movies' || catalogId === 'aiolists_search_series' || catalogId === 'aiolists_merged_search' || catalogId === 'aiolists_anime_search') {
         let searchQuery = req.query.search;
         
         // Extract search query from extra params if not in query string
@@ -391,49 +415,79 @@ module.exports = function(router) {
         }
 
         try {
-          // Determine search sources based on user configuration
-          const userSearchSources = req.userConfig.searchSources || ['cinemeta'];
-          let sources = [];
-          
-          // Individual search sources mode (multi search is disabled)
-          if (userSearchSources.includes('cinemeta')) {
-            sources.push('cinemeta');
-          }
-          if (userSearchSources.includes('trakt')) {
-            sources.push('trakt');
-          }
-          if (userSearchSources.includes('tmdb') && (req.userConfig.tmdbBearerToken || req.userConfig.tmdbSessionId)) {
-            sources.push('tmdb');
-          }
-          
-          // Default to Cinemeta if no valid sources
-          if (sources.length === 0) {
-            sources = ['cinemeta'];
-          }
-          
           const { searchContent } = require('../utils/searchEngine');
-          
-          // Use the catalog type for search
-          const searchType = catalogType || 'all';
-          
-          const searchResults = await searchContent({
-            query: searchQuery.trim(),
-            type: searchType,
-            sources: sources,
-            limit: 50,
-            userConfig: req.userConfig
-          });
+          let searchResults;
+
+          if (catalogId === 'aiolists_merged_search') {
+            // Merged search using TMDB multi search
+            console.log(`[API Search] Handling merged search for "${searchQuery}"`);
+            
+            searchResults = await searchContent({
+              query: searchQuery.trim(),
+              type: 'search', // Use search type for merged search
+              sources: ['multi'], // Use multi source for merged search
+              limit: 50,
+              userConfig: req.userConfig
+            });
+          } else if (catalogId === 'aiolists_anime_search') {
+            // Anime search using Kitsu API
+            console.log(`[API Search] Handling anime search for "${searchQuery}"`);
+            
+            searchResults = await searchContent({
+              query: searchQuery.trim(),
+              type: 'anime', // Use anime type for anime search
+              sources: ['anime'], // Use anime source for anime search
+              limit: 50,
+              userConfig: req.userConfig
+            });
+          } else {
+            // Traditional movie/series search
+            console.log(`[API Search] Handling traditional search for "${searchQuery}"`);
+            
+            // Determine search sources based on user configuration
+            const userSearchSources = req.userConfig.searchSources || [];
+            let sources = [];
+            
+            // Individual search sources mode (multi search is disabled)
+            if (userSearchSources.includes('cinemeta')) {
+              sources.push('cinemeta');
+            }
+            if (userSearchSources.includes('trakt')) {
+              sources.push('trakt');
+            }
+            if (userSearchSources.includes('tmdb') && (req.userConfig.tmdbBearerToken || req.userConfig.tmdbSessionId)) {
+              sources.push('tmdb');
+            }
+            
+            // If no valid sources are configured, return empty results
+            if (sources.length === 0) {
+              console.log(`[API Search] No valid search sources configured, returning empty results`);
+              return res.json({ metas: [] });
+            }
+            
+            // Use the catalog type for search
+            const searchType = catalogType || 'all';
+            
+            searchResults = await searchContent({
+              query: searchQuery.trim(),
+              type: searchType,
+              sources: sources,
+              limit: 50,
+              userConfig: req.userConfig
+            });
+          }
 
           // Filter results by type and genre if specified
           let filteredMetas = searchResults.results || [];
           
-          // Filter by type if specified
-          if (catalogType && catalogType !== 'all') {
+          // Filter by type if specified (only for traditional search)
+          if (catalogId === 'aiolists_search' && catalogType && catalogType !== 'all' && catalogType !== 'search') {
             filteredMetas = filteredMetas.filter(result => result.type === catalogType);
           }
 
           // Filter by genre if specified
           if (genre && genre !== 'All') {
+            const beforeFilter = filteredMetas.length;
             filteredMetas = filteredMetas.filter(result => {
               if (!result.genres) return false;
               const itemGenres = Array.isArray(result.genres) ? result.genres : [result.genres];
@@ -441,6 +495,7 @@ module.exports = function(router) {
                 String(g).toLowerCase() === String(genre).toLowerCase()
               );
             });
+            console.log(`[API Search] Genre filter "${genre}": ${beforeFilter} -> ${filteredMetas.length} results`);
           }
 
           return res.json({ 
@@ -449,7 +504,7 @@ module.exports = function(router) {
           });
 
         } catch (error) {
-          console.error(`Error in search catalog for "${searchQuery}":`, error);
+          console.error(`[API Search] Error in search catalog "${catalogId}" for "${searchQuery}":`, error);
           return res.json({ metas: [] });
         }
       }
@@ -921,15 +976,112 @@ module.exports = function(router) {
         req.userConfig.traktRefreshToken = null;
         req.userConfig.traktExpiresAt = null;
 
+        // Purge Trakt-related list configurations and metadata
         purgeListConfigs(req.userConfig, 'trakt_');
+        
+        // Clean up list order entries for Trakt lists
+        if (req.userConfig.listOrder && Array.isArray(req.userConfig.listOrder)) {
+          req.userConfig.listOrder = req.userConfig.listOrder.filter(listId => !listId.startsWith('trakt_'));
+        }
+        
+        // Clean up lists metadata for Trakt lists
+        if (req.userConfig.listsMetadata) {
+          Object.keys(req.userConfig.listsMetadata).forEach(key => {
+            if (key.startsWith('trakt_')) {
+              delete req.userConfig.listsMetadata[key];
+            }
+          });
+        }
 
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(req.userConfig);
-        manifestCache.clear();
+        clearManifestCache('Trakt disconnected');
         res.json({ success: true, configHash: newConfigHash, message: 'Disconnected from Trakt.' });
     } catch (error) {
         console.error('Error in /trakt/disconnect:', error);
         res.status(500).json({ error: 'Failed to disconnect from Trakt', details: error.message });
+    }
+  });
+
+  // Add MDBList disconnect endpoint
+  router.post('/:configHash/mdblist/disconnect', async (req, res) => {
+    try {
+        req.userConfig.apiKey = null;
+
+        // Purge MDBList-related list configurations and metadata
+        purgeListConfigs(req.userConfig, 'aiolists-');
+        
+        // Clean up list order entries for MDBList lists
+        if (req.userConfig.listOrder && Array.isArray(req.userConfig.listOrder)) {
+          req.userConfig.listOrder = req.userConfig.listOrder.filter(listId => 
+            !listId.startsWith('aiolists-') || listId === 'aiolists_search_movies' || listId === 'aiolists_search_series' || listId === 'aiolists_merged_search' || listId === 'aiolists_anime_search'
+          );
+        }
+        
+        // Clean up lists metadata for MDBList lists
+        if (req.userConfig.listsMetadata) {
+          Object.keys(req.userConfig.listsMetadata).forEach(key => {
+            if (key.startsWith('aiolists-')) {
+              delete req.userConfig.listsMetadata[key];
+            }
+          });
+        }
+
+        req.userConfig.lastUpdated = new Date().toISOString();
+        const newConfigHash = await compressConfig(req.userConfig);
+        clearManifestCache('MDBList disconnected');
+        res.json({ success: true, configHash: newConfigHash, message: 'Disconnected from MDBList.' });
+    } catch (error) {
+        console.error('Error in /mdblist/disconnect:', error);
+        res.status(500).json({ error: 'Failed to disconnect from MDBList', details: error.message });
+    }
+  });
+
+  // Add TMDB disconnect endpoint 
+  router.post('/:configHash/tmdb/disconnect', async (req, res) => {
+    try {
+        req.userConfig.tmdbSessionId = null;
+        req.userConfig.tmdbAccountId = null;
+        
+        // Only clear user-provided bearer token, not environment token
+        req.userConfig.tmdbBearerToken = null;
+        
+        // Reset metadata source if it was set to TMDB
+        if (req.userConfig.metadataSource === 'tmdb') {
+          req.userConfig.metadataSource = 'cinemeta';
+        }
+
+        // Purge TMDB-related list configurations and metadata
+        purgeListConfigs(req.userConfig, 'tmdb_');
+        
+        // Clean up list order entries for TMDB lists
+        if (req.userConfig.listOrder && Array.isArray(req.userConfig.listOrder)) {
+          req.userConfig.listOrder = req.userConfig.listOrder.filter(listId => !listId.startsWith('tmdb_'));
+        }
+        
+        // Clean up lists metadata for TMDB lists
+        if (req.userConfig.listsMetadata) {
+          Object.keys(req.userConfig.listsMetadata).forEach(key => {
+            if (key.startsWith('tmdb_')) {
+              delete req.userConfig.listsMetadata[key];
+            }
+          });
+        }
+
+        req.userConfig.lastUpdated = new Date().toISOString();
+        const newConfigHash = await compressConfig(req.userConfig);
+        clearManifestCache('TMDB disconnected');
+        
+        // Check if environment TMDB bearer token is still available
+        const hasEnvToken = !!require('../config').TMDB_BEARER_TOKEN;
+        const message = hasEnvToken ? 
+          'Disconnected from TMDB OAuth. TMDB features still available via environment Bearer Token.' :
+          'Disconnected from TMDB. Metadata source reset to Cinemeta.';
+          
+        res.json({ success: true, configHash: newConfigHash, message });
+    } catch (error) {
+        console.error('Error in /tmdb/disconnect:', error);
+        res.status(500).json({ error: 'Failed to disconnect from TMDB', details: error.message });
     }
   });
 
@@ -2001,28 +2153,7 @@ module.exports = function(router) {
     }
   });
 
-  router.post('/:configHash/tmdb/disconnect', async (req, res) => {
-    try {
-      req.userConfig.tmdbBearerToken = null;
-      req.userConfig.tmdbSessionId = null;
-      req.userConfig.tmdbAccountId = null;
-      
-      // Only revert to default metadata source if no environment Bearer Token is available
-      if (req.userConfig.metadataSource === 'tmdb' && !TMDB_BEARER_TOKEN) {
-        req.userConfig.metadataSource = 'cinemeta';
-      }
-      
-      req.userConfig.lastUpdated = new Date().toISOString();
-      
-      const newConfigHash = await compressConfig(req.userConfig);
-      manifestCache.clear();
-      
-      res.json({ success: true, configHash: newConfigHash, message: 'Disconnected from TMDB' });
-    } catch (error) {
-      console.error('Error in /tmdb/disconnect:', error);
-      res.status(500).json({ error: 'Failed to disconnect from TMDB', details: error.message });
-    }
-  });
+
 
   router.post('/tmdb/validate', async (req, res) => {
     try {
@@ -2163,4 +2294,71 @@ module.exports = function(router) {
       res.status(500).json({ error: 'Failed to get debug info', details: error.message });
     }
   });
+
+  // Debug endpoint for search configuration
+  router.get('/debug/search-config', (req, res) => {
+    const userConfig = req.userConfig || {};
+    
+    const debugInfo = {
+      searchSources: userConfig.searchSources || [],
+      mergedSearchSources: userConfig.mergedSearchSources || [],
+      animeSearchEnabled: userConfig.animeSearchEnabled || false,
+      hasTmdbBearerToken: !!(userConfig.tmdbBearerToken || TMDB_BEARER_TOKEN),
+      hasEnvBearerToken: !!TMDB_BEARER_TOKEN,
+      hasUserBearerToken: !!userConfig.tmdbBearerToken,
+      
+      // Configuration validation
+      validation: {
+        traditionalSearchValid: (userConfig.searchSources || []).length > 0,
+        mergedSearchValid: (userConfig.mergedSearchSources || []).includes('tmdb') && 
+                            !!(userConfig.tmdbBearerToken || TMDB_BEARER_TOKEN),
+        animeSearchValid: !!userConfig.animeSearchEnabled,
+      },
+      
+      // Expected manifest types
+      expectedTypes: {
+        base: ['movie', 'series', 'all'],
+        search: (userConfig.mergedSearchSources || []).includes('tmdb') && 
+                !!(userConfig.tmdbBearerToken || TMDB_BEARER_TOKEN) ? ['search'] : [],
+        anime: userConfig.animeSearchEnabled ? ['anime'] : []
+      }
+    };
+    
+    res.json({
+      success: true,
+      debug: debugInfo,
+      recommendations: {
+        forTmdbMultiSearch: !debugInfo.validation.mergedSearchValid ? 
+          'Set mergedSearchSources to ["tmdb"] and ensure TMDB Bearer Token is configured' : 'Configuration OK',
+        forAnimeSearch: !debugInfo.validation.animeSearchValid ? 
+          'Set animeSearchEnabled to true' : 'Configuration OK'
+      }
+    });
+  });
+
+  // Temporary endpoint to fix search configuration
+  router.post('/debug/fix-search-config', (req, res) => {
+    const userConfig = req.userConfig || {};
+    
+    // Enable all search features with TMDB bearer token available
+    userConfig.searchSources = ['cinemeta', 'tmdb'];  // Enable traditional search
+    userConfig.mergedSearchSources = ['tmdb'];        // Enable TMDB Multi Search  
+    userConfig.animeSearchEnabled = true;             // Enable Anime Search
+    
+    // Save the updated configuration
+    req.userConfig = userConfig;
+    
+    res.json({
+      success: true,
+      message: 'Search configuration has been fixed!',
+      updated: {
+        searchSources: userConfig.searchSources,
+        mergedSearchSources: userConfig.mergedSearchSources,
+        animeSearchEnabled: userConfig.animeSearchEnabled
+      },
+      instructions: 'Now refresh your addon manifest to see all search catalogs.'
+    });
+  });
+
+  return router;
 };

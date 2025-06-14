@@ -288,7 +288,7 @@ async function createAddon(userConfig) {
   await initTraktApi(userConfig);
   const manifest = {
     id: 'org.stremio.aiolists',
-    version: `1.2.3-${Date.now()}`,
+    version: `1.2.4-${Date.now()}`,
     name: 'AIOLists',
     description: 'Manage all your lists in one place.',
     resources: ['catalog', 'meta'],
@@ -307,10 +307,24 @@ async function createAddon(userConfig) {
 
   const allKnownTypes = new Set(['movie', 'series', 'all']);
 
-  // Add search type if multi search is enabled
+  // Add search type if search functionality is enabled
   const searchSources = userConfig.searchSources || ['cinemeta'];
-  if (searchSources.includes('multi')) {
-    allKnownTypes.add('search');
+  const mergedSearchSources = userConfig.mergedSearchSources || [];
+  
+  // Add search types based on configuration
+  if (searchSources.length > 0) {
+    // Traditional search is enabled, no additional type needed (uses movie/series)
+  }
+  
+  const mergedSearchSourcesForTypes = userConfig.mergedSearchSources || [];
+  if (mergedSearchSourcesForTypes.includes('tmdb') && (userConfig.tmdbBearerToken || require('../config').TMDB_BEARER_TOKEN)) {
+    allKnownTypes.add('search'); // For merged search
+    console.log(`[AddonBuilder] Added 'search' type to manifest for merged search`);
+  }
+  
+  if (userConfig.animeSearchEnabled) {
+    allKnownTypes.add('anime'); // For anime search
+    console.log(`[AddonBuilder] Added 'anime' type to manifest for anime search`);
   }
 
   // Add types from customMediaTypeNames (user overrides)
@@ -914,8 +928,18 @@ async function createAddon(userConfig) {
     // No sorting whatsoever - catalogs remain in the exact order they were added
   }
 
-  // Add search catalogs only if search sources are configured
-  const userSearchSources = userConfig.searchSources || ['cinemeta'];
+  // Add search catalogs - now with three different types
+  console.log(`[AddonBuilder] ========== SEARCH CATALOG DEBUG ==========`);
+  console.log(`[AddonBuilder] userConfig.searchSources:`, userConfig.searchSources);
+  console.log(`[AddonBuilder] userConfig.mergedSearchSources:`, userConfig.mergedSearchSources);
+  console.log(`[AddonBuilder] userConfig.animeSearchEnabled:`, userConfig.animeSearchEnabled);
+  console.log(`[AddonBuilder] userConfig.tmdbBearerToken:`, !!userConfig.tmdbBearerToken);
+  console.log(`[AddonBuilder] process.env.TMDB_BEARER_TOKEN:`, !!process.env.TMDB_BEARER_TOKEN);
+  console.log(`[AddonBuilder] require('../config').TMDB_BEARER_TOKEN:`, !!require('../config').TMDB_BEARER_TOKEN);
+  console.log(`[AddonBuilder] ================================================`);
+  
+  // 1. Traditional Movie/Series Search
+  const userSearchSources = userConfig.searchSources || [];  // Don't default to cinemeta
   let hasValidSearchSources = false;
   
   // Check if any valid search sources are enabled
@@ -929,16 +953,16 @@ async function createAddon(userConfig) {
     hasValidSearchSources = true;
   }
   
-  // Only add search catalogs if there are valid search sources
+  // Only add traditional search catalogs if there are valid search sources
   if (hasValidSearchSources) {
     const searchCatalogExtra = [
       { name: "search", isRequired: true },
       { name: "genre", isRequired: false, options: availableGenres }
     ];
     
-    // Create separate movie/series catalogs
+    // Create separate movie/series catalogs for traditional search with unique IDs
     tempGeneratedCatalogs.push({
-      id: 'aiolists_search',
+      id: 'aiolists_search_movies',
       type: 'movie',
       name: 'Search Movies',
       extra: searchCatalogExtra,
@@ -946,16 +970,81 @@ async function createAddon(userConfig) {
     });
     
     tempGeneratedCatalogs.push({
-      id: 'aiolists_search',
+      id: 'aiolists_search_series',
       type: 'series', 
       name: 'Search Series',
       extra: searchCatalogExtra,
       extraSupported: searchCatalogExtra.map(e => e.name)
     });
     
-    console.log(`[AddonBuilder] Added search catalogs with sources: ${userSearchSources.join(', ')}`);
+    console.log(`[AddonBuilder] Added traditional search catalogs with sources: ${userSearchSources.join(', ')}`);
   } else {
-    console.log(`[AddonBuilder] No valid search sources configured - search catalogs disabled`);
+    console.log(`[AddonBuilder] No valid search sources configured - traditional search catalogs disabled`);
+    console.log(`[AddonBuilder] Available sources: ${userSearchSources.join(', ')}`);
+    console.log(`[AddonBuilder] TMDB available for traditional search: ${!!(userConfig.tmdbBearerToken || require('../config').TMDB_BEARER_TOKEN)}`);
+  }
+
+  // 2. Merged Search (TMDB Multi Search)
+  const userMergedSearchSources = userConfig.mergedSearchSources || [];
+  let hasValidMergedSearchSources = false;
+  
+  // Debug logging
+  console.log(`[AddonBuilder] Merged search config check - mergedSearchSources:`, userMergedSearchSources);
+  console.log(`[AddonBuilder] TMDB Bearer Token available:`, !!(userConfig.tmdbBearerToken || require('../config').TMDB_BEARER_TOKEN));
+  
+  // Check if TMDB is available for merged search
+  if (userMergedSearchSources.includes('tmdb') && (userConfig.tmdbBearerToken || require('../config').TMDB_BEARER_TOKEN)) {
+    hasValidMergedSearchSources = true;
+  }
+  
+  if (hasValidMergedSearchSources) {
+    const mergedSearchCatalogExtra = [
+      { name: "search", isRequired: true },
+      { name: "genre", isRequired: false, options: availableGenres }
+    ];
+    
+    // Create merged search catalog (combines movies and series)
+    tempGeneratedCatalogs.push({
+      id: 'aiolists_merged_search',
+      type: 'search', // Custom type for merged search
+      name: 'Merged Search',
+      extra: mergedSearchCatalogExtra,
+      extraSupported: mergedSearchCatalogExtra.map(e => e.name)
+    });
+    
+    console.log(`[AddonBuilder] Added merged search catalog with TMDB multi search`);
+  } else {
+    console.log(`[AddonBuilder] TMDB not available or merged search disabled - merged search catalog disabled`);
+    console.log(`[AddonBuilder] Debug: mergedSearchSources includes tmdb:`, userMergedSearchSources.includes('tmdb'));
+    console.log(`[AddonBuilder] Debug: TMDB token available:`, !!(userConfig.tmdbBearerToken || require('../config').TMDB_BEARER_TOKEN));
+    console.log(`[AddonBuilder] Fix: Set mergedSearchSources to ['tmdb'] and ensure TMDB Bearer Token is configured`);
+  }
+
+  // 3. Anime Search
+  const animeSearchEnabled = userConfig.animeSearchEnabled || false;
+  
+  // Debug logging
+  console.log(`[AddonBuilder] Anime search config check - animeSearchEnabled:`, animeSearchEnabled);
+  
+  if (animeSearchEnabled) {
+    const animeSearchCatalogExtra = [
+      { name: "search", isRequired: true },
+      { name: "genre", isRequired: false, options: availableGenres }
+    ];
+    
+    // Create anime search catalog
+    tempGeneratedCatalogs.push({
+      id: 'aiolists_anime_search',
+      type: 'anime', // Custom type for anime search
+      name: 'Anime Search',
+      extra: animeSearchCatalogExtra,
+      extraSupported: animeSearchCatalogExtra.map(e => e.name)
+    });
+    
+    console.log(`[AddonBuilder] Added anime search catalog`);
+  } else {
+    console.log(`[AddonBuilder] Anime search disabled`);
+    console.log(`[AddonBuilder] Fix: Set animeSearchEnabled to true in user configuration`);
   }
   
   manifest.catalogs = tempGeneratedCatalogs;
@@ -969,51 +1058,80 @@ async function createAddon(userConfig) {
     const genre = extra?.genre || null;
     const searchQuery = extra?.search || null;
     
-    // Handle search catalog
-    if (id === 'aiolists_search' && searchQuery) {      
+    // Handle search catalogs
+    if ((id === 'aiolists_search_movies' || id === 'aiolists_search_series' || id === 'aiolists_merged_search' || id === 'aiolists_anime_search') && searchQuery) {      
       if (!searchQuery || searchQuery.trim().length < 2) {
         return Promise.resolve({ metas: [] });
       }
 
       try {
-        // Determine search sources based on user configuration
-        const userSearchSources = userConfig.searchSources || ['cinemeta'];
-        let sources = [];
-        
-        // Individual search sources mode (multi search is disabled)
-        if (userSearchSources.includes('cinemeta')) {
-          sources.push('cinemeta');
-        }
-        if (userSearchSources.includes('trakt')) {
-          sources.push('trakt');
-        }
-        if (userSearchSources.includes('tmdb') && (userConfig.tmdbBearerToken || userConfig.tmdbSessionId)) {
-          sources.push('tmdb');
-        }
-        
-        // Default to Cinemeta if no valid sources
-        if (sources.length === 0) {
-          sources = ['cinemeta'];
-        }
-
         const { searchContent } = require('../utils/searchEngine');
-        
-        // Use the type for search
-        const searchType = type || 'all';
-        
-        const searchResults = await searchContent({
-          query: searchQuery.trim(),
-          type: searchType,
-          sources: sources,
-          limit: 50,
-          userConfig: userConfig
-        });
+        let searchResults;
+
+        if (id === 'aiolists_merged_search') {
+          // Merged search using TMDB multi search
+          console.log(`[Search] Handling merged search for "${searchQuery}"`);
+          
+          searchResults = await searchContent({
+            query: searchQuery.trim(),
+            type: 'search', // Use search type for merged search
+            sources: ['multi'], // Use multi source for merged search
+            limit: 50,
+            userConfig: userConfig
+          });
+        } else if (id === 'aiolists_anime_search') {
+          // Anime search using Kitsu API
+          console.log(`[Search] Handling anime search for "${searchQuery}"`);
+          
+          searchResults = await searchContent({
+            query: searchQuery.trim(),
+            type: 'anime', // Use anime type for anime search
+            sources: ['anime'], // Use anime source for anime search
+            limit: 50,
+            userConfig: userConfig
+          });
+        } else {
+          // Traditional movie/series search
+          console.log(`[Search] Handling traditional search for "${searchQuery}" (catalog: ${id})`);
+          
+          // Determine search sources based on user configuration
+          const userSearchSources = userConfig.searchSources || [];
+          let sources = [];
+          
+          // Individual search sources mode (multi search is disabled)
+          if (userSearchSources.includes('cinemeta')) {
+            sources.push('cinemeta');
+          }
+          if (userSearchSources.includes('trakt')) {
+            sources.push('trakt');
+          }
+          if (userSearchSources.includes('tmdb') && (userConfig.tmdbBearerToken || userConfig.tmdbSessionId)) {
+            sources.push('tmdb');
+          }
+          
+          // If no valid sources are configured, return empty results
+          if (sources.length === 0) {
+            console.log(`[Search] No valid search sources configured, returning empty results`);
+            return Promise.resolve({ metas: [] });
+          }
+
+          // Use the type for search
+          const searchType = type || 'all';
+          
+          searchResults = await searchContent({
+            query: searchQuery.trim(),
+            type: searchType,
+            sources: sources,
+            limit: 50,
+            userConfig: userConfig
+          });
+        }
 
         // Filter results by type and genre if specified
         let filteredMetas = searchResults.results || [];
         
-        // Filter by type if specified
-        if (type && type !== 'all' && type !== 'search') {
+        // Filter by type if specified (only for traditional search)
+        if ((id === 'aiolists_search_movies' || id === 'aiolists_search_series') && type && type !== 'all' && type !== 'search') {
           filteredMetas = filteredMetas.filter(result => result.type === type);
         }
 
@@ -1027,6 +1145,7 @@ async function createAddon(userConfig) {
               String(g).toLowerCase() === String(genre).toLowerCase()
             );
           });
+          console.log(`[Search] Genre filter "${genre}": ${beforeFilter} -> ${filteredMetas.length} results`);
         }
 
         return Promise.resolve({ 
@@ -1035,7 +1154,7 @@ async function createAddon(userConfig) {
         });
 
       } catch (error) {
-        console.error(`[Search] Error in search catalog for "${searchQuery}":`, error);
+        console.error(`[Search] Error in search catalog "${id}" for "${searchQuery}":`, error);
         return Promise.resolve({ metas: [] });
       }
     }
