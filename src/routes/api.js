@@ -17,6 +17,7 @@ const manifestCache = new Cache({ defaultTTL: 1 * 60 * 1000 });
 
 // Helper function to create a config copy for storage that excludes sensitive Trakt tokens when using Upstash
 function createConfigForStorage(userConfig) {
+  console.log('[CONFIG] Creating config for storage');
   const configForStorage = { ...userConfig };
   
   // Only exclude Trakt tokens from storage if Upstash is configured and we have a traktUuid
@@ -28,6 +29,28 @@ function createConfigForStorage(userConfig) {
   }
   
   return configForStorage;
+}
+
+// Helper function to update config without rebuilding manifest
+async function updateConfigLightweight(userConfig, changes, changeDescription) {
+  console.log(`[CONFIG] Lightweight update: ${changeDescription}`);
+  console.log(`[CONFIG] Changes applied:`, Object.keys(changes));
+  
+  // Apply changes to user config
+  Object.assign(userConfig, changes);
+  userConfig.lastUpdated = new Date().toISOString();
+  
+  // Generate new config hash
+  const newConfigHash = await compressConfig(userConfig);
+  console.log(`[CONFIG] Generated new config hash: ${newConfigHash.substring(0, 20)}...`);
+  
+  return newConfigHash;
+}
+
+// Helper function to clear manifest cache and log it
+function clearManifestCache(reason) {
+  console.log(`[MANIFEST] Clearing manifest cache due to: ${reason}`);
+  manifestCache.clear();
 }
 
 function purgeListConfigs(userConfig, listIdPrefixOrExactId, isExactId = false) {
@@ -275,18 +298,55 @@ module.exports = function(router) {
     res.sendFile(path.join(__dirname, '..', '..', 'public', 'index.html'));
   });
 
+  // New endpoint to prepare manifest for Install/Copy actions
+  router.post('/:configHash/prepare-manifest', async (req, res) => {
+    try {
+      console.log('[MANIFEST] Preparing manifest for Install/Copy action');
+      console.log('[MANIFEST] Starting full manifest generation with list fetching');
+      
+      const cacheKey = `manifest_${req.configHash}`;
+      manifestCache.delete(cacheKey); // Force fresh generation
+      
+      const startTime = Date.now();
+      const addonInterface = await createAddon(req.userConfig);
+      const endTime = Date.now();
+      
+      console.log(`[MANIFEST] Manifest generation completed in ${endTime - startTime}ms`);
+      console.log(`[MANIFEST] Generated manifest with ${addonInterface.manifest.catalogs.length} catalogs`);
+      
+      manifestCache.set(cacheKey, addonInterface);
+      
+      res.json({ 
+        success: true, 
+        manifest: addonInterface.manifest,
+        generationTime: endTime - startTime,
+        catalogCount: addonInterface.manifest.catalogs.length
+      });
+    } catch (error) {
+      console.error('[MANIFEST] Error preparing manifest:', error);
+      res.status(500).json({ error: 'Failed to prepare manifest', details: error.message });
+    }
+  });
+
   router.get('/:configHash/manifest.json', async (req, res) => {
     try {
+      console.log('[MANIFEST] Serving manifest.json');
       const cacheKey = `manifest_${req.configHash}`;
       let addonInterface = manifestCache.get(cacheKey);
       if (!addonInterface) {
+        console.log('[MANIFEST] No cached manifest found, generating new one');
+        const startTime = Date.now();
         addonInterface = await createAddon(req.userConfig);
+        const endTime = Date.now();
+        console.log(`[MANIFEST] Fresh manifest generated in ${endTime - startTime}ms`);
         manifestCache.set(cacheKey, addonInterface);
+      } else {
+        console.log('[MANIFEST] Serving cached manifest');
       }
       setCacheHeaders(res, null);
       res.json(addonInterface.manifest);
     } catch (error) {
-      console.error('Error serving manifest:', error);
+      console.error('[MANIFEST] Error serving manifest:', error);
       res.status(500).json({ error: 'Failed to serve manifest' });
     }
   });
@@ -1042,26 +1102,30 @@ module.exports = function(router) {
 
   router.post('/:configHash/lists/names', async (req, res) => {
     try {
+      console.log('[LISTS] Updating list names (lightweight)');
       const { listId, customName } = req.body;
       if (!listId) return res.status(400).json({ error: 'List ID required' });
       if (!req.userConfig.customListNames) req.userConfig.customListNames = {};
       if (customName && customName.trim()) {
         req.userConfig.customListNames[String(listId)] = customName.trim();
+        console.log(`[LISTS] Set custom name for list ${listId}: "${customName.trim()}"`);
       } else {
         delete req.userConfig.customListNames[String(listId)];
+        console.log(`[LISTS] Removed custom name for list: ${listId}`);
       }
-      req.userConfig.lastUpdated = new Date().toISOString();
-      const newConfigHash = await compressConfig(req.userConfig);
-      manifestCache.clear();
+      
+      const newConfigHash = await updateConfigLightweight(req.userConfig, {}, 'custom list name update');
+      console.log('[LISTS] List names updated without manifest rebuild');
       res.json({ success: true, configHash: newConfigHash, message: 'List name updated' });
     } catch (error) {
-        console.error('Failed to update list name:', error);
+        console.error('[LISTS] Failed to update list name:', error);
         res.status(500).json({ error: 'Failed to update list name' });
     }
   });
 
   router.post('/:configHash/lists/mediatype', async (req, res) => {
     try {
+      console.log('[LISTS] Updating list media type (lightweight)');
       const { listId, customMediaType } = req.body;
       if (!listId) return res.status(400).json({ error: 'List ID required for custom media type.' });
 
@@ -1071,22 +1135,24 @@ module.exports = function(router) {
 
       if (customMediaType && customMediaType.trim()) {
         req.userConfig.customMediaTypeNames[String(listId)] = customMediaType.trim().toLowerCase();
+        console.log(`[LISTS] Set custom media type for list ${listId}: "${customMediaType.trim().toLowerCase()}"`);
       } else {
         delete req.userConfig.customMediaTypeNames[String(listId)];
+        console.log(`[LISTS] Removed custom media type for list: ${listId}`);
       }
 
-      req.userConfig.lastUpdated = new Date().toISOString();
-      const newConfigHash = await compressConfig(req.userConfig);
-      manifestCache.clear();
+      const newConfigHash = await updateConfigLightweight(req.userConfig, {}, 'custom media type update');
+      console.log('[LISTS] List media type updated without manifest rebuild');
       res.json({ success: true, configHash: newConfigHash, message: 'Custom media type display name updated' });
     } catch (error) {
-      console.error('Failed to update custom media type name:', error);
+      console.error('[LISTS] Failed to update custom media type name:', error);
       res.status(500).json({ error: 'Failed to update custom media type name' });
     }
   });
 
   router.post('/:configHash/lists/visibility', async (req, res) => {
     try {
+      console.log('[LISTS] Updating list visibility (lightweight)');
       const { hiddenLists } = req.body;
       if (!Array.isArray(hiddenLists)) return res.status(400).json({ error: 'Hidden lists must be an array of strings.' });
       
@@ -1095,12 +1161,13 @@ module.exports = function(router) {
       }
       
       req.userConfig.hiddenLists = hiddenLists.map(String);
-      req.userConfig.lastUpdated = new Date().toISOString();
-      const newConfigHash = await compressConfig(req.userConfig);
-      manifestCache.clear();
+      console.log(`[LISTS] Updated hidden lists: [${hiddenLists.join(', ')}]`);
+      
+      const newConfigHash = await updateConfigLightweight(req.userConfig, {}, 'list visibility update');
+      console.log('[LISTS] List visibility updated without manifest rebuild');
       res.json({ success: true, configHash: newConfigHash, message: 'List visibility updated' });
     } catch (error) {
-        console.error('Failed to update list visibility:', error);
+        console.error('[LISTS] Failed to update list visibility:', error);
         res.status(500).json({ error: 'Failed to update list visibility' });
     }
   });
@@ -1199,22 +1266,25 @@ module.exports = function(router) {
 
   router.post('/:configHash/lists/sort', async (req, res) => {
     try {
+      console.log('[LISTS] Updating sort preferences (lightweight)');
       const { listId, sort, order } = req.body;
       if (!listId || !sort) return res.status(400).json({ error: 'List ID (originalId) and sort field required' });
       if (!req.userConfig.sortPreferences) req.userConfig.sortPreferences = {};
       req.userConfig.sortPreferences[String(listId)] = { sort, order: order || 'desc' };
-      req.userConfig.lastUpdated = new Date().toISOString();
-      const newConfigHash = await compressConfig(req.userConfig);
-      manifestCache.clear();
+      console.log(`[LISTS] Set sort for list ${listId}: ${sort} ${order || 'desc'}`);
+      
+      const newConfigHash = await updateConfigLightweight(req.userConfig, {}, 'sort preferences update');
+      console.log('[LISTS] Sort preferences updated without manifest rebuild');
       res.json({ success: true, configHash: newConfigHash, message: 'Sort preferences updated' });
     } catch (error) {
-        console.error('Failed to update sort preferences:', error);
+        console.error('[LISTS] Failed to update sort preferences:', error);
         res.status(500).json({ error: 'Failed to update sort preferences' });
     }
   });
 
   router.post('/:configHash/lists/merge', async (req, res) => {
     try {
+      console.log('[LISTS] Updating list merge preference (lightweight)');
 
       if (req.userConfig.upstashUrl) {
         await initTraktApi(req.userConfig);
@@ -1247,21 +1317,21 @@ module.exports = function(router) {
             delete req.userConfig.mergedLists;
           }
         }
+        console.log(`[LISTS] Set list ${listId} to merged state`);
       } else { // User wants to split (merged === false)
         if (!req.userConfig.mergedLists) {
           req.userConfig.mergedLists = {};
         }
         req.userConfig.mergedLists[String(listId)] = false;
+        console.log(`[LISTS] Set list ${listId} to split state`);
       }
-      req.userConfig.lastUpdated = new Date().toISOString();
-  
-      const newConfigHash = await compressConfig(req.userConfig);
-      if (req.configHash !== newConfigHash) {
-          manifestCache.clear();
-      }
+      
+      const newConfigHash = await updateConfigLightweight(req.userConfig, {}, 'list merge preference update');
+      console.log('[LISTS] List merge preference updated without manifest rebuild');
   
       res.json({ success: true, configHash: newConfigHash, message: `List ${merged ? 'merged' : 'split'}` });
     } catch (error) {
+      console.error('[LISTS] Failed to update list merge preference:', error);
       res.status(500).json({ error: 'Failed to update list merge preference' });
     }
   });
@@ -1397,13 +1467,44 @@ module.exports = function(router) {
     }
   });
 
+  // Lightweight lists endpoint - doesn't fetch lists from external APIs
+  router.get('/:configHash/lists-lightweight', async (req, res) => {
+    try {
+      console.log('[LISTS] Loading lists (lightweight - no API calls)');
+      
+      // Initialize Trakt API if needed (this is fast)
+      if (req.userConfig.traktUuid || req.userConfig.traktAccessToken) {
+        await initTraktApi(req.userConfig);
+      }
+
+      // Return cached/stored list information without fetching from external APIs
+      console.log('[LISTS] Returning cached list configuration without external API calls');
+      
+      res.json({
+        success: true,
+        lists: [], // Empty for lightweight mode
+        importedAddons: req.userConfig.importedAddons || {},
+        listsMetadata: req.userConfig.listsMetadata || {},
+        customMediaTypeNames: req.userConfig.customMediaTypeNames || {},
+        isPotentiallySharedConfig: req.isPotentiallySharedConfig || false,
+        randomMDBListUsernames: req.userConfig.randomMDBListUsernames || [],
+        message: 'Lightweight mode - use /lists-full for complete list data'
+      });
+    } catch (error) {
+      console.error('[LISTS] Error in lightweight lists endpoint:', error);
+      res.status(500).json({ success: false, error: 'Failed to load lists configuration' });
+    }
+  });
+
   router.get('/:configHash/lists', async (req, res) => {
     try {
+      console.log('[LISTS] Loading lists (full - with external API calls)');
       const initialListsMetadataJson = JSON.stringify(req.userConfig.listsMetadata || {});
       const initialTraktAccessToken = req.userConfig.traktAccessToken;
       let configChangedByThisRequest = false;
         
       if (req.userConfig.traktUuid || req.userConfig.traktAccessToken) {
+        console.log('[LISTS] Initializing Trakt API');
         await initTraktApi(req.userConfig); // This is the key change
   
         if (req.userConfig.traktAccessToken !== initialTraktAccessToken) {
@@ -1413,22 +1514,28 @@ module.exports = function(router) {
 
     let allUserLists = [];
     if (req.userConfig.apiKey) {
+        console.log('[LISTS] Fetching MDBList lists');
         const mdbLists = await fetchAllMDBLists(req.userConfig.apiKey);
         allUserLists.push(...mdbLists.map(l => ({...l, source: 'mdblist'})));
+        console.log(`[LISTS] Fetched ${mdbLists.length} MDBList lists`);
     }
 
     if (req.userConfig.traktAccessToken) {
+      console.log('[LISTS] Fetching Trakt lists');
       const traktLists = await fetchTraktLists(req.userConfig); 
       allUserLists.push(...traktLists.map(l => ({...l, source: 'trakt'})));
+      console.log(`[LISTS] Fetched ${traktLists.length} Trakt lists`);
   }
 
     // Fetch from TMDB
+    console.log('[LISTS] Fetching TMDB lists');
     const { fetchTmdbLists } = require('../integrations/tmdb');
     const tmdbResult = await fetchTmdbLists(req.userConfig);
     
     // Add TMDB lists to the main lists if OAuth is connected
     if (tmdbResult.isConnected && tmdbResult.lists && tmdbResult.lists.length > 0) {
       allUserLists.push(...tmdbResult.lists.map(l => ({...l, source: 'tmdb'})));
+      console.log(`[LISTS] Fetched ${tmdbResult.lists.length} TMDB lists`);
     }
 
 

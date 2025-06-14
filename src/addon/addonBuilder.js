@@ -189,6 +189,9 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
 
 
 async function createAddon(userConfig) {
+  console.log('[ADDON BUILDER] Starting addon creation - this involves fetching all lists');
+  const startTime = Date.now();
+  
   await initTraktApi(userConfig);
   const manifest = {
     id: 'org.stremio.aiolists',
@@ -299,12 +302,16 @@ async function createAddon(userConfig) {
 
   let activeListsInfo = [];
   if (apiKey) {
+    console.log('[ADDON BUILDER] Fetching MDBList lists...');
     const mdbLists = await fetchAllMDBLists(apiKey);
     activeListsInfo.push(...mdbLists.map(l => ({ ...l, source: 'mdblist', originalId: String(l.id) })));
+    console.log(`[ADDON BUILDER] Fetched ${mdbLists.length} MDBList lists`);
   }
   if (traktAccessToken) {
+    console.log('[ADDON BUILDER] Fetching Trakt lists...');
     const traktFetchedLists = await fetchTraktLists(userConfig); // This might modify userConfig (token refresh)
     activeListsInfo.push(...traktFetchedLists.map(l => ({ ...l, source: 'trakt', originalId: String(l.id) })));
+    console.log(`[ADDON BUILDER] Fetched ${traktFetchedLists.length} Trakt lists`);
   }
   
   if (userConfig.tmdbSessionId && userConfig.tmdbAccountId) {
@@ -1154,6 +1161,10 @@ async function createAddon(userConfig) {
     }
   });
 
+  const endTime = Date.now();
+  console.log(`[ADDON BUILDER] Addon creation completed in ${endTime - startTime}ms`);
+  console.log(`[ADDON BUILDER] Generated ${manifest.catalogs.length} catalogs`);
+  
   return builder.getInterface();
 }
 

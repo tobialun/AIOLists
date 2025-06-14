@@ -785,6 +785,7 @@ document.addEventListener('DOMContentLoaded', function() {
     elements.universalImportInput.addEventListener('paste', handleUniversalPaste);
     elements.universalImportInput.addEventListener('input', handleUniversalInputChange);
     elements.copyManifestBtn?.addEventListener('click', copyManifestUrlToClipboard);
+    elements.updateStremioBtn?.addEventListener('click', handleInstallToStremio);
     elements.toggleGenreFilterBtn?.addEventListener('click', handleToggleGenreFilter);
     elements.toggleRandomListBtn?.addEventListener('click', handleToggleRandomListFeature);
     elements.settingsHeader?.addEventListener('click', toggleSettingsSection);
@@ -1991,6 +1992,9 @@ function startNameEditing(listItemElement, list) {
   }
 
   async function updateListPreference(listIdForPref, type, payload) {
+    console.log(`[UI] Updating list preference: ${type} for list ${listIdForPref || 'N/A'}`);
+    console.log(`[UI] Payload:`, payload);
+    
     const endpointMap = {
         name: `/${state.configHash}/lists/names`,
         mediatype: `/${state.configHash}/lists/mediatype`,
@@ -2002,7 +2006,7 @@ function startNameEditing(listItemElement, list) {
     };
     const endpoint = endpointMap[type];
     if (!endpoint) {
-        console.error("Unknown preference type for update:", type);
+        console.error("[UI] Unknown preference type for update:", type);
         return;
     }
 
@@ -2012,7 +2016,9 @@ function startNameEditing(listItemElement, list) {
     }
     const notifSection = (['order', 'visibility', 'name', 'remove', 'sort', 'merge', 'random_feature_disable', 'mediatype'].includes(type)) ? 'lists' : 'settings';
     showNotification(notifSection, 'Saving...', 'info', true);
+    
     try {
+        console.log(`[UI] Making API call to ${endpoint}`);
         const response = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2024,24 +2030,25 @@ function startNameEditing(listItemElement, list) {
             throw new Error(data.error || `Server error for ${type}. Status: ${response.status}`);
         }
 
-        let needsManifestReload = false;
+        console.log(`[UI] ${type} update successful, got new config hash`);
+        
         if (data.configHash && data.configHash !== state.configHash) {
             state.configHash = data.configHash;
             updateURL();
             updateStremioButtonHref();
-            needsManifestReload = true;
+            console.log(`[UI] Updated config hash: ${state.configHash.substring(0, 20)}...`);
         }
         
         showNotification(notifSection, `${type.charAt(0).toUpperCase() + type.slice(1).replace('_', ' ')} updated.`, 'success', false);
         
-        const manifestAffectingChanges = ['visibility', 'remove', 'order', 'merge', 'mediatype'];
-        if (needsManifestReload || manifestAffectingChanges.includes(type)) {
-            await loadConfiguration();
-        }
+        // Note: We no longer reload configuration or refetch lists for these lightweight updates
+        // The UI state is already updated locally and the config hash reflects the backend changes
+        console.log(`[UI] ${type} update completed without manifest rebuild or list refetch`);
 
     } catch (error) {
-        console.error(`Update Error for ${type}:`, error);
+        console.error(`[UI] Update Error for ${type}:`, error);
         showNotification(notifSection, `Error updating ${type}: ${error.message}`, 'error', true);
+        console.log(`[UI] Error during ${type} update, will refresh lists from server`);
         await loadUserListsAndAddons();
     }
   }
@@ -2101,16 +2108,76 @@ function startNameEditing(listItemElement, list) {
     }
   }
 
-  async function copyManifestUrlToClipboard() {
+  // New function to prepare manifest before install/copy actions
+  async function prepareManifestForAction(actionName) {
+    console.log(`[UI] Preparing manifest for ${actionName} action`);
+    showNotification('lists', `Preparing manifest for ${actionName}...`, 'info', true);
+    
+    try {
+      const response = await fetch(`/${state.configHash}/prepare-manifest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to prepare manifest');
+      }
+      
+      console.log(`[UI] Manifest prepared for ${actionName} in ${data.generationTime}ms`);
+      console.log(`[UI] Generated ${data.catalogCount} catalogs`);
+      showNotification('lists', `Manifest ready for ${actionName}! (${data.catalogCount} catalogs)`, 'success', false);
+      
+      return true;
+    } catch (error) {
+      console.error(`[UI] Error preparing manifest for ${actionName}:`, error);
+      showNotification('lists', `Error preparing manifest: ${error.message}`, 'error', true);
+      return false;
+    }
+  }
+
+  async function handleInstallToStremio(event) {
+    console.log('[UI] Install to Stremio requested');
+    event.preventDefault(); // Prevent default link behavior
+    
     if (!elements.updateStremioBtn || !elements.updateStremioBtn.href || !elements.updateStremioBtn.href.includes('/manifest.json')) {
         return showNotification('lists', 'Manifest URL not ready.', 'error');
     }
+    
+    // Prepare manifest before redirecting to Stremio
+    const manifestReady = await prepareManifestForAction('Install to Stremio');
+    if (!manifestReady) {
+      return; // Error already shown by prepareManifestForAction
+    }
+    
+    // Now redirect to Stremio
+    console.log('[UI] Redirecting to Stremio with prepared manifest');
+    window.location.href = elements.updateStremioBtn.href;
+  }
+
+  async function copyManifestUrlToClipboard() {
+    console.log('[UI] Copy manifest URL requested');
+    
+    if (!elements.updateStremioBtn || !elements.updateStremioBtn.href || !elements.updateStremioBtn.href.includes('/manifest.json')) {
+        return showNotification('lists', 'Manifest URL not ready.', 'error');
+    }
+    
+    // Prepare manifest before copying
+    const manifestReady = await prepareManifestForAction('Copy URL');
+    if (!manifestReady) {
+      return; // Error already shown by prepareManifestForAction
+    }
+    
     try {
       await navigator.clipboard.writeText(elements.updateStremioBtn.href);
+      console.log('[UI] Manifest URL copied to clipboard');
       const originalContent = elements.copyManifestBtn.innerHTML;
       elements.copyManifestBtn.innerHTML = '<span>Copied!</span>'; elements.copyManifestBtn.disabled = true;
       setTimeout(() => { elements.copyManifestBtn.innerHTML = originalContent; elements.copyManifestBtn.disabled = false; }, 2000);
-    } catch (err) { showNotification('lists', 'Failed to copy URL.', 'error'); }
+    } catch (err) { 
+      console.error('[UI] Failed to copy URL:', err);
+      showNotification('lists', 'Failed to copy URL.', 'error'); 
+    }
   }
 
   function showNotification(sectionKey, message, type = 'info', persistent = false) {
