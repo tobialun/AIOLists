@@ -3,6 +3,7 @@ const { Redis } = require('@upstash/redis');
 
 async function getTraktTokens(userConfig) {
     if (!userConfig.upstashUrl || !userConfig.upstashToken || !userConfig.traktUuid) {
+        console.log('[UPSTASH] getTraktTokens: Missing required credentials');
         return null;
     }
 
@@ -12,7 +13,17 @@ async function getTraktTokens(userConfig) {
             token: userConfig.upstashToken,
         });
 
-        const data = await redis.get(`trakt:${userConfig.traktUuid}`);
+        const redisKey = `trakt:${userConfig.traktUuid}`;
+        console.log(`[UPSTASH] Attempting to get tokens from Redis key: ${redisKey}`);
+        
+        const data = await redis.get(redisKey);
+        console.log(`[UPSTASH] Retrieved tokens:`, {
+            found: !!data,
+            hasAccessToken: !!data?.accessToken,
+            hasRefreshToken: !!data?.refreshToken,
+            expiresAt: data?.expiresAt
+        });
+        
         return data;
     } catch (error) {
         console.error('Upstash Error: Failed to get Trakt tokens:', error.message);
@@ -22,6 +33,7 @@ async function getTraktTokens(userConfig) {
 
 async function saveTraktTokens(userConfig, tokens) {
     if (!userConfig.upstashUrl || !userConfig.upstashToken || !userConfig.traktUuid) {
+        console.log('[UPSTASH] saveTraktTokens: Missing required credentials');
         return;
     }
 
@@ -31,9 +43,28 @@ async function saveTraktTokens(userConfig, tokens) {
             token: userConfig.upstashToken,
         });
 
-        await redis.set(`trakt:${userConfig.traktUuid}`, tokens);
+        const redisKey = `trakt:${userConfig.traktUuid}`;
+        console.log(`[UPSTASH] Saving tokens to Redis key: ${redisKey}`);
+        console.log(`[UPSTASH] Tokens being saved:`, {
+            hasAccessToken: !!tokens.accessToken,
+            hasRefreshToken: !!tokens.refreshToken,
+            expiresAt: tokens.expiresAt
+        });
+        
+        await redis.set(redisKey, tokens);
+        console.log(`[UPSTASH] Successfully saved tokens to Redis`);
+        
+        // Verify the save by reading back immediately
+        const verification = await redis.get(redisKey);
+        console.log(`[UPSTASH] Verification read back:`, {
+            hasAccessToken: !!verification?.accessToken,
+            hasRefreshToken: !!verification?.refreshToken,
+            expiresAt: verification?.expiresAt
+        });
+        
     } catch (error) {
         console.error('Upstash Error: Failed to save Trakt tokens:', error.message);
+        throw error; // Re-throw to ensure calling code knows it failed
     }
 }
 
