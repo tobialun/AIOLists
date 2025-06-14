@@ -2363,5 +2363,41 @@ module.exports = function(router) {
     });
   });
 
+  // Root manifest.json endpoint - returns default/empty manifest
+  router.get('/manifest.json', (req, res) => {
+    console.log('[MANIFEST] Serving default root manifest.json');
+    
+    const defaultManifest = {
+      "id": "org.stremio.aiolists",
+      "version": `1.2.4-${Date.now()}`,
+      "name": "AIOLists",
+      "description": "Manage all your lists in one place.",
+      "resources": [
+        "catalog",
+        "meta"
+      ],
+      "types": [
+        "movie",
+        "series",
+        "all",
+        "search",
+        "anime"
+      ],
+      "idPrefixes": [
+        "tt",
+        "tmdb:"
+      ],
+      "catalogs": [],
+      "logo": "https://i.imgur.com/DigFuAQ.png",
+      "behaviorHints": {
+        "configurable": true,
+        "configurationRequired": false
+      }
+    };
+    
+    setCacheHeaders(res, null);
+    res.json(defaultManifest);
+  });
+
   return router;
 };
