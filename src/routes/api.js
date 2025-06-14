@@ -153,9 +153,12 @@ module.exports = function(router) {
         }
       }
       
+      // Determine if this is a potentially shared config (excludes Upstash-stored tokens)
+      const hasUpstashTraktStorage = req.userConfig.upstashUrl && req.userConfig.traktUuid;
+      
       req.isPotentiallySharedConfig = (!req.userConfig.apiKey && Object.values(req.userConfig.importedAddons || {}).some(addon => addon.isMDBListUrlImport)) ||
-                                     (!req.userConfig.traktAccessToken && Object.values(req.userConfig.importedAddons || {}).some(addon => addon.isTraktPublicList)) ||
-                                     (!req.userConfig.traktAccessToken && (req.userConfig.listOrder || []).some(id => id.startsWith('trakt_') && !id.startsWith('traktpublic_')));
+                                     (!req.userConfig.traktAccessToken && !hasUpstashTraktStorage && Object.values(req.userConfig.importedAddons || {}).some(addon => addon.isTraktPublicList)) ||
+                                     (!req.userConfig.traktAccessToken && !hasUpstashTraktStorage && (req.userConfig.listOrder || []).some(id => id.startsWith('trakt_') && !id.startsWith('traktpublic_')));
       next();
     } catch (error) {
       console.error('Error decompressing configHash:', configHash, error);
@@ -736,6 +739,14 @@ module.exports = function(router) {
       delete configToSend.tmdbBearerToken;
     }
     
+    // Always remove Trakt tokens from API responses if Upstash is configured (tokens should only exist in Upstash)
+    if (req.userConfig.upstashUrl && req.userConfig.traktUuid) {
+      delete configToSend.traktAccessToken;
+      delete configToSend.traktRefreshToken;
+      delete configToSend.traktExpiresAt;
+      console.log('[CONFIG API] Removed Trakt tokens from API response (stored in Upstash)');
+    }
+    
     // Only remove sensitive data if this is a potentially shared config
     if (req.isPotentiallySharedConfig) {
       delete configToSend.apiKey;
@@ -841,22 +852,31 @@ module.exports = function(router) {
         req.userConfig.upstashUrl = upstashUrl || '';
         req.userConfig.upstashToken = upstashToken || '';
 
-        // Save Trakt tokens to Upstash but keep them in the active session
+        // Save Trakt tokens to Upstash if available
         if (upstashUrl && upstashToken && req.userConfig.traktAccessToken && req.userConfig.traktUuid) {
             const tokensToSave = {
                 accessToken: req.userConfig.traktAccessToken,
                 refreshToken: req.userConfig.traktRefreshToken,
                 expiresAt: req.userConfig.traktExpiresAt
             };
+            console.log('[UPSTASH] Saving Trakt tokens to Upstash for UUID:', req.userConfig.traktUuid);
             await saveTraktTokens(req.userConfig, tokensToSave);
-            // Don't remove Trakt tokens from the active session - they'll be removed only from storage
             
             // Immediately verify that tokens are accessible from Upstash
+            console.log('[UPSTASH] Verifying tokens can be loaded from Upstash');
             await initTraktApi(req.userConfig);
+            console.log('[UPSTASH] Tokens successfully verified in Upstash');
+            
+            // Clear tokens from local config now that they're safely stored in Upstash
+            console.log('[UPSTASH] Clearing Trakt tokens from local config (now stored in Upstash)');
+            req.userConfig.traktAccessToken = null;
+            req.userConfig.traktRefreshToken = null;
+            req.userConfig.traktExpiresAt = null;
         }
         
         req.userConfig.lastUpdated = new Date().toISOString();
         
+        // Use createConfigForStorage to properly handle token storage exclusion
         const newConfigHash = await compressConfig(createConfigForStorage(req.userConfig));
         manifestCache.clear();
         res.json({ success: true, configHash: newConfigHash });

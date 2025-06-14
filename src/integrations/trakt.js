@@ -61,29 +61,46 @@ async function refreshTraktToken(userConfig) {
 }
 
 async function initTraktApi(userConfig) {
+  console.log(`[TRAKT INIT] Starting initTraktApi with:`, {
+    hasUpstashUrl: !!userConfig.upstashUrl,
+    hasUpstashToken: !!userConfig.upstashToken,
+    hasTraktUuid: !!userConfig.traktUuid,
+    hasTraktAccessToken: !!userConfig.traktAccessToken
+  });
+  
   // If Upstash credentials are provided, use them as the source of truth
   if (userConfig.upstashUrl && userConfig.upstashToken && userConfig.traktUuid) {
+    console.log(`[TRAKT INIT] Attempting to load tokens from Upstash for UUID: ${userConfig.traktUuid}`);
     const tokens = await getTraktTokens(userConfig);
     if (tokens) {
+      console.log(`[TRAKT INIT] Successfully loaded tokens from Upstash, updating userConfig`);
       userConfig.traktAccessToken = tokens.accessToken;
       userConfig.traktRefreshToken = tokens.refreshToken;
       userConfig.traktExpiresAt = tokens.expiresAt;
 
       if (Date.now() >= new Date(userConfig.traktExpiresAt).getTime()) {
+        console.log(`[TRAKT INIT] Token expired, refreshing...`);
         return await refreshTraktToken(userConfig);
       }
+      console.log(`[TRAKT INIT] Token is valid, init successful`);
       return true;
+    } else {
+      console.log(`[TRAKT INIT] No tokens found in Upstash`);
     }
   }
 
   // Fallback for non-persistent flow (token is in the config hash)
   if (userConfig.traktAccessToken && userConfig.traktExpiresAt) {
+    console.log(`[TRAKT INIT] Using tokens from config (non-Upstash flow)`);
     if (Date.now() >= new Date(userConfig.traktExpiresAt).getTime()) {
+      console.log(`[TRAKT INIT] Config token expired, refreshing...`);
       return await refreshTraktToken(userConfig);
     }
+    console.log(`[TRAKT INIT] Config token is valid, init successful`);
     return true;
   }
 
+  console.log(`[TRAKT INIT] No valid tokens found, init failed`);
   return false;
 }
 

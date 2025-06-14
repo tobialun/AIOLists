@@ -1197,7 +1197,16 @@ document.addEventListener('DOMContentLoaded', function() {
   function handleUpstashInput() {
     if (state.upstashSaveTimeout) clearTimeout(state.upstashSaveTimeout);
     state.upstashSaveTimeout = setTimeout(() => {
-        saveUpstashCredentials();
+        const upstashUrl = elements.upstashUrlInput.value.trim();
+        const upstashToken = elements.upstashTokenInput.value.trim();
+        
+        // Only save and validate if both URL and token are provided
+        if (upstashUrl && upstashToken) {
+          saveUpstashCredentials();
+        } else {
+          // If either field is empty, clear persistence status
+          updatePersistenceStatus(false);
+        }
     }, 1000);
   }
 
@@ -1240,14 +1249,34 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
     }
     
-    // Simulate check for now, replace with actual backend call if needed
-    // For simplicity, we assume if they are entered, they are potentially valid
-    // and the backend will verify on use.
-    state.userConfig.upstashUrl = upstashUrl;
-    state.userConfig.upstashToken = upstashToken;
-    updatePersistenceStatus(true);
-    elements.upstashContainer.classList.add('hidden');
-    elements.upstashForm.style.display = 'none';
+    try {
+      // Actually validate the Upstash credentials with the backend
+      const response = await fetch(`/${state.configHash}/upstash/check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ upstashUrl, upstashToken })
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok && data.success) {
+        // Credentials are valid
+        state.userConfig.upstashUrl = upstashUrl;
+        state.userConfig.upstashToken = upstashToken;
+        updatePersistenceStatus(true);
+        elements.upstashContainer.classList.add('hidden');
+        elements.upstashForm.style.display = 'none';
+        showNotification('connections', 'Upstash credentials validated successfully.', 'success');
+      } else {
+        // Credentials are invalid
+        updatePersistenceStatus(false);
+        showNotification('connections', `Upstash validation failed: ${data.error || 'Invalid credentials'}`, 'error', true);
+      }
+    } catch (error) {
+      console.error('Upstash validation error:', error);
+      updatePersistenceStatus(false);
+      showNotification('connections', `Upstash validation error: ${error.message}`, 'error', true);
+    }
   }
   
   async function validateAndSaveApiKeys(mdblistApiKeyToValidate, rpdbApiKeyToValidate, tmdbApiKeyToValidate = '', isInitialLoadOrSilentCheck = false) {
