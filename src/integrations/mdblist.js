@@ -19,6 +19,136 @@ async function validateMDBListKey(apiKey) {
   }
 }
 
+/**
+ * Convert public access MDBList imports to premium API-based lists when an API key is provided
+ * @param {Object} userConfig - User configuration containing importedAddons
+ * @param {string} apiKey - Valid MDBList API key
+ * @returns {Promise<Object>} Object with success status and any changes made
+ */
+async function convertPublicListsToPremium(userConfig, apiKey) {
+  if (!apiKey || !userConfig.importedAddons) {
+    return { success: true, conversions: 0, errors: [] };
+  }
+
+  console.log('[MDBList] Converting public access lists to premium API access...');
+  
+  let conversions = 0;
+  const errors = [];
+  
+  // Find all MDBList imports that need conversion:
+  // 1. Explicit public access lists (isPublicAccess: true)
+  // 2. Legacy URL imports without API access (no isPublicAccess field, mdblistId is slug-like)
+  const publicListAddons = Object.entries(userConfig.importedAddons).filter(([id, addon]) => {
+    if (!addon.isMDBListUrlImport || !addon.mdblistUsername || !addon.mdblistSlug) {
+      return false;
+    }
+    
+    // Explicit public access
+    if (addon.isPublicAccess === true) {
+      return true;
+    }
+    
+    // Legacy imports (no isPublicAccess field) that likely need conversion
+    // These are imports made before API key was available
+    if (addon.isPublicAccess === undefined && addon.mdblistId) {
+      // If mdblistId is the same as mdblistSlug, it's likely a legacy import
+      if (addon.mdblistId === addon.mdblistSlug) {
+        return true;
+      }
+      // If mdblistId is not a pure numeric string, it might be a slug
+      if (isNaN(parseInt(addon.mdblistId)) || addon.mdblistId.includes('-')) {
+        return true;
+      }
+    }
+    
+    return false;
+  });
+
+  if (publicListAddons.length === 0) {
+    console.log('[MDBList] No public access or legacy lists found to convert');
+    return { success: true, conversions: 0, errors: [] };
+  }
+
+  console.log(`[MDBList] Found ${publicListAddons.length} MDBList imports to convert to API access`);
+
+  // Process each list that needs conversion
+  const convertedLists = []; // Track successfully converted lists
+  for (const [addonId, addon] of publicListAddons) {
+    try {
+      const conversionType = addon.isPublicAccess === true ? 'public access' : 'legacy import';
+      console.log(`[MDBList] Converting ${conversionType} list: ${addon.name} (${addon.mdblistUsername}/${addon.mdblistSlug})`);
+      
+      // Construct the URL for re-extraction with API key
+      const listUrl = `https://mdblist.com/lists/${addon.mdblistUsername}/${addon.mdblistSlug}`;
+      
+      // Extract list info using API key
+      const apiListData = await extractListFromUrl(listUrl, apiKey);
+      
+      if (apiListData && !apiListData.isPublicAccess) {
+        // Successfully converted to API access
+        console.log(`[MDBList] Successfully converted ${addon.name} to API access (ID: ${apiListData.listId})`);
+        
+        // Update the addon with API-based data
+        userConfig.importedAddons[addonId] = {
+          ...addon,
+          // Update with API-based properties
+          mdblistId: apiListData.listId, // Numeric ID from API
+          isPublicAccess: false, // No longer public access
+          hasMovies: apiListData.hasMovies,
+          hasShows: apiListData.hasShows,
+          // Keep the original username/slug for fallback compatibility
+          mdblistUsername: addon.mdblistUsername,
+          mdblistSlug: addon.mdblistSlug
+        };
+        
+        conversions++;
+        convertedLists.push({
+          id: addonId,
+          name: addon.name,
+          username: addon.mdblistUsername,
+          slug: addon.mdblistSlug,
+          newApiId: apiListData.listId
+        });
+      } else {
+        console.warn(`[MDBList] Failed to convert ${addon.name} to API access - API extraction returned public access or failed`);
+        errors.push(`Failed to convert "${addon.name}" to API access`);
+      }
+      
+    } catch (error) {
+      console.error(`[MDBList] Error converting ${addon.name}:`, error.message);
+      errors.push(`Error converting "${addon.name}": ${error.message}`);
+      
+      // Continue with other lists even if one fails
+    }
+    
+    // Small delay between conversions to be respectful to the API
+    if (publicListAddons.indexOf([addonId, addon]) < publicListAddons.length - 1) {
+      await delay(1000);
+    }
+  }
+
+  const result = {
+    success: true,
+    conversions,
+    errors,
+    message: conversions > 0 ? 
+      `Successfully converted ${conversions} public lists to premium API access` :
+      'No lists were converted',
+    // Add detailed conversion info for better UI feedback
+    convertedLists: convertedLists
+  };
+
+  if (conversions > 0) {
+    console.log(`[MDBList] Conversion complete: ${conversions} lists converted to premium access`);
+  }
+  
+  if (errors.length > 0) {
+    console.warn(`[MDBList] Conversion completed with ${errors.length} errors:`, errors);
+  }
+
+  return result;
+}
+
 async function fetchAllLists(apiKey) {
   if (!apiKey) return [];
   
@@ -758,5 +888,6 @@ module.exports = {
   fetchListItems,
   fetchListItemsFromPublicJson,
   validateMDBListKey,
-  extractListFromUrl
+  extractListFromUrl,
+  convertPublicListsToPremium
 };

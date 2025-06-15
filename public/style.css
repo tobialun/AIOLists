@@ -1215,6 +1215,38 @@ button:active, .action-btn:active, .trakt-login-btn:active, .stremio-refresh-btn
   animation: spin 0.8s linear infinite;
   margin-left: 8px;
 }
+
+/* Conversion status container */
+.conversion-status-container {
+  margin-top: 8px;
+  padding: 12px;
+  background-color: #f0f8ff;
+  border: 1px solid #d1e9ff;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.conversion-spinner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #1565c0;
+}
+
+.conversion-message {
+  font-weight: 500;
+}
+
+.conversion-progress {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #666;
+}
+
+.conversion-details {
+  font-style: italic;
+}
+
 #traktPersistenceContainer {
   display: flex;
   align-items: center;

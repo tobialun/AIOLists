@@ -1303,12 +1303,27 @@ document.addEventListener('DOMContentLoaded', function() {
       updateApiKeyUI(elements.rpdbApiKeyInput, rpdbApiKeyToValidate, 'rpdb', null, rpdbValid);
       updateRandomListButtonState();
 
+      let saveData = null;
+
       if (mdblistApiKeyToValidate || rpdbApiKeyToValidate || state.userConfig.apiKey || state.userConfig.rpdbApiKey) {
+          // Show conversion spinner if we're setting a new MDBList API key or changing from no key to having key
+          const isSettingNewMdblistKey = mdblistApiKeyToValidate && (!state.userConfig.apiKey || state.userConfig.apiKey !== mdblistApiKeyToValidate);
+          
+          if (isSettingNewMdblistKey && !isInitialLoadOrSilentCheck) {
+            showConversionSpinner(true);
+          }
+
           const saveResponse = await fetch(`/${state.configHash}/apikey`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ apiKey: mdblistApiKeyToValidate, rpdbApiKey: rpdbApiKeyToValidate })
           });
-          const saveData = await saveResponse.json();
+          saveData = await saveResponse.json(); // Assign to the function-scoped variable
+          
+          // Hide conversion spinner
+          if (isSettingNewMdblistKey && !isInitialLoadOrSilentCheck) {
+            showConversionSpinner(false);
+          }
+          
           if (!saveResponse.ok || !saveData.success) throw new Error(saveData.error || "Failed to save API keys");
 
           if (saveData.configHash && saveData.configHash !== state.configHash) {
@@ -1322,10 +1337,41 @@ document.addEventListener('DOMContentLoaded', function() {
             state.userConfig.enableRandomListFeature = false;
             updateRandomListButtonState();
           }
+          
+          // Handle conversion feedback if present
+          if (saveData.conversionResult) {
+            const { conversions, errors, message, convertedLists } = saveData.conversionResult;
+            
+            if (conversions > 0) {
+              console.log(`[UI] Successfully converted ${conversions} public MDBList imports to premium access`);
+              
+              // Show detailed conversion info if available
+              let conversionMessage = `API key saved and lists updated!`;
+              if (convertedLists && convertedLists.length > 0) {
+                const listNames = convertedLists.slice(0, 3).map(list => list.name).join(', ');
+                const moreCount = convertedLists.length > 3 ? ` and ${convertedLists.length - 3} more` : '';
+                conversionMessage += ` Lists: ${listNames}${moreCount}`;
+              }
+              
+              if (!isInitialLoadOrSilentCheck) {
+                showNotification('apiKeys', conversionMessage, 'success');
+              }
+            } else if (errors && errors.length > 0) {
+              console.warn('[UI] Some lists could not be converted:', errors);
+              if (!isInitialLoadOrSilentCheck) {
+                showNotification('apiKeys', 
+                  `API key saved, but some lists could not be converted: ${errors.slice(0, 2).join(', ')}${errors.length > 2 ? ` and ${errors.length - 2} more` : ''}`, 
+                  'warning', true);
+              }
+            }
+          }
       }
 
       if (!isInitialLoadOrSilentCheck) {
-          showNotification('apiKeys', 'API keys updated.', 'success');
+          // Only show generic success message if no conversion result was handled above
+          if (!saveData?.conversionResult || saveData.conversionResult.conversions === 0) {
+            showNotification('apiKeys', 'API keys updated.', 'success');
+          }
       }
 
       if (!isInitialLoadOrSilentCheck && ( (mdblistApiKeyToValidate && mdblistValid) || (rpdbApiKeyToValidate && rpdbValid) || state.userConfig.traktAccessToken) ) {
@@ -1336,6 +1382,8 @@ document.addEventListener('DOMContentLoaded', function() {
           updateRandomListButtonState();
       }
     } catch (error) {
+      // Make sure to hide conversion spinner on error
+      showConversionSpinner(false);
       console.error('Key Error:', error);
       if (!isInitialLoadOrSilentCheck || (mdblistApiKeyToValidate || rpdbApiKeyToValidate)) {
         showNotification('apiKeys', `Key Error: ${error.message}`, 'error', true);
@@ -1365,6 +1413,23 @@ document.addEventListener('DOMContentLoaded', function() {
       if (isValid === false) {
           if (inputElement.classList) inputElement.classList.add('invalid');
       }
+    }
+  }
+
+  function showConversionSpinner(show) {
+    const conversionContainer = document.getElementById('mdblistConversionStatus');
+    const conversionProgress = document.getElementById('conversionProgress');
+    const conversionDetails = conversionProgress?.querySelector('.conversion-details');
+    
+    if (!conversionContainer) return;
+    
+    if (show) {
+      conversionContainer.style.display = 'block';
+      conversionProgress.style.display = 'none';
+            
+    } else {
+      conversionContainer.style.display = 'none';
+      conversionProgress.style.display = 'none';
     }
   }
 
