@@ -23,7 +23,6 @@ async function fetchAllLists(apiKey) {
   if (!apiKey) return [];
   
   const fetchStartTime = Date.now();
-  console.log(`[MDBLIST PERF] Starting fetch of all MDBList lists`);
   
   let allLists = [];
   const listEndpoints = [
@@ -36,7 +35,7 @@ async function fetchAllLists(apiKey) {
 
   for (const endpoint of listEndpoints) {
     const endpointStartTime = Date.now();
-    console.log(`[MDBLIST PERF] Fetching ${endpoint.type} lists...`);
+
     
     let currentRetries = 0;
     let success = false;
@@ -46,7 +45,7 @@ async function fetchAllLists(apiKey) {
         if (response.data && Array.isArray(response.data)) {
           const listCount = response.data.length;
           allLists.push(...response.data.map(list => ({ ...list, listType: endpoint.type, name: list.name })));
-          console.log(`[MDBLIST PERF] Fetched ${listCount} ${endpoint.type} lists in ${Date.now() - endpointStartTime}ms`);
+
         }
         success = true;
       } catch (err) {
@@ -69,7 +68,6 @@ async function fetchAllLists(apiKey) {
   allLists.push({ id: 'watchlist', name: 'My Watchlist', listType: 'W', isWatchlist: true });
   
   const fetchEndTime = Date.now();
-  console.log(`[MDBLIST PERF] All MDBList lists fetch completed in ${fetchEndTime - fetchStartTime}ms (${allLists.length} total lists)`);
   return allLists;
 }
 
@@ -220,7 +218,7 @@ async function fetchListItemsFromPublicJson(username, listSlug, skip = 0, sort =
 
     const publicJsonUrl = `https://mdblist.com/lists/${username}/${listSlug}/json/?${params.toString()}`;
     
-    console.log(`[MDBList Public] Attempting to fetch from public JSON: ${publicJsonUrl}`);
+
     
     const response = await axios.get(publicJsonUrl, { 
       timeout: 15000,
@@ -235,7 +233,7 @@ async function fetchListItemsFromPublicJson(username, listSlug, skip = 0, sort =
     }
 
     const rawItems = response.data;
-    console.log(`[MDBList Public] Fetched ${rawItems.length} items from public JSON`);
+
 
     // Process the public JSON response format
     let hasMovies = false;
@@ -266,7 +264,7 @@ async function fetchListItemsFromPublicJson(username, listSlug, skip = 0, sort =
     let filteredItems = processedItems;
     if (genre && genre !== 'All') {
       // For public JSON, we don't have genre data, so we'll need to enrich first
-      console.log(`[MDBList Public] Genre filtering requested for "${genre}" - will filter after metadata enrichment`);
+
     }
 
     // No metadata enrichment here - this will be done in the addon builder when serving to Stremio
@@ -281,7 +279,7 @@ async function fetchListItemsFromPublicJson(username, listSlug, skip = 0, sort =
         // This filtering will be more comprehensive after enrichment in the addon builder
         return true; // For now, include all items - genre filtering will happen after enrichment
       });
-      console.log(`[MDBList Public] Genre filter "${genre}": ${beforeFilterCount} -> ${enrichedItems.length} items (basic filtering, comprehensive filtering in addon builder)`);
+      
     }
 
     return {
@@ -314,7 +312,7 @@ async function fetchListItems(
 ) {
   // If no API key is provided, try to use public JSON endpoint if we have the necessary information
   if (!apiKey) {
-    console.log('[MDBList] No API key provided, checking for public JSON fallback...');
+
     
     // Check if we have the necessary information for public JSON access
     let username = usernameForRandomList;
@@ -335,19 +333,15 @@ async function fetchListItems(
     if (!username && userConfig?.enableRandomListFeature && userConfig?.randomMDBListUsernames?.length > 0) {
       // For random lists, we might have the username stored differently
       // This would need to be coordinated with how the random list selection works
-      console.log('[MDBList] Random list feature detected but no specific username provided for public JSON');
+      
     }
     
     if (username && listSlug) {
-      console.log(`[MDBList] Attempting public JSON access for ${username}/${listSlug}`);
-      const publicResult = await fetchListItemsFromPublicJson(username, listSlug, stremioSkip, sort, order, genre, userConfig, isMergedByUser);
-      if (publicResult) {
-        console.log(`[MDBList] Successfully fetched ${publicResult.allItems.length} items via public JSON`);
-        return publicResult;
+              const publicResult = await fetchListItemsFromPublicJson(username, listSlug, stremioSkip, sort, order, genre, userConfig, isMergedByUser);
+        if (publicResult) {
+          return publicResult;
+        }
       }
-    }
-    
-    console.log('[MDBList] Public JSON fallback not available or failed, returning null');
     return null;
   }
 
@@ -421,7 +415,6 @@ async function fetchListItems(
         } catch (error) {
           // Check if this is an API key validation error and we have fallback info
           if (!success && error.response && (error.response.status === 401 || error.response.status === 403)) {
-            console.log(`[MDBList] API authentication failed (${error.response.status}), attempting public JSON fallback...`);
             
             // Try to extract username and slug for public JSON fallback
             let username = listOwnerUsername;
@@ -438,10 +431,8 @@ async function fetchListItems(
             }
             
             if (username && listSlug) {
-              console.log(`[MDBList] Attempting public JSON fallback for ${username}/${listSlug}`);
               const publicResult = await fetchListItemsFromPublicJson(username, listSlug, stremioSkip, sort, order, genre, userConfig, isMergedByUser);
               if (publicResult) {
-                console.log(`[MDBList] Public JSON fallback successful, returning ${publicResult.allItems.length} items`);
                 return publicResult;
               }
             }
@@ -540,7 +531,6 @@ async function fetchListItems(
       } catch (error) {
           // Check if this is an API key validation error and we have fallback info
           if (!success && error.response && (error.response.status === 401 || error.response.status === 403)) {
-            console.log(`[MDBList] API authentication failed (${error.response.status}), attempting public JSON fallback...`);
             
             // Try to extract username and slug for public JSON fallback
             let username = listOwnerUsername;
@@ -557,10 +547,8 @@ async function fetchListItems(
             }
             
             if (username && listSlug) {
-              console.log(`[MDBList] Attempting public JSON fallback for ${username}/${listSlug}`);
               const publicResult = await fetchListItemsFromPublicJson(username, listSlug, stremioSkip, sort, order, genre, userConfig, isMergedByUser);
               if (publicResult) {
-                console.log(`[MDBList] Public JSON fallback successful, returning ${publicResult.allItems.length} items`);
                 return publicResult;
               }
             }

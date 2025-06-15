@@ -1169,7 +1169,7 @@ document.addEventListener('DOMContentLoaded', function() {
       }
 
       const isTraktConnected = !!(state.userConfig.traktAccessToken || (state.userConfig.upstashUrl && state.userConfig.traktUuid));
-      updateTraktUI(isTraktConnected);
+      updateTraktUI(isTraktConnected, state.userConfig.traktUsername);
       
       const isTmdbConnected = !!state.userConfig.tmdbSessionId;
       updateTmdbConnectionUI(isTmdbConnected, state.userConfig.tmdbUsername);
@@ -1368,7 +1368,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   }
 
-  function updateTraktUI(isConnected) {
+  function updateTraktUI(isConnected, username = null) {
     if (isConnected) {
         // Connected state: hide connect button, show connected state
         elements.traktLoginBtn.style.setProperty('display', 'none', 'important');
@@ -1379,7 +1379,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Update the connected state text
         const connectedText = elements.traktConnectedState.querySelector('b');
         if (connectedText) {
-          connectedText.textContent = 'Connected to Trakt';
+          connectedText.textContent = username ? `[Trakt] Connected as ${username}` : '[Trakt] Connected';
         }
         
         const isPersistent = !!(state.userConfig.upstashUrl && state.userConfig.upstashToken && state.userConfig.traktUuid);
@@ -1465,7 +1465,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 updateURL();
       updateStremioButtonHref();
       
-      showNotification('connections', 'Successfully connected to Trakt!', 'success');
+      showNotification('connections', `Successfully connected to Trakt as ${data.username || 'user'}!`, 'success');
       await loadConfiguration(); 
       } else {
           throw new Error("Received success from server but no new config hash.");
@@ -2306,6 +2306,7 @@ function startNameEditing(listItemElement, list) {
       state.userConfig.traktRefreshToken = null;
       state.userConfig.traktExpiresAt = null;
       state.userConfig.traktUuid = null;
+      state.userConfig.traktUsername = null;
       
       // Reload lists only (don't reload full config which would reset other API key UIs)
       await loadUserListsAndAddons();
@@ -2517,16 +2518,20 @@ function startNameEditing(listItemElement, list) {
       updateURL();
       updateStremioButtonHref();
       
+      // Store username before reloading configuration
+      const authenticatedUsername = data.username;
+      
       // Reload configuration to get the actual session values from backend
       await loadConfig();
       
-      updateTmdbConnectionUI(true, data.username);
+      // Use the username from authentication response, not from config (which might be empty)
+      updateTmdbConnectionUI(true, authenticatedUsername || state.userConfig.tmdbUsername);
       
       // Reset auth container to ensure clean state
       resetTmdbAuthContainer();
       
-      showNotification('connections', `Successfully connected to TMDB as ${data.username || 'user'}!`, 'success');
-      await loadUserListsAndAddons();
+      showNotification('connections', `Successfully connected to TMDB as ${authenticatedUsername || 'user'}!`, 'success');
+      // loadUserListsAndAddons is already called by loadConfig(), no need to call it again
     } catch (error) {
       console.error('TMDB Authentication Error:', error);
       showNotification('connections', `TMDB Authentication Error: ${error.message}`, 'error', true);
@@ -2571,7 +2576,7 @@ function startNameEditing(listItemElement, list) {
         tmdbConnectedState.style.setProperty('display', 'flex', 'important');
         const connectedText = tmdbConnectedState.querySelector('b');
         if (connectedText) {
-          connectedText.textContent = username ? `Connected to TMDB (${username})` : 'Connected to TMDB';
+          connectedText.textContent = username ? `[TMDB] Connected as ${username}` : 'Connected to TMDB';
         }
       }
     } else {
@@ -3029,7 +3034,7 @@ function startNameEditing(listItemElement, list) {
 
       // Update Trakt UI
       const isTraktConnected = !!(state.userConfig.traktAccessToken || (state.userConfig.upstashUrl && state.userConfig.traktUuid));
-      updateTraktUI(isTraktConnected);
+      updateTraktUI(isTraktConnected, state.userConfig.traktUsername);
 
       // Update TMDB UI
       const isTmdbConnected = !!state.userConfig.tmdbSessionId;
@@ -3083,13 +3088,17 @@ function startNameEditing(listItemElement, list) {
       updateURL();
       updateStremioButtonHref();
       
+      // Store username before reloading configuration
+      const authenticatedUsername = data.username;
+      
       // Reload configuration to get the actual session values from backend
       await loadConfiguration();
       
-      updateTmdbConnectionUI(true, data.username);
+      // Use the username from authentication response, not from config (which might be empty)
+      updateTmdbConnectionUI(true, authenticatedUsername || state.userConfig.tmdbUsername);
       
-      showNotification('connections', `Successfully connected to TMDB as ${data.username || 'user'}!`, 'success');
-      await loadUserListsAndAddons();
+      showNotification('connections', `Successfully connected to TMDB as ${authenticatedUsername || 'user'}!`, 'success');
+      // loadUserListsAndAddons is already called by loadConfiguration(), no need to call it again
       
     } catch (error) {
       console.error('TMDB Callback Error:', error);
@@ -3127,9 +3136,9 @@ function startNameEditing(listItemElement, list) {
       updateURL();
       updateStremioButtonHref();
       
-      updateTraktUI(true); // Update UI before reloading
+      updateTraktUI(true, data.username); // Update UI before reloading
       
-      showNotification('connections', 'Successfully connected to Trakt!', 'success');
+      showNotification('connections', `Successfully connected to Trakt as ${data.username || 'user'}!`, 'success');
       
       // Reload full configuration including lists
       await loadConfiguration();

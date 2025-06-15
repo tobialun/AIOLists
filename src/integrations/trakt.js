@@ -17,6 +17,21 @@ async function getTraktUserUuid(accessToken) {
   return response.data.user.ids.uuid;
 }
 
+async function getTraktUserSettings(accessToken) {
+  const response = await axios.get(`${TRAKT_API_URL}/users/settings`, {
+    headers: {
+      'Content-Type': 'application/json',
+      'trakt-api-version': '2',
+      'trakt-api-key': TRAKT_CLIENT_ID,
+      'Authorization': `Bearer ${accessToken}`
+    }
+  });
+  return {
+    uuid: response.data.user.ids.uuid,
+    username: response.data.user.username
+  };
+}
+
 async function refreshTraktToken(userConfig) {
   const refreshToken = userConfig.traktRefreshToken;
   if (!refreshToken) return false;
@@ -61,46 +76,31 @@ async function refreshTraktToken(userConfig) {
 }
 
 async function initTraktApi(userConfig) {
-  console.log(`[TRAKT INIT] Starting initTraktApi with:`, {
-    hasUpstashUrl: !!userConfig.upstashUrl,
-    hasUpstashToken: !!userConfig.upstashToken,
-    hasTraktUuid: !!userConfig.traktUuid,
-    hasTraktAccessToken: !!userConfig.traktAccessToken
-  });
+
   
   // If Upstash credentials are provided, use them as the source of truth
   if (userConfig.upstashUrl && userConfig.upstashToken && userConfig.traktUuid) {
-    console.log(`[TRAKT INIT] Attempting to load tokens from Upstash for UUID: ${userConfig.traktUuid}`);
     const tokens = await getTraktTokens(userConfig);
     if (tokens) {
-      console.log(`[TRAKT INIT] Successfully loaded tokens from Upstash, updating userConfig`);
       userConfig.traktAccessToken = tokens.accessToken;
       userConfig.traktRefreshToken = tokens.refreshToken;
       userConfig.traktExpiresAt = tokens.expiresAt;
 
       if (Date.now() >= new Date(userConfig.traktExpiresAt).getTime()) {
-        console.log(`[TRAKT INIT] Token expired, refreshing...`);
         return await refreshTraktToken(userConfig);
       }
-      console.log(`[TRAKT INIT] Token is valid, init successful`);
       return true;
-    } else {
-      console.log(`[TRAKT INIT] No tokens found in Upstash`);
     }
   }
 
   // Fallback for non-persistent flow (token is in the config hash)
   if (userConfig.traktAccessToken && userConfig.traktExpiresAt) {
-    console.log(`[TRAKT INIT] Using tokens from config (non-Upstash flow)`);
     if (Date.now() >= new Date(userConfig.traktExpiresAt).getTime()) {
-      console.log(`[TRAKT INIT] Config token expired, refreshing...`);
       return await refreshTraktToken(userConfig);
     }
-    console.log(`[TRAKT INIT] Config token is valid, init successful`);
     return true;
   }
 
-  console.log(`[TRAKT INIT] No valid tokens found, init failed`);
   return false;
 }
 
@@ -130,10 +130,11 @@ async function authenticateTrakt(code, userConfig) {
         expiresAt: Date.now() + (response.data.expires_in * 1000)
     };
 
-    const uuid = await getTraktUserUuid(tokens.accessToken);
+    const userSettings = await getTraktUserSettings(tokens.accessToken);
     
     return {
-      uuid,
+      uuid: userSettings.uuid,
+      username: userSettings.username,
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       expiresAt: tokens.expiresAt,
@@ -149,7 +150,6 @@ async function fetchTraktLists(userConfig) {
     }
     
     const fetchStartTime = Date.now();
-    console.log(`[TRAKT PERF] Starting fetch of Trakt lists`);
     
     try {
       const response = await axios.get(`${TRAKT_API_URL}/users/me/lists`, {
@@ -175,7 +175,6 @@ async function fetchTraktLists(userConfig) {
       
       const allLists = [...lists, ...specialLists.map(sl => ({ ...sl, updated: new Date().toISOString() }))];
       const fetchEndTime = Date.now();
-      console.log(`[TRAKT PERF] Trakt lists fetch completed in ${fetchEndTime - fetchStartTime}ms (${allLists.length} total lists)`);
       return allLists;
     } catch (error) {
       console.error("[TraktIntegration] Exception fetching Trakt lists:", error.message);
@@ -606,6 +605,7 @@ async function validateTraktApi() {
   module.exports = {
   initTraktApi,
   getTraktAuthUrl,
+  getTraktUserSettings,
   authenticateTrakt,
   fetchTraktLists,
   fetchTraktListItems,

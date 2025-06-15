@@ -59,7 +59,7 @@ async function batchFetchPosters(imdbIds, rpdbApiKey, language = null) {
   if (!rpdbApiKey || !imdbIds?.length) return {};
   
   const posterStartTime = Date.now();
-  console.log(`[POSTER PERF] Starting poster fetch for ${imdbIds.length} items`);
+
   
   const results = {};
   const uncachedIds = [];
@@ -74,10 +74,7 @@ async function batchFetchPosters(imdbIds, rpdbApiKey, language = null) {
     }
   }
   
-  console.log(`[POSTER PERF] Found ${imdbIds.length - uncachedIds.length} cached posters, fetching ${uncachedIds.length} new ones`);
-  
   if (!uncachedIds.length) {
-    console.log(`[POSTER PERF] All posters were cached, completed in ${Date.now() - posterStartTime}ms`);
     return results;
   }
   
@@ -101,7 +98,7 @@ async function batchFetchPosters(imdbIds, rpdbApiKey, language = null) {
     });
     
     await Promise.all(fetchPromises);
-    console.log(`[POSTER PERF] Batch of ${batch.length} posters completed in ${Date.now() - batchStartTime}ms`);
+    
     
     // Small delay between batches to be respectful to RPDB API
     if (batch !== batches[batches.length - 1]) {
@@ -110,7 +107,6 @@ async function batchFetchPosters(imdbIds, rpdbApiKey, language = null) {
   }
   
   const posterEndTime = Date.now();
-  console.log(`[POSTER PERF] Total poster fetch completed in ${posterEndTime - posterStartTime}ms for ${imdbIds.length} items`);
   return results;
 }
 
