@@ -419,7 +419,7 @@ module.exports = function(router) {
               query: searchQuery.trim(),
               type: 'search', // Use search type for merged search
               sources: ['multi'], // Use multi source for merged search
-              limit: 50,
+              limit: 20,
               userConfig: req.userConfig
             });
           } else if (catalogId === 'aiolists_anime_search') {
@@ -430,7 +430,7 @@ module.exports = function(router) {
               query: searchQuery.trim(),
               type: 'anime', // Use anime type for anime search
               sources: ['anime'], // Use anime source for anime search
-              limit: 50,
+              limit: 20,
               userConfig: req.userConfig
             });
           } else {
@@ -465,7 +465,7 @@ module.exports = function(router) {
               query: searchQuery.trim(),
               type: searchType,
               sources: sources,
-              limit: 50,
+              limit: 20,
               userConfig: req.userConfig
             });
           }
@@ -1625,13 +1625,11 @@ module.exports = function(router) {
 
   router.get('/:configHash/lists', async (req, res) => {
     try {
-      console.log('[LISTS] Loading lists (full - with external API calls)');
       const initialListsMetadataJson = JSON.stringify(req.userConfig.listsMetadata || {});
       const initialTraktAccessToken = req.userConfig.traktAccessToken;
       let configChangedByThisRequest = false;
         
       if (req.userConfig.traktUuid || req.userConfig.traktAccessToken) {
-        console.log('[LISTS] Initializing Trakt API');
         await initTraktApi(req.userConfig); // This is the key change
   
         if (req.userConfig.traktAccessToken !== initialTraktAccessToken) {
@@ -1641,28 +1639,22 @@ module.exports = function(router) {
 
     let allUserLists = [];
     if (req.userConfig.apiKey) {
-        console.log('[LISTS] Fetching MDBList lists');
         const mdbLists = await fetchAllMDBLists(req.userConfig.apiKey);
         allUserLists.push(...mdbLists.map(l => ({...l, source: 'mdblist'})));
-        console.log(`[LISTS] Fetched ${mdbLists.length} MDBList lists`);
     }
 
     if (req.userConfig.traktAccessToken) {
-      console.log('[LISTS] Fetching Trakt lists');
       const traktLists = await fetchTraktLists(req.userConfig); 
       allUserLists.push(...traktLists.map(l => ({...l, source: 'trakt'})));
-      console.log(`[LISTS] Fetched ${traktLists.length} Trakt lists`);
   }
 
     // Fetch from TMDB
-    console.log('[LISTS] Fetching TMDB lists');
     const { fetchTmdbLists } = require('../integrations/tmdb');
     const tmdbResult = await fetchTmdbLists(req.userConfig);
     
     // Add TMDB lists to the main lists if OAuth is connected
     if (tmdbResult.isConnected && tmdbResult.lists && tmdbResult.lists.length > 0) {
       allUserLists.push(...tmdbResult.lists.map(l => ({...l, source: 'tmdb'})));
-      console.log(`[LISTS] Fetched ${tmdbResult.lists.length} TMDB lists`);
     }
 
 
@@ -1999,7 +1991,6 @@ module.exports = function(router) {
                   ...newLists.map(list => list.id)
               ];
               configChangedByThisRequest = true;
-              console.log(`[API] Appended ${newLists.length} new lists to existing order: ${newLists.map(l => l.id).join(', ')}`);
           }
       }
 
@@ -2188,7 +2179,7 @@ module.exports = function(router) {
 
   router.post('/:configHash/search', async (req, res) => {
     try {
-      const { query, type = 'all', sources = ['cinemeta'], limit = 50 } = req.body;
+      const { query, type = 'all', sources = ['cinemeta'], limit = 20 } = req.body;
       
       if (!query || query.trim().length < 2) {
         return res.status(400).json({ error: 'Search query must be at least 2 characters long' });

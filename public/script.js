@@ -2024,10 +2024,7 @@ function startNameEditing(listItemElement, list) {
     await updateListPreference(null, 'remove', { listIds: [listToRemoveIdStr] });
   }
 
-  async function updateListPreference(listIdForPref, type, payload) {
-    console.log(`[UI] Updating list preference: ${type} for list ${listIdForPref || 'N/A'}`);
-    console.log(`[UI] Payload:`, payload);
-    
+  async function updateListPreference(listIdForPref, type, payload) {    
     const endpointMap = {
         name: `/${state.configHash}/lists/names`,
         mediatype: `/${state.configHash}/lists/mediatype`,
@@ -2051,7 +2048,6 @@ function startNameEditing(listItemElement, list) {
     showNotification(notifSection, 'Saving...', 'info', true);
     
     try {
-        console.log(`[UI] Making API call to ${endpoint}`);
         const response = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2062,26 +2058,19 @@ function startNameEditing(listItemElement, list) {
         if (!response.ok || !data.success) {
             throw new Error(data.error || `Server error for ${type}. Status: ${response.status}`);
         }
-
-        console.log(`[UI] ${type} update successful, got new config hash`);
         
         if (data.configHash && data.configHash !== state.configHash) {
             state.configHash = data.configHash;
             updateURL();
             updateStremioButtonHref();
-            console.log(`[UI] Updated config hash: ${state.configHash.substring(0, 20)}...`);
         }
         
         showNotification(notifSection, `${type.charAt(0).toUpperCase() + type.slice(1).replace('_', ' ')} updated.`, 'success', false);
         
-        // Note: We no longer reload configuration or refetch lists for these lightweight updates
-        // The UI state is already updated locally and the config hash reflects the backend changes
-        console.log(`[UI] ${type} update completed without manifest rebuild or list refetch`);
 
     } catch (error) {
         console.error(`[UI] Update Error for ${type}:`, error);
         showNotification(notifSection, `Error updating ${type}: ${error.message}`, 'error', true);
-        console.log(`[UI] Error during ${type} update, will refresh lists from server`);
         await loadUserListsAndAddons();
     }
   }
@@ -2143,7 +2132,6 @@ function startNameEditing(listItemElement, list) {
 
   // New function to prepare manifest before install/copy actions
   async function prepareManifestForAction(actionName) {
-    console.log(`[UI] Preparing manifest for ${actionName} action`);
     showNotification('lists', `Preparing manifest for ${actionName}...`, 'info', true);
     
     try {
@@ -2157,8 +2145,6 @@ function startNameEditing(listItemElement, list) {
         throw new Error(data.error || 'Failed to prepare manifest');
       }
       
-      console.log(`[UI] Manifest prepared for ${actionName} in ${data.generationTime}ms`);
-      console.log(`[UI] Generated ${data.catalogCount} catalogs`);
       showNotification('lists', `Manifest ready for ${actionName}! (${data.catalogCount} catalogs)`, 'success', false);
       
       return true;
@@ -2170,7 +2156,6 @@ function startNameEditing(listItemElement, list) {
   }
 
   async function handleInstallToStremio(event) {
-    console.log('[UI] Install to Stremio requested');
     event.preventDefault(); // Prevent default link behavior
     
     if (!elements.updateStremioBtn || !elements.updateStremioBtn.href || !elements.updateStremioBtn.href.includes('/manifest.json')) {
@@ -2183,13 +2168,10 @@ function startNameEditing(listItemElement, list) {
       return; // Error already shown by prepareManifestForAction
     }
     
-    // Now redirect to Stremio
-    console.log('[UI] Redirecting to Stremio with prepared manifest');
     window.location.href = elements.updateStremioBtn.href;
   }
 
   async function copyManifestUrlToClipboard() {
-    console.log('[UI] Copy manifest URL requested');
     
     if (!elements.updateStremioBtn || !elements.updateStremioBtn.href || !elements.updateStremioBtn.href.includes('/manifest.json')) {
         return showNotification('lists', 'Manifest URL not ready.', 'error');
@@ -2203,7 +2185,6 @@ function startNameEditing(listItemElement, list) {
     
     try {
       await navigator.clipboard.writeText(elements.updateStremioBtn.href);
-      console.log('[UI] Manifest URL copied to clipboard');
       const originalContent = elements.copyManifestBtn.innerHTML;
       elements.copyManifestBtn.innerHTML = '<span>Copied!</span>'; elements.copyManifestBtn.disabled = true;
       setTimeout(() => { elements.copyManifestBtn.innerHTML = originalContent; elements.copyManifestBtn.disabled = false; }, 2000);
