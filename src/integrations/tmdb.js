@@ -845,7 +845,7 @@ function convertTmdbToStremioFormat(tmdbData, type) {
     released: releasedFormatted,
     runtime: isMovie ? 
       (tmdbData.runtime ? `${tmdbData.runtime} min` : undefined) :
-      (tmdbData.episode_run_time?.[0] ? tmdbData.episode_run_time[0] : undefined),
+      (tmdbData.episode_run_time?.[0] ? `${tmdbData.episode_run_time[0]} min` : undefined),
     genres: tmdbData.genres?.map(genre => genre.name) || [],
     genre: tmdbData.genres?.map(genre => genre.name) || [], // Cinemeta uses 'genre' as well
     cast: cast.length > 0 ? cast : undefined,

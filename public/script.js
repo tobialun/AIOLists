@@ -1346,7 +1346,7 @@ document.addEventListener('DOMContentLoaded', function() {
               console.log(`[UI] Successfully converted ${conversions} public MDBList imports to premium access`);
               
               // Show detailed conversion info if available
-              let conversionMessage = `API key saved! ${conversions} public list${conversions > 1 ? 's' : ''} converted to premium access.`;
+              let conversionMessage = `API key saved and lists updated!`;
               if (convertedLists && convertedLists.length > 0) {
                 const listNames = convertedLists.slice(0, 3).map(list => list.name).join(', ');
                 const moreCount = convertedLists.length > 3 ? ` and ${convertedLists.length - 3} more` : '';
