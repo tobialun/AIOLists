@@ -72,6 +72,7 @@ async function convertPublicListsToPremium(userConfig, apiKey) {
   console.log(`[MDBList] Found ${publicListAddons.length} MDBList imports to convert to API access`);
 
   // Process each list that needs conversion
+  const convertedLists = []; // Track successfully converted lists
   for (const [addonId, addon] of publicListAddons) {
     try {
       const conversionType = addon.isPublicAccess === true ? 'public access' : 'legacy import';
@@ -101,6 +102,13 @@ async function convertPublicListsToPremium(userConfig, apiKey) {
         };
         
         conversions++;
+        convertedLists.push({
+          id: addonId,
+          name: addon.name,
+          username: addon.mdblistUsername,
+          slug: addon.mdblistSlug,
+          newApiId: apiListData.listId
+        });
       } else {
         console.warn(`[MDBList] Failed to convert ${addon.name} to API access - API extraction returned public access or failed`);
         errors.push(`Failed to convert "${addon.name}" to API access`);
@@ -125,7 +133,9 @@ async function convertPublicListsToPremium(userConfig, apiKey) {
     errors,
     message: conversions > 0 ? 
       `Successfully converted ${conversions} public lists to premium API access` :
-      'No lists were converted'
+      'No lists were converted',
+    // Add detailed conversion info for better UI feedback
+    convertedLists: convertedLists
   };
 
   if (conversions > 0) {

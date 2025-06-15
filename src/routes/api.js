@@ -858,7 +858,7 @@ module.exports = function(router) {
         if (conversionResult) {
           response.conversionResult = conversionResult;
           if (conversionResult.conversions > 0) {
-            response.message = `API key saved and ${conversionResult.conversions} public lists converted to premium access`;
+            response.message = `Lists updated`;
           } else if (conversionResult.errors && conversionResult.errors.length > 0) {
             response.message = `API key saved but some lists could not be converted: ${conversionResult.errors.join(', ')}`;
           }

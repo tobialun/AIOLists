@@ -58,6 +58,16 @@
             <button type="button" class="disconnect-btn" onclick="window.disconnectMDBList()">Disconnect</button>
           </div>
         </div>
+        <!-- Conversion status container -->
+        <div id="mdblistConversionStatus" class="conversion-status-container" style="display: none;">
+          <div class="conversion-spinner">
+            <div class="inline-spinner"></div>
+            <span class="conversion-message">Converting public mdblists to API lists...</span>
+          </div>
+          <div class="conversion-progress" id="conversionProgress" style="display: none;">
+            <span class="conversion-details"></span>
+          </div>
+        </div>
       </div>
       <div class="form-group">
         <label for="rpdbApiKey">RPDB:
