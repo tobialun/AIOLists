@@ -904,17 +904,7 @@ function convertTmdbToStremioFormat(tmdbData, type) {
       });
     }
     
-    // TMDB rating link
-    if (metadata.tmdbRating) {
-      const tmdbUrl = isMovie ? 
-        `https://www.themoviedb.org/movie/${tmdbData.id}` :
-        `https://www.themoviedb.org/tv/${tmdbData.id}`;
-      metadata.links.push({
-        name: metadata.tmdbRating.toFixed(1),
-        category: "tmdb",
-        url: tmdbUrl
-      });
-    }
+
     
     // Genre links
     if (metadata.genres && metadata.genres.length > 0) {
