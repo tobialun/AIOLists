@@ -183,12 +183,19 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
     if (addonConfig.isTraktPublicList) {
       itemsResult = await fetchTraktListItems( addonConfig.id, userConfig, skip, sortPrefsForImportedOrRandom.sort, sortPrefsForImportedOrRandom.order, true, addonConfig.traktUser, itemTypeHintForFetching, genre );
     } else if (addonConfig.isMDBListUrlImport) {
-      if (apiKey) {
-        // Use API approach when available
+      if (apiKey && addonConfig.mdblistId) {
+        // Use API approach with the converted numeric ID (premium access)
         const isListUserMerged = userConfig.mergedLists?.[catalogIdFromRequest] !== false;
+        console.log(`[AddonBuilder] Using premium API access for converted list: ${addonConfig.name} (ID: ${addonConfig.mdblistId})`);
         itemsResult = await fetchMDBListItems( addonConfig.mdblistId, apiKey, listsMetadata, skip, sortPrefsForImportedOrRandom.sort, sortPrefsForImportedOrRandom.order, true, genre, null, isListUserMerged, userConfig );
+      } else if (apiKey) {
+        // Use API approach when available (legacy handling for lists that don't have mdblistId)
+        const listIdForApi = addonConfig.mdblistId || addonConfig.listId;
+        const isListUserMerged = userConfig.mergedLists?.[catalogIdFromRequest] !== false;
+        itemsResult = await fetchMDBListItems( listIdForApi, apiKey, listsMetadata, skip, sortPrefsForImportedOrRandom.sort, sortPrefsForImportedOrRandom.order, true, genre, null, isListUserMerged, userConfig );
       } else if (addonConfig.mdblistUsername && addonConfig.mdblistSlug) {
         // Use public JSON fallback when no API key is available
+        console.log(`[AddonBuilder] Using public JSON access for list: ${addonConfig.name} (${addonConfig.mdblistUsername}/${addonConfig.mdblistSlug})`);
         const { fetchListItemsFromPublicJson } = require('../integrations/mdblist');
         const isListUserMerged = userConfig.mergedLists?.[catalogIdFromRequest] !== false;
         itemsResult = await fetchListItemsFromPublicJson(

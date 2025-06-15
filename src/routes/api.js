@@ -786,6 +786,7 @@ module.exports = function(router) {
     try {
           const { apiKey, rpdbApiKey } = req.body;
     let configChanged = false;
+    let conversionResult = null;
 
     const newApiKey = apiKey || '';
     const newRpdbApiKey = rpdbApiKey || '';
@@ -817,7 +818,33 @@ module.exports = function(router) {
                 }
             }
         } else {
+            // API key is being set (not cleared)
+            const oldApiKey = req.userConfig.apiKey;
             req.userConfig.apiKey = newApiKey;
+            
+            // If this is the first time setting an API key (transitioning from no key to having key)
+            // or changing from one key to another, convert public lists to premium
+            if (!oldApiKey || oldApiKey !== newApiKey) {
+              try {
+                const { convertPublicListsToPremium } = require('../integrations/mdblist');
+                conversionResult = await convertPublicListsToPremium(req.userConfig, newApiKey);
+                
+                console.log(`[API] MDBList conversion result:`, conversionResult);
+                
+                if (conversionResult.conversions > 0) {
+                  console.log(`[API] Successfully converted ${conversionResult.conversions} public MDBList imports to premium access`);
+                }
+              } catch (conversionError) {
+                console.error('[API] Error converting public lists to premium:', conversionError.message);
+                // Don't fail the entire API key setting process if conversion fails
+                conversionResult = {
+                  success: false,
+                  conversions: 0,
+                  errors: [conversionError.message],
+                  message: 'API key saved but list conversion failed'
+                };
+              }
+            }
         }
       }
 
@@ -825,7 +852,19 @@ module.exports = function(router) {
         req.userConfig.lastUpdated = new Date().toISOString();
         const newConfigHash = await compressConfig(createConfigForStorage(req.userConfig));
         manifestCache.clear();
-        return res.json({ success: true, configHash: newConfigHash });
+        
+        // Include conversion result in response if it occurred
+        const response = { success: true, configHash: newConfigHash };
+        if (conversionResult) {
+          response.conversionResult = conversionResult;
+          if (conversionResult.conversions > 0) {
+            response.message = `API key saved and ${conversionResult.conversions} public lists converted to premium access`;
+          } else if (conversionResult.errors && conversionResult.errors.length > 0) {
+            response.message = `API key saved but some lists could not be converted: ${conversionResult.errors.join(', ')}`;
+          }
+        }
+        
+        return res.json(response);
       }
       return res.json({ success: true, configHash: req.configHash, message: "API keys processed" });
     } catch (error) {

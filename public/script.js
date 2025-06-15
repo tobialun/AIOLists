@@ -1303,12 +1303,14 @@ document.addEventListener('DOMContentLoaded', function() {
       updateApiKeyUI(elements.rpdbApiKeyInput, rpdbApiKeyToValidate, 'rpdb', null, rpdbValid);
       updateRandomListButtonState();
 
+      let saveData = null; // Declare saveData at function scope
+
       if (mdblistApiKeyToValidate || rpdbApiKeyToValidate || state.userConfig.apiKey || state.userConfig.rpdbApiKey) {
           const saveResponse = await fetch(`/${state.configHash}/apikey`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ apiKey: mdblistApiKeyToValidate, rpdbApiKey: rpdbApiKeyToValidate })
           });
-          const saveData = await saveResponse.json();
+          saveData = await saveResponse.json(); // Assign to the function-scoped variable
           if (!saveResponse.ok || !saveData.success) throw new Error(saveData.error || "Failed to save API keys");
 
           if (saveData.configHash && saveData.configHash !== state.configHash) {
@@ -1322,10 +1324,34 @@ document.addEventListener('DOMContentLoaded', function() {
             state.userConfig.enableRandomListFeature = false;
             updateRandomListButtonState();
           }
+          
+          // Handle conversion feedback if present
+          if (saveData.conversionResult) {
+            const { conversions, errors, message } = saveData.conversionResult;
+            
+            if (conversions > 0) {
+              console.log(`[UI] Successfully converted ${conversions} public MDBList imports to premium access`);
+              if (!isInitialLoadOrSilentCheck) {
+                showNotification('apiKeys', 
+                  `API key saved! ${conversions} public list${conversions > 1 ? 's' : ''} converted to premium access.`, 
+                  'success');
+              }
+            } else if (errors && errors.length > 0) {
+              console.warn('[UI] Some lists could not be converted:', errors);
+              if (!isInitialLoadOrSilentCheck) {
+                showNotification('apiKeys', 
+                  `API key saved, but some lists could not be converted: ${errors.slice(0, 2).join(', ')}${errors.length > 2 ? ` and ${errors.length - 2} more` : ''}`, 
+                  'warning', true);
+              }
+            }
+          }
       }
 
       if (!isInitialLoadOrSilentCheck) {
-          showNotification('apiKeys', 'API keys updated.', 'success');
+          // Only show generic success message if no conversion result was handled above
+          if (!saveData?.conversionResult || saveData.conversionResult.conversions === 0) {
+            showNotification('apiKeys', 'API keys updated.', 'success');
+          }
       }
 
       if (!isInitialLoadOrSilentCheck && ( (mdblistApiKeyToValidate && mdblistValid) || (rpdbApiKeyToValidate && rpdbValid) || state.userConfig.traktAccessToken) ) {
