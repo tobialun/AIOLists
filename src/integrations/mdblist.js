@@ -270,17 +270,8 @@ async function fetchListItemsFromPublicJson(username, listSlug, skip = 0, sort =
     // No metadata enrichment here - this will be done in the addon builder when serving to Stremio
     let enrichedItems = filteredItems;
 
-    // Apply genre filter after enrichment if specified
-    if (genre && genre !== 'All' && enrichedItems.length > 0) {
-      const beforeFilterCount = enrichedItems.length;
-      // Basic genre filtering - comprehensive filtering will happen after enrichment in addon builder
-      enrichedItems = enrichedItems.filter(item => {
-        // Most raw MDBList items don't have detailed genre data at this stage
-        // This filtering will be more comprehensive after enrichment in the addon builder
-        return true; // For now, include all items - genre filtering will happen after enrichment
-      });
-      
-    }
+    // Note: Genre filtering is now handled after metadata enrichment in the addon builder
+    // This ensures TMDB-enriched genres are properly used for filtering
 
     return {
       allItems: enrichedItems,
@@ -464,13 +455,9 @@ async function fetchListItems(
 
       if (!initialItemsFlat || initialItemsFlat.length === 0) { morePagesFromMdbList = false; break; }
       
-      // For genre filtering, we'll use basic filtering on available data
-      // Full metadata enrichment will happen later in the addon builder when serving to Stremio
-      const genreItemsFromPage = initialItemsFlat.filter(item => {
-        // Basic genre filtering - most MDBList items don't have detailed genre data at this stage
-        // This filtering will be more comprehensive after enrichment in the addon builder
-        return true; // For now, include all items - genre filtering will happen after enrichment
-      });
+      // Note: Genre filtering is now handled after metadata enrichment in the addon builder
+      // This ensures TMDB-enriched genres are properly used for filtering
+      const genreItemsFromPage = initialItemsFlat;
       allEnrichedGenreItems.push(...genreItemsFromPage);
       mdbListOffset += MDBLIST_PAGE_LIMIT;
       attemptsForGenreCompletion++;

@@ -204,9 +204,19 @@ async function fetchExternalAddonItems(targetOriginalId, targetOriginalType, sou
         return { metas: [], hasMovies: false, hasShows: false };
       }
     }
+    
+    // Skip genre filtering at external addon level when using TMDB metadata source
+    // This allows TMDB-enriched genre filtering to work properly after enrichment
+    const shouldSkipExternalGenreFilter = userConfig?.metadataSource === 'tmdb' && genre && genre !== 'All';
+    const genreForExternalAddon = shouldSkipExternalGenreFilter ? null : genre;
+    
+    if (shouldSkipExternalGenreFilter) {
+      console.log(`[ExternalAddon] Skipping external addon genre filter for "${genre}" - will filter after TMDB enrichment`);
+    }
+    
     const tempExternalAddon = new ExternalAddon(sourceAddonConfig.apiBaseUrl); 
     tempExternalAddon.apiBaseUrl = sourceAddonConfig.apiBaseUrl;
-    attemptedUrl = tempExternalAddon.buildCatalogUrl(catalogEntry.originalId, catalogEntry.originalType, skip, genre);
+    attemptedUrl = tempExternalAddon.buildCatalogUrl(catalogEntry.originalId, catalogEntry.originalType, skip, genreForExternalAddon);
     const response = await axios.get(attemptedUrl, { timeout: 20000 });
     if (!response.data || !Array.isArray(response.data.metas)) {
       console.error(`[AIOLists ExternalAddon] Invalid metadata response from ${attemptedUrl}: Data or metas array missing. Response:`, response.data);
@@ -227,14 +237,8 @@ async function fetchExternalAddonItems(targetOriginalId, targetOriginalType, sou
     // No metadata enrichment here - this will be done in the addon builder when serving to Stremio
     let enrichedMetas = metasFromExternal;
     let finalMetas = enrichedMetas;
-    if (genre && finalMetas.length > 0) {
-        // Basic genre filtering - comprehensive filtering will happen after enrichment in addon builder
-        finalMetas = finalMetas.filter(meta => {
-            // Most external addon items may not have detailed genre data at this stage
-            // This filtering will be more comprehensive after enrichment in the addon builder
-            return true; // For now, include all items - genre filtering will happen after enrichment
-        });
-    }
+    // Note: Genre filtering is now handled after metadata enrichment in the addon builder
+    // This ensures TMDB-enriched genres are properly used for filtering
     const hasMovies = finalMetas.some(m => m.type === 'movie');
     const hasShows = finalMetas.some(m => m.type === 'series');
     return { metas: finalMetas, hasMovies, hasShows };

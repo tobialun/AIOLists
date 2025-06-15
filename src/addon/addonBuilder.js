@@ -272,7 +272,7 @@ async function createAddon(userConfig) {
   await initTraktApi(userConfig);
   const manifest = {
     id: 'org.stremio.aiolists',
-    version: `1.2.5-${Date.now()}`,
+    version: `1.2.6-${Date.now()}`,
     name: 'AIOLists',
     description: 'Manage all your lists in one place.',
     resources: ['catalog', 'meta'],
@@ -1167,6 +1167,33 @@ async function createAddon(userConfig) {
     // Apply genre filtering after enrichment (since we removed it from integration layer)
     if (genre && genre !== 'All' && metas.length > 0) {
         const beforeFilterCount = metas.length;
+        
+        // Debug: Log genre information for external addon items
+        const isExternalAddon = importedAddons && Object.values(importedAddons).some(addon => 
+          addon.catalogs?.some(catalog => String(catalog.id) === String(id))
+        );
+        
+        if (isExternalAddon) {
+          const itemsWithGenres = metas.filter(meta => meta.genres && meta.genres.length > 0);
+          const itemsWithoutGenres = metas.filter(meta => !meta.genres || meta.genres.length === 0);
+          console.log(`[Genre Filter] External addon "${id}": ${itemsWithGenres.length}/${metas.length} items have genre data (metadata source: ${userConfig.metadataSource || 'cinemeta'})`);
+          
+          if (itemsWithGenres.length > 0) {
+            console.log(`[Genre Filter] Sample genres found:`, itemsWithGenres.slice(0, 3).map(item => ({
+              name: item.name,
+              genres: item.genres
+            })));
+          }
+          
+          if (itemsWithoutGenres.length > 0) {
+            console.log(`[Genre Filter] Sample items without genres:`, itemsWithoutGenres.slice(0, 3).map(item => ({
+              id: item.id,
+              name: item.name,
+              hasGenres: !!item.genres
+            })));
+          }
+        }
+        
         metas = metas.filter(meta => {
             if (!meta.genres) return false;
             const itemGenres = Array.isArray(meta.genres) ? meta.genres : [meta.genres];
@@ -1174,7 +1201,10 @@ async function createAddon(userConfig) {
                 String(g).toLowerCase() === String(genre).toLowerCase()
             );
         });
-
+        
+        if (isExternalAddon) {
+          console.log(`[Genre Filter] External addon "${id}": Filtered from ${beforeFilterCount} to ${metas.length} items for genre "${genre}"`);
+        }
     }
     
     const cacheMaxAge = (id === 'random_mdblist_catalog' || isWatchlist(id)) ? 0 : (5 * 60);

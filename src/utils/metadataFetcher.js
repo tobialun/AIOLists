@@ -12,6 +12,28 @@ const {
 const CINEMETA_BASE = 'https://v3-cinemeta.strem.io';
 const BATCH_SIZE = METADATA_BATCH_SIZE || 50;
 
+// Helper function to normalize IMDB IDs
+function normalizeImdbId(id) {
+  if (!id) return null;
+  
+  // If it's already a valid IMDB ID
+  if (/^tt\d{7,8}$/.test(id)) {
+    return id;
+  }
+  
+  // If it's a numeric ID, add 'tt' prefix
+  if (/^\d{7,8}$/.test(id)) {
+    return `tt${id}`;
+  }
+  
+  // If it's a TMDB ID format, we can't convert it here
+  if (id.startsWith('tmdb:')) {
+    return null;
+  }
+  
+  return null;
+}
+
 // Fetch metadata from Cinemeta for a chunk of IMDB IDs
 async function fetchCinemetaChunk(imdbIdChunk, type) {
   const CINEMETA_TIMEOUT = 5000; // Reduced timeout for faster failure
@@ -119,22 +141,38 @@ async function enrichItemsWithTMDB(items, language = 'en-US', userBearerToken = 
   
   const { batchConvertImdbToTmdbIds, batchFetchTmdbMetadata } = require('../integrations/tmdb');
   
-  // Step 1: Convert IMDB IDs to TMDB IDs
-  const imdbIds = items.map(item => item.imdb_id || item.id).filter(id => id && id.startsWith('tt'));
+  // Step 1: Extract and normalize IMDB IDs from items
+  const itemsWithIds = [];
+  items.forEach((item, index) => {
+    const originalId = item.imdb_id || item.id;
+    const normalizedId = normalizeImdbId(originalId);
+    
+    if (normalizedId) {
+      itemsWithIds.push({
+        originalIndex: index,
+        imdbId: normalizedId,
+        originalItem: item
+      });
+    } else if (originalId) {
+      console.log(`[TMDB] Skipping item with invalid ID format: "${originalId}" (item: ${item.name || item.title || 'Unknown'})`);
+    }
+  });
   
-  if (imdbIds.length === 0) {
-    return items;
+  // If no valid IMDB IDs found, try to enrich with Cinemeta as fallback
+  if (itemsWithIds.length === 0) {
+    console.log('[TMDB] No valid IMDB IDs found for TMDB enrichment, falling back to Cinemeta');
+    return await enrichItemsWithCinemeta(items);
   }
   
   try {
     const conversionStartTime = Date.now();
+    const imdbIds = itemsWithIds.map(item => item.imdbId);
     const imdbToTmdbMap = await batchConvertImdbToTmdbIds(imdbIds, userBearerToken);
     
     // Step 2: Prepare items for TMDB metadata fetch
     const tmdbItems = [];
-    items.forEach(item => {
-      const imdbId = item.imdb_id || item.id;
-      if (imdbId && imdbToTmdbMap[imdbId]) {
+    itemsWithIds.forEach(({ imdbId, originalItem }) => {
+      if (imdbToTmdbMap[imdbId]) {
         tmdbItems.push({
           imdbId: imdbId,
           tmdbId: imdbToTmdbMap[imdbId].tmdbId,
@@ -143,43 +181,69 @@ async function enrichItemsWithTMDB(items, language = 'en-US', userBearerToken = 
       }
     });
     
+    // If no TMDB conversions found, try Cinemeta fallback for all items
     if (tmdbItems.length === 0) {
-      return items;
+      console.log('[TMDB] No TMDB conversions found, falling back to Cinemeta');
+      return await enrichItemsWithCinemeta(items);
     }
     
     const metadataStartTime = Date.now();
     const tmdbMetadataMap = await batchFetchTmdbMetadata(tmdbItems, language, userBearerToken);
     
-    // Step 3: Merge TMDB metadata with original items and convert IDs to tmdb: format
-    const enrichedItems = items.map(item => {
-      const imdbId = item.imdb_id || item.id;
-      const tmdbMetadata = tmdbMetadataMap[imdbId];
+    // Step 3: Create a result array preserving original order
+    const enrichedItems = items.map((originalItem, index) => {
+      // Find if this item had a valid IMDB ID
+      const itemWithId = itemsWithIds.find(item => item.originalIndex === index);
       
-      if (tmdbMetadata) {
-        // Get the TMDB ID for this item
-        const tmdbConversion = imdbToTmdbMap[imdbId];
-        const newId = tmdbConversion ? `tmdb:${tmdbConversion.tmdbId}` : item.id;
+      if (itemWithId) {
+        const tmdbMetadata = tmdbMetadataMap[itemWithId.imdbId];
         
-        return {
-          ...item,
-          ...tmdbMetadata,
-          // Use tmdb: format for ID when enriched with TMDB
-          id: newId,
-          imdb_id: item.imdb_id || item.id,
-          type: item.type
-        };
+        if (tmdbMetadata) {
+          // Get the TMDB ID for this item
+          const tmdbConversion = imdbToTmdbMap[itemWithId.imdbId];
+          const newId = tmdbConversion ? `tmdb:${tmdbConversion.tmdbId}` : originalItem.id;
+          
+          return {
+            ...originalItem,
+            ...tmdbMetadata,
+            // Use tmdb: format for ID when enriched with TMDB
+            id: newId,
+            imdb_id: itemWithId.imdbId, // Use normalized IMDB ID
+            type: originalItem.type
+          };
+        }
       }
       
-      return item;
+      // If no TMDB metadata found, return original item
+      return originalItem;
     });
     
+    // Count how many items were successfully enriched
+    const enrichedCount = enrichedItems.filter((item, index) => {
+      const itemWithId = itemsWithIds.find(i => i.originalIndex === index);
+      return itemWithId && tmdbMetadataMap[itemWithId.imdbId];
+    }).length;
+    
+    console.log(`[TMDB] Enriched ${enrichedCount}/${items.length} items with TMDB metadata`);
+    
+    // Count items with genre information after TMDB enrichment
+    const itemsWithGenres = enrichedItems.filter(item => item.genres && item.genres.length > 0);
+    console.log(`[TMDB] ${itemsWithGenres.length}/${items.length} items have genre information after TMDB enrichment`);
+    
+    // If less than 50% of items were enriched, fall back to Cinemeta for better genre coverage
+    if (enrichedCount < items.length * 0.5) {
+      console.log('[TMDB] Low enrichment success rate, falling back to Cinemeta for better coverage');
+      return await enrichItemsWithCinemeta(items);
+    }
 
     return enrichedItems;
     
   } catch (error) {
     console.error(`[DEBUG] Error in TMDB enrichment process:`, error.message);
     console.error(`[DEBUG] Error stack:`, error.stack);
-    throw error; // Re-throw to trigger fallback
+    // Fall back to Cinemeta on any error
+    console.log('[TMDB] TMDB enrichment failed, falling back to Cinemeta');
+    return await enrichItemsWithCinemeta(items);
   }
 }
 
@@ -192,12 +256,28 @@ async function enrichItemsWithCinemeta(items) {
   if (!items || items.length === 0) return [];
 
   try {
-    // Group items by type for efficient batching
-    const movieItems = items.filter(item => item.type === 'movie' && item.imdb_id);
-    const seriesItems = items.filter(item => item.type === 'series' && item.imdb_id);
+    // Normalize and extract valid IMDB IDs
+    const processedItems = items.map((item, index) => {
+      const originalId = item.imdb_id || item.id;
+      const normalizedId = normalizeImdbId(originalId);
+      
+      if (!normalizedId && originalId) {
+        console.log(`[Cinemeta] Skipping item with invalid ID format: "${originalId}" (item: ${item.name || item.title || 'Unknown'})`);
+      }
+      
+      return {
+        originalIndex: index,
+        imdbId: normalizedId,
+        originalItem: item
+      };
+    });
     
-    const movieIds = movieItems.map(item => item.imdb_id);
-    const seriesIds = seriesItems.map(item => item.imdb_id);
+    // Group items by type for efficient batching
+    const movieItems = processedItems.filter(item => item.originalItem.type === 'movie' && item.imdbId);
+    const seriesItems = processedItems.filter(item => item.originalItem.type === 'series' && item.imdbId);
+    
+    const movieIds = movieItems.map(item => item.imdbId);
+    const seriesIds = seriesItems.map(item => item.imdbId);
     
     // Fetch metadata in batches
     const [movieMetadata, seriesMetadata] = await Promise.all([
@@ -208,21 +288,37 @@ async function enrichItemsWithCinemeta(items) {
     // Combine all metadata
     const allMetadata = { ...movieMetadata, ...seriesMetadata };
     
-    // Merge metadata back into items
-    const enrichedItems = items.map(item => {
-      const metadata = allMetadata[item.imdb_id];
-      if (metadata) {
+    // Merge metadata back into items, preserving original order
+    const enrichedItems = items.map((originalItem, index) => {
+      const processedItem = processedItems[index];
+      
+      if (processedItem.imdbId && allMetadata[processedItem.imdbId]) {
+        const metadata = allMetadata[processedItem.imdbId];
         return {
-          ...item,
+          ...originalItem,
           ...metadata,
           // Preserve essential fields
-          imdb_id: item.imdb_id,
-          id: item.imdb_id,
-          type: item.type
+          imdb_id: processedItem.imdbId, // Use normalized IMDB ID
+          id: processedItem.imdbId,
+          type: originalItem.type
         };
       }
-      return item;
+      
+      // Return original item if no metadata found
+      return originalItem;
     });
+    
+    // Count successful enrichments
+    const enrichedCount = enrichedItems.filter((item, index) => {
+      const processedItem = processedItems[index];
+      return processedItem.imdbId && allMetadata[processedItem.imdbId];
+    }).length;
+    
+    console.log(`[Cinemeta] Enriched ${enrichedCount}/${items.length} items with Cinemeta metadata`);
+    
+    // Count items with genre information after Cinemeta enrichment
+    const itemsWithGenres = enrichedItems.filter(item => item.genres && item.genres.length > 0);
+    console.log(`[Cinemeta] ${itemsWithGenres.length}/${items.length} items have genre information after Cinemeta enrichment`);
 
     return enrichedItems;
     
