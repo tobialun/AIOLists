@@ -2372,7 +2372,7 @@ module.exports = function(router) {
     
     const defaultManifest = {
       "id": "org.stremio.aiolists",
-      "version": `1.2.6-${Date.now()}`,
+      "version": `1.2.7-${Date.now()}`,
       "name": "AIOLists",
       "description": "Manage all your lists in one place.",
       "resources": [
