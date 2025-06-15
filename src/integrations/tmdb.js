@@ -395,7 +395,7 @@ async function processListItems(items, userConfig, genre) {
   if (itemsWithTmdbIds.length > 0) {
     // Fetch external IDs with concurrency control to avoid overwhelming the API
     const CONCURRENCY_LIMIT = TMDB_CONCURRENT_REQUESTS || 5;
-    console.log(`[TMDB PERF] Processing ${itemsWithTmdbIds.length} items with concurrency ${CONCURRENCY_LIMIT}`);
+  
     
     const chunks = [];
     for (let i = 0; i < itemsWithTmdbIds.length; i += CONCURRENCY_LIMIT) {
@@ -657,7 +657,7 @@ async function fetchTmdbMetadata(tmdbId, type, language = 'en-US', userBearerTok
     // For series, also fetch season and episode data
     if (type === 'series' && data.number_of_seasons) {
       try {
-        console.log(`[TMDB] Fetching episode data for series ${tmdbId} with ${data.number_of_seasons} seasons`);
+    
         
         // Fetch episode data for all seasons (limit to first 10 seasons for performance)
         const maxSeasons = Math.min(data.number_of_seasons, 10);
@@ -688,7 +688,7 @@ async function fetchTmdbMetadata(tmdbId, type, language = 'en-US', userBearerTok
         // Add episode data to the main data object
         data.seasons_with_episodes = validSeasons.map(response => response.data);
         
-        console.log(`[TMDB] Successfully fetched episode data for ${validSeasons.length} seasons of series ${tmdbId}`);
+
       } catch (error) {
         console.warn(`[TMDB] Failed to fetch episode data for series ${tmdbId}:`, error.message);
         // Continue without episode data if fetching fails
@@ -787,7 +787,7 @@ function convertTmdbToStremioFormat(tmdbData, type) {
   // Process episodes for series
   let videos = [];
   if (!isMovie && tmdbData.seasons_with_episodes) {
-    console.log(`[TMDB] Processing episodes for series ${tmdbData.id}`);
+
     
     tmdbData.seasons_with_episodes.forEach(season => {
       if (season.episodes && Array.isArray(season.episodes)) {
@@ -828,7 +828,7 @@ function convertTmdbToStremioFormat(tmdbData, type) {
       return a.episode - b.episode;
     });
     
-    console.log(`[TMDB] Processed ${videos.length} episodes for series ${tmdbData.id}`);
+
   }
 
   // Build comprehensive metadata object similar to Cinemeta structure

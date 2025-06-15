@@ -17,7 +17,6 @@ const manifestCache = new Cache({ defaultTTL: 1 * 60 * 1000 });
 
 // Helper function to create a config copy for storage that excludes sensitive Trakt tokens when using Upstash
 function createConfigForStorage(userConfig) {
-  console.log('[CONFIG] Creating config for storage');
   const configForStorage = { ...userConfig };
   
   // Only exclude Trakt tokens from storage if Upstash is configured and we have a traktUuid
@@ -33,23 +32,18 @@ function createConfigForStorage(userConfig) {
 
 // Helper function to update config without rebuilding manifest
 async function updateConfigLightweight(userConfig, changes, changeDescription) {
-  console.log(`[CONFIG] Lightweight update: ${changeDescription}`);
-  console.log(`[CONFIG] Changes applied:`, Object.keys(changes));
-  
   // Apply changes to user config
   Object.assign(userConfig, changes);
   userConfig.lastUpdated = new Date().toISOString();
   
   // Generate new config hash
   const newConfigHash = await compressConfig(userConfig);
-  console.log(`[CONFIG] Generated new config hash: ${newConfigHash.substring(0, 20)}...`);
   
   return newConfigHash;
 }
 
-// Helper function to clear manifest cache and log it
+// Helper function to clear manifest cache
 function clearManifestCache(reason) {
-  console.log(`[MANIFEST] Clearing manifest cache due to: ${reason}`);
   manifestCache.clear();
 }
 
@@ -215,7 +209,6 @@ module.exports = function(router) {
             if (req.userConfig.randomMDBListUsernames.length === 0 && defaultConfig.randomMDBListUsernames.length > 0) {
                 // If user clears all, revert to default non-empty list to prevent issues
                 req.userConfig.randomMDBListUsernames = [...defaultConfig.randomMDBListUsernames];
-                 console.warn("Random MDBList usernames cleared by user, reverting to internal default to ensure functionality.");
             }
         } else {
             return res.status(400).json({ success: false, error: 'Invalid format for randomMDBListUsernames. Must be an array of strings.' });
@@ -274,7 +267,6 @@ module.exports = function(router) {
       if (languageChanged) {
         const { clearTmdbCaches } = require('../integrations/tmdb');
         clearTmdbCaches();
-        console.log(`Cleared TMDB cache due to language change from ${currentLanguage} to ${tmdbLanguage}`);
       }
 
       req.userConfig.lastUpdated = new Date().toISOString();
@@ -328,8 +320,7 @@ module.exports = function(router) {
   // New endpoint to prepare manifest for Install/Copy actions
   router.post('/:configHash/prepare-manifest', async (req, res) => {
     try {
-      console.log('[MANIFEST] Preparing manifest for Install/Copy action');
-      console.log('[MANIFEST] Starting full manifest generation with list fetching');
+      
       
       const cacheKey = `manifest_${req.configHash}`;
       manifestCache.delete(cacheKey); // Force fresh generation
@@ -338,8 +329,7 @@ module.exports = function(router) {
       const addonInterface = await createAddon(req.userConfig);
       const endTime = Date.now();
       
-      console.log(`[MANIFEST] Manifest generation completed in ${endTime - startTime}ms`);
-      console.log(`[MANIFEST] Generated manifest with ${addonInterface.manifest.catalogs.length} catalogs`);
+
       
       manifestCache.set(cacheKey, addonInterface);
       
@@ -357,18 +347,18 @@ module.exports = function(router) {
 
   router.get('/:configHash/manifest.json', async (req, res) => {
     try {
-      console.log('[MANIFEST] Serving manifest.json');
+  
       const cacheKey = `manifest_${req.configHash}`;
       let addonInterface = manifestCache.get(cacheKey);
       if (!addonInterface) {
-        console.log('[MANIFEST] No cached manifest found, generating new one');
+
         const startTime = Date.now();
         addonInterface = await createAddon(req.userConfig);
         const endTime = Date.now();
-        console.log(`[MANIFEST] Fresh manifest generated in ${endTime - startTime}ms`);
+
         manifestCache.set(cacheKey, addonInterface);
       } else {
-        console.log('[MANIFEST] Serving cached manifest');
+
       }
       setCacheHeaders(res, null);
       res.json(addonInterface.manifest);
@@ -423,7 +413,7 @@ module.exports = function(router) {
 
           if (catalogId === 'aiolists_merged_search') {
             // Merged search using TMDB multi search
-            console.log(`[API Search] Handling merged search for "${searchQuery}"`);
+    
             
             searchResults = await searchContent({
               query: searchQuery.trim(),
@@ -434,7 +424,7 @@ module.exports = function(router) {
             });
           } else if (catalogId === 'aiolists_anime_search') {
             // Anime search using Kitsu API
-            console.log(`[API Search] Handling anime search for "${searchQuery}"`);
+    
             
             searchResults = await searchContent({
               query: searchQuery.trim(),
@@ -445,7 +435,7 @@ module.exports = function(router) {
             });
           } else {
             // Traditional movie/series search
-            console.log(`[API Search] Handling traditional search for "${searchQuery}"`);
+    
             
             // Determine search sources based on user configuration
             const userSearchSources = req.userConfig.searchSources || [];
@@ -464,7 +454,7 @@ module.exports = function(router) {
             
             // If no valid sources are configured, return empty results
             if (sources.length === 0) {
-              console.log(`[API Search] No valid search sources configured, returning empty results`);
+      
               return res.json({ metas: [] });
             }
             
@@ -498,7 +488,7 @@ module.exports = function(router) {
                 String(g).toLowerCase() === String(genre).toLowerCase()
               );
             });
-            console.log(`[API Search] Genre filter "${genre}": ${beforeFilter} -> ${filteredMetas.length} results`);
+    
           }
 
           return res.json({ 
@@ -601,7 +591,6 @@ module.exports = function(router) {
                   String(g).toLowerCase() === String(genre).toLowerCase()
               );
           });
-          console.log(`[API] Genre filter "${genre}": ${beforeFilterCount} -> ${metas.length} items after enrichment`);
       }
       
       res.json({ metas });
@@ -744,10 +733,10 @@ module.exports = function(router) {
       delete configToSend.traktAccessToken;
       delete configToSend.traktRefreshToken;
       delete configToSend.traktExpiresAt;
-      console.log('[CONFIG API] Removed Trakt tokens from API response (stored in Upstash)');
     }
     
     // Only remove sensitive data if this is a potentially shared config
+    // Note: Keep usernames (tmdbUsername, traktUsername, mdblistUsername) as they're not sensitive
     if (req.isPotentiallySharedConfig) {
       delete configToSend.apiKey;
       delete configToSend.rpdbApiKey;
@@ -859,16 +848,12 @@ module.exports = function(router) {
                 refreshToken: req.userConfig.traktRefreshToken,
                 expiresAt: req.userConfig.traktExpiresAt
             };
-            console.log('[UPSTASH] Saving Trakt tokens to Upstash for UUID:', req.userConfig.traktUuid);
             await saveTraktTokens(req.userConfig, tokensToSave);
             
             // Immediately verify that tokens are accessible from Upstash
-            console.log('[UPSTASH] Verifying tokens can be loaded from Upstash');
             await initTraktApi(req.userConfig);
-            console.log('[UPSTASH] Tokens successfully verified in Upstash');
             
             // Clear tokens from local config now that they're safely stored in Upstash
-            console.log('[UPSTASH] Clearing Trakt tokens from local config (now stored in Upstash)');
             req.userConfig.traktAccessToken = null;
             req.userConfig.traktRefreshToken = null;
             req.userConfig.traktExpiresAt = null;
@@ -891,8 +876,6 @@ module.exports = function(router) {
       const configHash = req.params.configHash;
       const { code } = req.body;
       
-      console.log(`[Trakt Auth] Attempting authentication with code: ${code ? 'present' : 'missing'}`);
-      
       if (!configHash) {
         return res.status(400).json({ error: 'Config hash is required' });
       }
@@ -907,21 +890,11 @@ module.exports = function(router) {
         return res.status(400).json({ error: 'Invalid config hash' });
       }
       
-      console.log(`[Trakt Auth] Config decompressed successfully`);
-      
       // Complete Trakt authentication
       const authResult = await authenticateTrakt(code, userConfig);
       
-      console.log(`[Trakt Auth] Authentication result:`, {
-        hasAccessToken: !!authResult?.accessToken,
-        hasRefreshToken: !!authResult?.refreshToken,
-        hasUuid: !!authResult?.uuid,
-        expiresAt: authResult?.expiresAt
-      });
-      
       // authenticateTrakt returns the auth data directly or throws an error
       if (!authResult || !authResult.accessToken) {
-        console.error(`[Trakt Auth] Authentication failed - no access token received`);
         return res.status(400).json({ error: 'Trakt authentication failed - no access token received' });
       }
       
@@ -932,19 +905,19 @@ module.exports = function(router) {
       if (authResult.uuid) {
         userConfig.traktUuid = authResult.uuid;
       }
-      
-      console.log(`[Trakt Auth] User config updated with tokens`);
+      if (authResult.username) {
+        userConfig.traktUsername = authResult.username; // Store the username for persistence
+      }
       
       // Compress and return new config hash
       const newConfigHash = await compressConfig(userConfig);
-      
-      console.log(`[Trakt Auth] New config hash generated: ${newConfigHash ? 'success' : 'failed'}`);
       
       res.json({
         success: true,
         configHash: newConfigHash,
         message: 'Successfully connected to Trakt!',
-        uuid: authResult.uuid
+        uuid: authResult.uuid,
+        username: authResult.username
       });
       
     } catch (error) {
@@ -995,6 +968,7 @@ module.exports = function(router) {
         req.userConfig.traktAccessToken = null;
         req.userConfig.traktRefreshToken = null;
         req.userConfig.traktExpiresAt = null;
+        req.userConfig.traktUsername = null; // Clear the username when disconnecting
 
         // Purge Trakt-related list configurations and metadata
         purgeListConfigs(req.userConfig, 'trakt_');
@@ -1062,6 +1036,7 @@ module.exports = function(router) {
     try {
         req.userConfig.tmdbSessionId = null;
         req.userConfig.tmdbAccountId = null;
+        req.userConfig.tmdbUsername = null; // Clear the username when disconnecting
         
         // Only clear user-provided bearer token, not environment token
         req.userConfig.tmdbBearerToken = null;
@@ -1274,20 +1249,16 @@ module.exports = function(router) {
 
   router.post('/:configHash/lists/names', async (req, res) => {
     try {
-      console.log('[LISTS] Updating list names (lightweight)');
       const { listId, customName } = req.body;
       if (!listId) return res.status(400).json({ error: 'List ID required' });
       if (!req.userConfig.customListNames) req.userConfig.customListNames = {};
       if (customName && customName.trim()) {
         req.userConfig.customListNames[String(listId)] = customName.trim();
-        console.log(`[LISTS] Set custom name for list ${listId}: "${customName.trim()}"`);
       } else {
         delete req.userConfig.customListNames[String(listId)];
-        console.log(`[LISTS] Removed custom name for list: ${listId}`);
       }
       
       const newConfigHash = await updateConfigLightweight(req.userConfig, {}, 'custom list name update');
-      console.log('[LISTS] List names updated without manifest rebuild');
       res.json({ success: true, configHash: newConfigHash, message: 'List name updated' });
     } catch (error) {
         console.error('[LISTS] Failed to update list name:', error);
@@ -1297,7 +1268,6 @@ module.exports = function(router) {
 
   router.post('/:configHash/lists/mediatype', async (req, res) => {
     try {
-      console.log('[LISTS] Updating list media type (lightweight)');
       const { listId, customMediaType } = req.body;
       if (!listId) return res.status(400).json({ error: 'List ID required for custom media type.' });
 
@@ -1307,14 +1277,11 @@ module.exports = function(router) {
 
       if (customMediaType && customMediaType.trim()) {
         req.userConfig.customMediaTypeNames[String(listId)] = customMediaType.trim().toLowerCase();
-        console.log(`[LISTS] Set custom media type for list ${listId}: "${customMediaType.trim().toLowerCase()}"`);
       } else {
         delete req.userConfig.customMediaTypeNames[String(listId)];
-        console.log(`[LISTS] Removed custom media type for list: ${listId}`);
       }
 
       const newConfigHash = await updateConfigLightweight(req.userConfig, {}, 'custom media type update');
-      console.log('[LISTS] List media type updated without manifest rebuild');
       res.json({ success: true, configHash: newConfigHash, message: 'Custom media type display name updated' });
     } catch (error) {
       console.error('[LISTS] Failed to update custom media type name:', error);
@@ -1324,7 +1291,6 @@ module.exports = function(router) {
 
   router.post('/:configHash/lists/visibility', async (req, res) => {
     try {
-      console.log('[LISTS] Updating list visibility (lightweight)');
       const { hiddenLists } = req.body;
       if (!Array.isArray(hiddenLists)) return res.status(400).json({ error: 'Hidden lists must be an array of strings.' });
       
@@ -1333,13 +1299,11 @@ module.exports = function(router) {
       }
       
       req.userConfig.hiddenLists = hiddenLists.map(String);
-      console.log(`[LISTS] Updated hidden lists: [${hiddenLists.join(', ')}]`);
       
       const newConfigHash = await updateConfigLightweight(req.userConfig, {}, 'list visibility update');
       
       // Clear manifest cache since visibility changes affect what appears in the manifest
       clearManifestCache('list visibility update');
-      console.log('[LISTS] List visibility updated and manifest cache cleared');
       res.json({ success: true, configHash: newConfigHash, message: 'List visibility updated' });
     } catch (error) {
         console.error('[LISTS] Failed to update list visibility:', error);
@@ -1441,15 +1405,12 @@ module.exports = function(router) {
 
   router.post('/:configHash/lists/sort', async (req, res) => {
     try {
-      console.log('[LISTS] Updating sort preferences (lightweight)');
       const { listId, sort, order } = req.body;
       if (!listId || !sort) return res.status(400).json({ error: 'List ID (originalId) and sort field required' });
       if (!req.userConfig.sortPreferences) req.userConfig.sortPreferences = {};
       req.userConfig.sortPreferences[String(listId)] = { sort, order: order || 'desc' };
-      console.log(`[LISTS] Set sort for list ${listId}: ${sort} ${order || 'desc'}`);
       
       const newConfigHash = await updateConfigLightweight(req.userConfig, {}, 'sort preferences update');
-      console.log('[LISTS] Sort preferences updated without manifest rebuild');
       res.json({ success: true, configHash: newConfigHash, message: 'Sort preferences updated' });
     } catch (error) {
         console.error('[LISTS] Failed to update sort preferences:', error);
@@ -1459,8 +1420,6 @@ module.exports = function(router) {
 
   router.post('/:configHash/lists/merge', async (req, res) => {
     try {
-      console.log('[LISTS] Updating list merge preference (lightweight)');
-
       if (req.userConfig.upstashUrl) {
         await initTraktApi(req.userConfig);
       }
@@ -1492,17 +1451,14 @@ module.exports = function(router) {
             delete req.userConfig.mergedLists;
           }
         }
-        console.log(`[LISTS] Set list ${listId} to merged state`);
       } else { // User wants to split (merged === false)
         if (!req.userConfig.mergedLists) {
           req.userConfig.mergedLists = {};
         }
         req.userConfig.mergedLists[String(listId)] = false;
-        console.log(`[LISTS] Set list ${listId} to split state`);
       }
       
       const newConfigHash = await updateConfigLightweight(req.userConfig, {}, 'list merge preference update');
-      console.log('[LISTS] List merge preference updated without manifest rebuild');
   
       res.json({ success: true, configHash: newConfigHash, message: `List ${merged ? 'merged' : 'split'}` });
     } catch (error) {
@@ -1645,16 +1601,12 @@ module.exports = function(router) {
   // Lightweight lists endpoint - doesn't fetch lists from external APIs
   router.get('/:configHash/lists-lightweight', async (req, res) => {
     try {
-      console.log('[LISTS] Loading lists (lightweight - no API calls)');
-      
       // Initialize Trakt API if needed (this is fast)
       if (req.userConfig.traktUuid || req.userConfig.traktAccessToken) {
         await initTraktApi(req.userConfig);
       }
 
       // Return cached/stored list information without fetching from external APIs
-      console.log('[LISTS] Returning cached list configuration without external API calls');
-      
       res.json({
         success: true,
         lists: [], // Empty for lightweight mode
@@ -2158,6 +2110,7 @@ module.exports = function(router) {
       
       req.userConfig.tmdbSessionId = tmdbAuthResult.sessionId;
       req.userConfig.tmdbAccountId = tmdbAuthResult.accountId;
+      req.userConfig.tmdbUsername = tmdbAuthResult.username; // Store the username for persistence
       req.userConfig.lastUpdated = new Date().toISOString();
       
       const newConfigHash = await compressConfig(req.userConfig);
@@ -2389,7 +2342,7 @@ module.exports = function(router) {
     
     const defaultManifest = {
       "id": "org.stremio.aiolists",
-      "version": `1.2.4-${Date.now()}`,
+      "version": `1.2.5-${Date.now()}`,
       "name": "AIOLists",
       "description": "Manage all your lists in one place.",
       "resources": [
@@ -2412,7 +2365,11 @@ module.exports = function(router) {
       "behaviorHints": {
         "configurable": true,
         "configurationRequired": false
-      }
+      },
+      "stremioAddonsConfig": {
+        "issuer": "https://stremio-addons.net",
+        "signature": "eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..bBDFxrSiXGiYJ0dwgZHfFw.etvArxgbxW-ZCwbZeX18Es0ZlvnUPhsM-TvqrMRH-vD-xF8RL840HD7ec7k3ijjaqo5efYkoY0r73wrqrEgYFvuSs1VC3yLSIuKf8kiQh8oFumr2b4wH5WAj49DHkZEG.PJBxhHkw3DkOKrf6YifUVQ"
+      }    
     };
     
     setCacheHeaders(res, null);

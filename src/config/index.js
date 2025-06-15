@@ -32,11 +32,13 @@ const defaultConfig = {
   tmdbBearerToken: TMDB_BEARER_TOKEN, // Use env var if set
   tmdbSessionId: '',
   tmdbAccountId: '',
+  tmdbUsername: '',
   metadataSource: 'cinemeta',
   tmdbLanguage: '',
   traktAccessToken: '',
   traktRefreshToken: '',
   traktExpiresAt: null,
+  traktUsername: '',
   listOrder: [],
   lastUpdated: null,
   listsMetadata: {},

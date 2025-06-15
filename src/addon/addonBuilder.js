@@ -44,7 +44,6 @@ const DELAY_BETWEEN_DIFFERENT_TRAKT_LISTS_MS = 500;
 
 // Lightweight metadata checking without full enrichment
 async function getLightweightListMetadata(listId, userConfig, type = 'all') {
-  console.log(`[METADATA LIGHT] Starting lightweight check for ${listId} (type: ${type})`);
   const startTime = Date.now();
   
   try {
@@ -59,10 +58,9 @@ async function getLightweightListMetadata(listId, userConfig, type = 'all') {
     // Fetch just the raw list data without enrichment
     const content = await fetchListContent(listId, lightweightConfig, 0, null, type);
     
-    const endTime = Date.now();
-    console.log(`[METADATA LIGHT] Lightweight check completed in ${endTime - startTime}ms for ${listId}: movies=${content?.hasMovies || false}, shows=${content?.hasShows || false}`);
-    
-    return {
+      const endTime = Date.now();
+  
+  return {
       hasMovies: content?.hasMovies || false,
       hasShows: content?.hasShows || false,
       itemCount: content?.allItems?.length || 0
@@ -89,14 +87,11 @@ const getManifestCatalogName = (listId, originalName, customListNames) => {
 
 async function fetchListContent(listId, userConfig, skip = 0, genre = null, stremioCatalogType = 'all') {
   const fetchContentStartTime = Date.now();
-  console.log(`[FETCH PERF] Starting fetchListContent for ${listId} (skip: ${skip}, type: ${stremioCatalogType})`);
   
   const catalogIdFromRequest = String(listId);
 
   if (catalogIdFromRequest.startsWith('trakt_') && !catalogIdFromRequest.startsWith('traktpublic_')) {
-    const initTraktStartTime = Date.now();
     await initTraktApi(userConfig);
-    console.log(`[FETCH PERF] Trakt API init took ${Date.now() - initTraktStartTime}ms for ${listId}`);
   }
 
   const { apiKey, traktAccessToken, listsMetadata = {}, sortPreferences = {}, importedAddons = {}, rpdbApiKey, randomMDBListUsernames, enableRandomListFeature, customMediaTypeNames = {} } = userConfig;
@@ -154,7 +149,6 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
       }
     } else {
       // Fallback to public JSON approach when no API key is available
-      console.log(`[Random MDBList] No API key available, using public JSON approach for user: ${randomUsername}`);
       
       // For public JSON, we'll use a predefined list of popular/well-known lists
       // This is a simplified approach since we can't discover lists without an API key
@@ -167,14 +161,11 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
       const randomListSlug = popularListSlugs[Math.floor(Math.random() * popularListSlugs.length)];
       const randomCatalogSortPrefs = sortPreferences?.['random_mdblist_catalog'] || { sort: 'rank', order: 'asc' };
       
-      console.log(`[Random MDBList] Attempting to fetch ${randomUsername}/${randomListSlug} via public JSON`);
-      
       // Try to fetch using public JSON
       const { fetchListItemsFromPublicJson } = require('../integrations/mdblist');
       itemsResult = await fetchListItemsFromPublicJson(randomUsername, randomListSlug, skip, randomCatalogSortPrefs.sort, randomCatalogSortPrefs.order, genre, userConfig, false);
       
       if (!itemsResult) {
-        console.log(`[Random MDBList] Public JSON failed for ${randomUsername}/${randomListSlug}, trying alternative`);
         // Try another random combination
         const altUsername = randomMDBListUsernames[Math.floor(Math.random() * randomMDBListUsernames.length)];
         const altListSlug = popularListSlugs[Math.floor(Math.random() * popularListSlugs.length)];
@@ -182,7 +173,6 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
       }
       
       if (!itemsResult) {
-        console.log(`[Random MDBList] All public JSON attempts failed, returning empty result`);
         itemsResult = { allItems: [], hasMovies: false, hasShows: false };
       }
     }
@@ -199,7 +189,6 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
         itemsResult = await fetchMDBListItems( addonConfig.mdblistId, apiKey, listsMetadata, skip, sortPrefsForImportedOrRandom.sort, sortPrefsForImportedOrRandom.order, true, genre, null, isListUserMerged, userConfig );
       } else if (addonConfig.mdblistUsername && addonConfig.mdblistSlug) {
         // Use public JSON fallback when no API key is available
-        console.log(`[MDBList URL Import] No API key, using public JSON for ${addonConfig.mdblistUsername}/${addonConfig.mdblistSlug}`);
         const { fetchListItemsFromPublicJson } = require('../integrations/mdblist');
         const isListUserMerged = userConfig.mergedLists?.[catalogIdFromRequest] !== false;
         itemsResult = await fetchListItemsFromPublicJson(
@@ -264,17 +253,10 @@ async function fetchListContent(listId, userConfig, skip = 0, genre = null, stre
     itemsResult = await fetchMDBListItems( mdbListOriginalIdFromCatalog, apiKey, listsMetadata, skip, sortForMdbList, mdbListSortPrefs.order, false, genre, null, isListUserMerged, userConfig );
   }
   const finalResult = itemsResult || null;
-  const fetchContentEndTime = Date.now();
-  console.log(`[FETCH PERF] fetchListContent completed in ${fetchContentEndTime - fetchContentStartTime}ms for ${listId}`);
-  if (finalResult) {
-    console.log(`[FETCH PERF] Returned ${finalResult.allItems?.length || 0} items for ${listId}`);
-  }
   return finalResult;
 }
 
-
 async function createAddon(userConfig) {
-  console.log('[ADDON BUILDER] Starting addon creation - this involves fetching all lists');
   const startTime = Date.now();
   
   // Check manifest cache first (if enabled)
@@ -283,8 +265,6 @@ async function createAddon(userConfig) {
     const cachedManifest = manifestCache.get(cacheKey);
     
     if (cachedManifest && (Date.now() - cachedManifest.timestamp) < MANIFEST_CACHE_TTL) {
-      const cacheAge = Math.round((Date.now() - cachedManifest.timestamp) / 1000);
-      console.log(`[ADDON BUILDER] Using cached manifest (${cacheAge}s old) - skipping list processing`);
       return cachedManifest.addon;
     }
   }
@@ -292,7 +272,7 @@ async function createAddon(userConfig) {
   await initTraktApi(userConfig);
   const manifest = {
     id: 'org.stremio.aiolists',
-    version: `1.2.4-${Date.now()}`,
+    version: `1.2.5-${Date.now()}`,
     name: 'AIOLists',
     description: 'Manage all your lists in one place.',
     resources: ['catalog', 'meta'],
@@ -318,13 +298,11 @@ async function createAddon(userConfig) {
   // Only add 'search' type if merged search is actually enabled
   if (mergedSearchSources.includes('tmdb') && (userConfig.tmdbBearerToken || require('../config').TMDB_BEARER_TOKEN)) {
     allKnownTypes.add('search'); // For merged search
-    console.log(`[AddonBuilder] Added 'search' type to manifest for merged search`);
   }
   
   // Only add 'anime' type if anime search is actually enabled
   if (userConfig.animeSearchEnabled === true) {
     allKnownTypes.add('anime'); // For anime search
-    console.log(`[AddonBuilder] Added 'anime' type to manifest for anime search`);
   }
 
   // Add types from customMediaTypeNames (user overrides)
@@ -370,7 +348,6 @@ async function createAddon(userConfig) {
     try {
       const { fetchTmdbGenres } = require('../integrations/tmdb');
       const genreLanguage = userConfig.tmdbLanguage || 'en-US';
-      console.log(`[ADDON BUILDER] Fetching TMDB genres for language: ${genreLanguage}`);
       
       const tmdbGenres = await Promise.race([
         fetchTmdbGenres(genreLanguage, userConfig.tmdbBearerToken),
@@ -378,7 +355,6 @@ async function createAddon(userConfig) {
       ]);
       if (tmdbGenres.length > 0) {
         availableGenres = tmdbGenres;
-        console.log(`[ADDON BUILDER] Using ${tmdbGenres.length} TMDB genres in ${genreLanguage}`);
       }
     } catch (error) {
       console.warn('Failed to fetch TMDB genres, falling back to static genres:', error.message);
@@ -414,16 +390,12 @@ async function createAddon(userConfig) {
 
   let activeListsInfo = [];
   if (apiKey) {
-    console.log('[ADDON BUILDER] Fetching MDBList lists...');
     const mdbLists = await fetchAllMDBLists(apiKey);
     activeListsInfo.push(...mdbLists.map(l => ({ ...l, source: 'mdblist', originalId: String(l.id) })));
-    console.log(`[ADDON BUILDER] Fetched ${mdbLists.length} MDBList lists`);
   }
   if (traktAccessToken) {
-    console.log('[ADDON BUILDER] Fetching Trakt lists...');
     const traktFetchedLists = await fetchTraktLists(userConfig); // This might modify userConfig (token refresh)
     activeListsInfo.push(...traktFetchedLists.map(l => ({ ...l, source: 'trakt', originalId: String(l.id) })));
-    console.log(`[ADDON BUILDER] Fetched ${traktFetchedLists.length} Trakt lists`);
   }
   
   if (userConfig.tmdbSessionId && userConfig.tmdbAccountId) {
@@ -449,7 +421,6 @@ async function createAddon(userConfig) {
     // Skip hidden lists entirely - they should not appear in the manifest
     const isHidden = hiddenListsSet.has(currentListId);
     if (isHidden) {
-        console.log(`[AddonBuilder] Skipping hidden list ${currentListId} from manifest`);
         return;
     }
 
@@ -606,7 +577,7 @@ async function createAddon(userConfig) {
     }
   };
   
-  console.log(`[AddonBuilder] Processing ${activeListsInfo.length} lists in parallel...`);
+
   const listProcessingStartTime = Date.now();
   
   // Process lists in parallel with controlled concurrency
@@ -648,7 +619,7 @@ async function createAddon(userConfig) {
                 if (existingMetadata && typeof existingMetadata.hasMovies === 'boolean' && typeof existingMetadata.hasShows === 'boolean') {
                     determinedHasMovies = existingMetadata.hasMovies;
                     determinedHasShows = existingMetadata.hasShows;
-                    console.log(`[AddonBuilder] Using cached metadata for ${fullManifestListId}: movies=${determinedHasMovies}, shows=${determinedHasShows}`);
+            
                 } else {
                     // Fall back to API response data
                     const moviesCount = parseInt(listInfo.movies) || 0;
@@ -664,7 +635,7 @@ async function createAddon(userConfig) {
                             determinedHasShows = true;
                         }
                     }
-                    console.log(`[AddonBuilder] Determined from API data for ${fullManifestListId}: movies=${determinedHasMovies}, shows=${determinedHasShows}`);
+            
                 }
             }
 
@@ -699,10 +670,10 @@ async function createAddon(userConfig) {
                     // Watchlist and favorites can contain both movies and shows
                     determinedHasMovies = true;
                     determinedHasShows = true;
-                    console.log(`[AddonBuilder] Using defaults for ${currentListId}: movies=true, shows=true`);
+            
                 } else if (currentListId.startsWith('tmdb_list_')) {
                     // For custom TMDB lists, use lightweight check instead of full fetch
-                    console.log(`[AddonBuilder] Using defaults for custom TMDB list ${currentListId}: movies=true, shows=true`);
+            
                     determinedHasMovies = true;
                     determinedHasShows = true;
                 } else {
@@ -720,7 +691,7 @@ async function createAddon(userConfig) {
                     lastChecked: new Date().toISOString()
                 };
             } else {
-                console.log(`[AddonBuilder] Using cached metadata for ${currentListId}: movies=${determinedHasMovies}, shows=${determinedHasShows}`);
+        
             }
             
             let listDataForProcessing = { 
@@ -734,7 +705,7 @@ async function createAddon(userConfig) {
         }
         
         const listEndTime = Date.now();
-        console.log(`[AddonBuilder] Processed list ${listInfo.id || listInfo.name} in ${listEndTime - listStartTime}ms`);
+
         
       } catch (error) {
         console.error(`[AddonBuilder] Error processing list ${listInfo.id || listInfo.name}:`, error.message);
@@ -751,10 +722,10 @@ async function createAddon(userConfig) {
   }
   
   const listProcessingEndTime = Date.now();
-  console.log(`[AddonBuilder] Completed processing ${activeListsInfo.length} lists in ${listProcessingEndTime - listProcessingStartTime}ms (parallel)`);
+  
   
   // Only process Trakt lists that need metadata checking in a separate, optimized pass
-  console.log(`[AddonBuilder] Starting optimized Trakt metadata checking...`);
+  
   const traktMetadataStartTime = Date.now();
   
   const traktListsNeedingMetadata = activeListsInfo.filter(listInfo => {
@@ -768,7 +739,7 @@ async function createAddon(userConfig) {
   });
   
   if (traktListsNeedingMetadata.length > 0) {
-    console.log(`[AddonBuilder] Found ${traktListsNeedingMetadata.length} Trakt lists needing metadata check`);
+
     
     // Process these in smaller parallel batches to avoid rate limiting
     const TRAKT_METADATA_CONCURRENCY = 2; // Only 2 at a time for Trakt
@@ -798,7 +769,7 @@ async function createAddon(userConfig) {
             }
             if (currentListId === 'trakt_watchlist') typeForMetaCheck = 'all';
 
-                         console.log(`[AddonBuilder] Checking metadata for Trakt list ${currentListId}...`);
+                 
              const lightweightMetadata = await getLightweightListMetadata(currentListId, tempUserConfigForMetadata, typeForMetaCheck);
              const sourceHasMovies = lightweightMetadata.hasMovies;
              const sourceHasShows = lightweightMetadata.hasShows;
@@ -812,7 +783,7 @@ async function createAddon(userConfig) {
             };
             delete userConfig.listsMetadata[currentListId].errorFetching;
             
-            console.log(`[AddonBuilder] Metadata check completed for ${currentListId}: movies=${sourceHasMovies}, shows=${sourceHasShows}`);
+    
             success = true;
           } catch (error) {
             fetchRetries++;
@@ -844,10 +815,10 @@ async function createAddon(userConfig) {
   }
   
   const traktMetadataEndTime = Date.now();
-  console.log(`[AddonBuilder] Trakt metadata checking completed in ${traktMetadataEndTime - traktMetadataStartTime}ms`);
+  
   
 
-  console.log(`[AddonBuilder] Processing ${Object.keys(importedAddons || {}).length} imported addons...`);
+
   for (const addon of Object.values(importedAddons || {})) {
     const addonGroupId = String(addon.id);
     if (removedListsSet.has(addonGroupId) || hiddenListsSet.has(addonGroupId)) {
@@ -926,23 +897,12 @@ async function createAddon(userConfig) {
     });
     
     // Extract the sorted catalogs
-    tempGeneratedCatalogs = catalogsWithIndex.map(item => item.catalog);
-    
-    console.log(`[AddonBuilder] Applied custom list ordering (${userConfig.listOrder.length} items in order)`);
-  } else {
-    console.log(`[AddonBuilder] No custom list ordering - preserving natural order (append to bottom)`);
-    // No sorting whatsoever - catalogs remain in the exact order they were added
-  }
+          tempGeneratedCatalogs = catalogsWithIndex.map(item => item.catalog);
+    } else {
+      // No sorting whatsoever - catalogs remain in the exact order they were added
+    }
 
   // Add search catalogs - now with three different types
-  console.log(`[AddonBuilder] ========== SEARCH CATALOG DEBUG ==========`);
-  console.log(`[AddonBuilder] userConfig.searchSources:`, userConfig.searchSources);
-  console.log(`[AddonBuilder] userConfig.mergedSearchSources:`, userConfig.mergedSearchSources);
-  console.log(`[AddonBuilder] userConfig.animeSearchEnabled:`, userConfig.animeSearchEnabled);
-  console.log(`[AddonBuilder] userConfig.tmdbBearerToken:`, !!userConfig.tmdbBearerToken);
-  console.log(`[AddonBuilder] process.env.TMDB_BEARER_TOKEN:`, !!process.env.TMDB_BEARER_TOKEN);
-  console.log(`[AddonBuilder] require('../config').TMDB_BEARER_TOKEN:`, !!require('../config').TMDB_BEARER_TOKEN);
-  console.log(`[AddonBuilder] ================================================`);
   
   // 1. Traditional Movie/Series Search
   const userSearchSources = userConfig.searchSources || [];  // Don't default to cinemeta
@@ -982,20 +942,13 @@ async function createAddon(userConfig) {
       extraSupported: searchCatalogExtra.map(e => e.name)
     });
     
-    console.log(`[AddonBuilder] Added traditional search catalogs with sources: ${userSearchSources.join(', ')}`);
-  } else {
-    console.log(`[AddonBuilder] No valid search sources configured - traditional search catalogs disabled`);
-    console.log(`[AddonBuilder] Available sources: ${userSearchSources.join(', ')}`);
-    console.log(`[AddonBuilder] TMDB available for traditional search: ${!!(userConfig.tmdbBearerToken || require('../config').TMDB_BEARER_TOKEN)}`);
   }
 
   // 2. Merged Search (TMDB Multi Search)
   const userMergedSearchSources = userConfig.mergedSearchSources || [];
   let hasValidMergedSearchSources = false;
   
-  // Debug logging
-  console.log(`[AddonBuilder] Merged search config check - mergedSearchSources:`, userMergedSearchSources);
-  console.log(`[AddonBuilder] TMDB Bearer Token available:`, !!(userConfig.tmdbBearerToken || require('../config').TMDB_BEARER_TOKEN));
+
   
   // Check if TMDB is available for merged search
   if (userMergedSearchSources.includes('tmdb') && (userConfig.tmdbBearerToken || require('../config').TMDB_BEARER_TOKEN)) {
@@ -1016,19 +969,12 @@ async function createAddon(userConfig) {
       extraSupported: mergedSearchCatalogExtra.map(e => e.name)
     });
     
-    console.log(`[AddonBuilder] Added merged search catalog with TMDB multi search`);
-  } else {
-    console.log(`[AddonBuilder] TMDB not available or merged search disabled - merged search catalog disabled`);
-    console.log(`[AddonBuilder] Debug: mergedSearchSources includes tmdb:`, userMergedSearchSources.includes('tmdb'));
-    console.log(`[AddonBuilder] Debug: TMDB token available:`, !!(userConfig.tmdbBearerToken || require('../config').TMDB_BEARER_TOKEN));
-    console.log(`[AddonBuilder] Fix: Set mergedSearchSources to ['tmdb'] and ensure TMDB Bearer Token is configured`);
   }
 
   // 3. Anime Search
   const animeSearchEnabled = userConfig.animeSearchEnabled || false;
   
-  // Debug logging
-  console.log(`[AddonBuilder] Anime search config check - animeSearchEnabled:`, animeSearchEnabled);
+
   
   if (animeSearchEnabled) {
     const animeSearchCatalogExtra = [
@@ -1044,10 +990,6 @@ async function createAddon(userConfig) {
       extraSupported: animeSearchCatalogExtra.map(e => e.name)
     });
     
-    console.log(`[AddonBuilder] Added anime search catalog`);
-  } else {
-    console.log(`[AddonBuilder] Anime search disabled`);
-    console.log(`[AddonBuilder] Fix: Set animeSearchEnabled to true in user configuration`);
   }
   
   manifest.catalogs = tempGeneratedCatalogs;
@@ -1055,7 +997,6 @@ async function createAddon(userConfig) {
 
   builder.defineCatalogHandler(async ({ type, id, extra }) => {
     const catalogStartTime = Date.now();
-    console.log(`[CATALOG PERF] Starting catalog request for ${id} (type: ${type})`);
     
     const skip = parseInt(extra?.skip) || 0;
     const genre = extra?.genre || null;
@@ -1073,7 +1014,6 @@ async function createAddon(userConfig) {
 
         if (id === 'aiolists_merged_search') {
           // Merged search using TMDB multi search
-          console.log(`[Search] Handling merged search for "${searchQuery}"`);
           
           searchResults = await searchContent({
             query: searchQuery.trim(),
@@ -1084,7 +1024,6 @@ async function createAddon(userConfig) {
           });
         } else if (id === 'aiolists_anime_search') {
           // Anime search using Kitsu API
-          console.log(`[Search] Handling anime search for "${searchQuery}"`);
           
           searchResults = await searchContent({
             query: searchQuery.trim(),
@@ -1095,7 +1034,6 @@ async function createAddon(userConfig) {
           });
         } else {
           // Traditional movie/series search
-          console.log(`[Search] Handling traditional search for "${searchQuery}" (catalog: ${id})`);
           
           // Determine search sources based on user configuration
           const userSearchSources = userConfig.searchSources || [];
@@ -1114,7 +1052,6 @@ async function createAddon(userConfig) {
           
           // If no valid sources are configured, return empty results
           if (sources.length === 0) {
-            console.log(`[Search] No valid search sources configured, returning empty results`);
             return Promise.resolve({ metas: [] });
           }
 
@@ -1148,7 +1085,7 @@ async function createAddon(userConfig) {
               String(g).toLowerCase() === String(genre).toLowerCase()
             );
           });
-          console.log(`[Search] Genre filter "${genre}": ${beforeFilter} -> ${filteredMetas.length} results`);
+  
         }
 
         return Promise.resolve({ 
@@ -1164,39 +1101,26 @@ async function createAddon(userConfig) {
     
     // Handle regular list catalogs
     const fetchStartTime = Date.now();
-    console.log(`[CATALOG PERF] Fetching list content for ${id}...`);
+    
     const itemsResult = await fetchListContent(id, userConfig, skip, genre, type); 
     const fetchEndTime = Date.now();
-    console.log(`[CATALOG PERF] List content fetch completed in ${fetchEndTime - fetchStartTime}ms for ${id}`);
+    
     
     if (!itemsResult || !itemsResult.allItems) {
-      console.log(`[CATALOG PERF] No items found for ${id}, returning empty`);
+      
       return Promise.resolve({ metas: [] });
     }
-    console.log(`[CATALOG PERF] Found ${itemsResult.allItems.length} items for ${id}`);
+    
 
     // Enrich items with metadata based on user's metadata source preference
     const enrichStartTime = Date.now();
-    console.log(`[CATALOG PERF] Starting metadata enrichment for ${itemsResult.allItems.length} items...`);
+    
     const metadataSource = userConfig.metadataSource || 'cinemeta';
     const hasTmdbOAuth = !!(userConfig.tmdbSessionId && userConfig.tmdbAccountId);
     const tmdbLanguage = userConfig.tmdbLanguage || 'en-US';
     
-    // Debug the environment variable loading
-    const envToken = require('../config').TMDB_BEARER_TOKEN;
-    console.log(`[DEBUG] AddonBuilder - Raw env TMDB_BEARER_TOKEN: "${envToken}"`);
-    console.log(`[DEBUG] AddonBuilder - Raw env TMDB_BEARER_TOKEN length: ${envToken ? envToken.length : 'null/undefined'}`);
-    console.log(`[DEBUG] AddonBuilder - process.env.TMDB_BEARER_TOKEN exists: ${!!process.env.TMDB_BEARER_TOKEN}`);
-    console.log(`[DEBUG] AddonBuilder - process.env.TMDB_BEARER_TOKEN length: ${process.env.TMDB_BEARER_TOKEN ? process.env.TMDB_BEARER_TOKEN.length : 'null/undefined'}`);
-    
-    const tmdbBearerToken = userConfig.tmdbBearerToken || envToken;
-    
-    console.log(`[DEBUG] AddonBuilder - metadataSource: ${metadataSource}, hasTmdbOAuth: ${hasTmdbOAuth}, tmdbBearerToken: ${tmdbBearerToken ? 'SET' : 'NULL/UNDEFINED'}`);
-    console.log(`[DEBUG] AddonBuilder - userConfig.tmdbBearerToken: ${userConfig.tmdbBearerToken ? 'SET' : 'NULL/UNDEFINED'}`);
-    console.log(`[DEBUG] AddonBuilder - userConfig.tmdbBearerToken exact value: "${userConfig.tmdbBearerToken}"`);
-    console.log(`[DEBUG] AddonBuilder - environment TMDB_BEARER_TOKEN: ${envToken ? 'SET' : 'NULL/UNDEFINED'}`);
-    console.log(`[DEBUG] AddonBuilder - final tmdbBearerToken: ${tmdbBearerToken ? 'SET' : 'NULL/UNDEFINED'}`);
-    console.log(`[DEBUG] AddonBuilder - final tmdbBearerToken length: ${tmdbBearerToken ? tmdbBearerToken.length : 'null/undefined'}`);
+          const envToken = require('../config').TMDB_BEARER_TOKEN;
+      const tmdbBearerToken = userConfig.tmdbBearerToken || envToken;
     
     const { enrichItemsWithMetadata } = require('../utils/metadataFetcher');
     const enrichedItems = await enrichItemsWithMetadata(
@@ -1207,12 +1131,12 @@ async function createAddon(userConfig) {
       tmdbBearerToken
     );
     const enrichEndTime = Date.now();
-    console.log(`[CATALOG PERF] Metadata enrichment completed in ${enrichEndTime - enrichStartTime}ms`);
+    
     
     // Log conversion results for debugging
     const tmdbFormatItems = enrichedItems.filter(i => i.id && i.id.startsWith('tmdb:')).length;
     if (tmdbFormatItems > 0) {
-      console.log(`[DEBUG] Catalog contains ${tmdbFormatItems} items with tmdb: format IDs`);
+
     }
     
     // Update the items result with enriched items
@@ -1228,16 +1152,16 @@ async function createAddon(userConfig) {
     };
 
     const convertStartTime = Date.now();
-    console.log(`[CATALOG PERF] Converting ${enrichedResult.allItems.length} items to Stremio format...`);
+    
     let metas = await convertToStremioFormat(enrichedResult, userConfig.rpdbApiKey, metadataConfig);
     const convertEndTime = Date.now();
-    console.log(`[CATALOG PERF] Stremio format conversion completed in ${convertEndTime - convertStartTime}ms`);
+    
 
     // Apply type filtering
     if (type === 'movie' || type === 'series') {
         const beforeFilter = metas.length;
         metas = metas.filter(meta => meta.type === type);
-        console.log(`[CATALOG PERF] Type filter (${type}): ${beforeFilter} -> ${metas.length} items`);
+
     }
     
     // Apply genre filtering after enrichment (since we removed it from integration layer)
@@ -1250,12 +1174,12 @@ async function createAddon(userConfig) {
                 String(g).toLowerCase() === String(genre).toLowerCase()
             );
         });
-        console.log(`[AddonBuilder] Genre filter "${genre}": ${beforeFilterCount} -> ${metas.length} items after enrichment`);
+
     }
     
     const cacheMaxAge = (id === 'random_mdblist_catalog' || isWatchlist(id)) ? 0 : (5 * 60);
     const totalTime = Date.now() - catalogStartTime;
-    console.log(`[CATALOG PERF] Total catalog request completed in ${totalTime}ms for ${id} (${metas.length} items returned)`);
+    
     return Promise.resolve({ metas, cacheMaxAge });
   });
 
@@ -1272,9 +1196,7 @@ async function createAddon(userConfig) {
       const tmdbLanguage = userConfig.tmdbLanguage || 'en-US';
       const tmdbBearerToken = userConfig.tmdbBearerToken || require('../config').TMDB_BEARER_TOKEN;
       
-      console.log(`[MetaHandler] Processing ${id} with source: ${metadataSource}`);
-      console.log(`[MetaHandler] tmdbBearerToken available: ${!!tmdbBearerToken}`);
-      console.log(`[MetaHandler] hasTmdbOAuth: ${hasTmdbOAuth}`);
+      
       
       // Use user's preferred language for episode names and metadata
       const metaLanguage = tmdbLanguage;
@@ -1316,7 +1238,7 @@ async function createAddon(userConfig) {
         
         if (tmdbId) {
           try {
-            console.log(`[MetaHandler] Attempting to fetch TMDB metadata for ID: ${tmdbId}, type: ${tmdbType}`);
+  
             // Fetch comprehensive TMDB metadata
             const { fetchTmdbMetadata } = require('../integrations/tmdb');
             const tmdbMeta = await fetchTmdbMetadata(tmdbId, tmdbType, metaLanguage, tmdbBearerToken);
@@ -1356,7 +1278,7 @@ async function createAddon(userConfig) {
                       tmdbMeta.logo = cinemetaMeta.logo;
                     }
                     
-                    console.log(`[MetaHandler] Enhanced TMDB metadata with Cinemeta data for ${imdbIdForCinemeta}`);
+      
                   }
                 } catch (cinemetaError) {
                   console.warn(`[MetaHandler] Could not fetch Cinemeta data for ${imdbIdForCinemeta}:`, cinemetaError.message);
@@ -1414,7 +1336,7 @@ async function createAddon(userConfig) {
                 configurationRequired: false
               };
               
-              console.log(`[MetaHandler] Successfully fetched comprehensive TMDB metadata for ${id} -> ${tmdbMeta.id}`);
+
               
               return Promise.resolve({ 
                 meta: tmdbMeta,
@@ -1494,7 +1416,7 @@ async function createAddon(userConfig) {
           }
         });
         
-        console.log(`[MetaHandler] Returning enriched metadata for ${id} with ${Object.keys(meta).length} fields`);
+
         
         return Promise.resolve({ 
           meta,
@@ -1531,8 +1453,7 @@ async function createAddon(userConfig) {
   });
 
   const endTime = Date.now();
-  console.log(`[ADDON BUILDER] Addon creation completed in ${endTime - startTime}ms`);
-  console.log(`[ADDON BUILDER] Generated ${manifest.catalogs.length} catalogs`);
+
   
   const addonInterface = builder.getInterface();
   
@@ -1543,13 +1464,13 @@ async function createAddon(userConfig) {
       addon: addonInterface,
       timestamp: Date.now()
     });
-    console.log(`[ADDON BUILDER] Cached manifest for future requests (TTL: ${MANIFEST_CACHE_TTL / 1000}s)`);
+    
     
     // Clean up old cache entries (keep only last 5)
     if (manifestCache.size > 5) {
       const oldestKey = manifestCache.keys().next().value;
       manifestCache.delete(oldestKey);
-      console.log(`[ADDON BUILDER] Cleaned up old cache entry`);
+      
     }
   }
   
