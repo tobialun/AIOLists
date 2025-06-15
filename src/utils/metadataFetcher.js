@@ -10,7 +10,7 @@ const {
 } = require('../integrations/tmdb');
 
 const CINEMETA_BASE = 'https://v3-cinemeta.strem.io';
-const BATCH_SIZE = METADATA_BATCH_SIZE || 50;
+const BATCH_SIZE = METADATA_BATCH_SIZE || 20;
 
 // Helper function to normalize IMDB IDs
 function normalizeImdbId(id) {
@@ -223,12 +223,9 @@ async function enrichItemsWithTMDB(items, language = 'en-US', userBearerToken = 
       const itemWithId = itemsWithIds.find(i => i.originalIndex === index);
       return itemWithId && tmdbMetadataMap[itemWithId.imdbId];
     }).length;
-    
-    console.log(`[TMDB] Enriched ${enrichedCount}/${items.length} items with TMDB metadata`);
-    
+        
     // Count items with genre information after TMDB enrichment
     const itemsWithGenres = enrichedItems.filter(item => item.genres && item.genres.length > 0);
-    console.log(`[TMDB] ${itemsWithGenres.length}/${items.length} items have genre information after TMDB enrichment`);
     
     // If less than 50% of items were enriched, fall back to Cinemeta for better genre coverage
     if (enrichedCount < items.length * 0.5) {
@@ -318,7 +315,6 @@ async function enrichItemsWithCinemeta(items) {
     
     // Count items with genre information after Cinemeta enrichment
     const itemsWithGenres = enrichedItems.filter(item => item.genres && item.genres.length > 0);
-    console.log(`[Cinemeta] ${itemsWithGenres.length}/${items.length} items have genre information after Cinemeta enrichment`);
 
     return enrichedItems;
     

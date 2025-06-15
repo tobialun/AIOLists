@@ -18,7 +18,7 @@ const externalIdCache = new Map();
  * @param {Object} params.userConfig - User configuration
  * @returns {Promise<Object>} Search results
  */
-async function searchContent({ query, type = 'all', sources = ['cinemeta'], limit = 50, userConfig = {} }) {
+async function searchContent({ query, type = 'all', sources = ['cinemeta'], limit = 20, userConfig = {} }) {
   if (!query || query.trim().length < 2) {
     return { results: [], totalResults: 0, sources: [] };
   }
@@ -105,12 +105,9 @@ async function searchContent({ query, type = 'all', sources = ['cinemeta'], limi
     
     if (shouldEnhanceTmdbResults) {
       const effectiveLanguage = tmdbLanguage || 'en-US';
-      console.log(`[Search] Enhancing search results with TMDB metadata (language: ${effectiveLanguage}, source preference: ${metadataSource})`);
       finalResults = await enhanceSearchResultsWithTmdbLanguage(uniqueResults, effectiveLanguage, tmdbBearerToken, userConfig);
-      console.log(`[Search] Enhanced ${finalResults.length} results with TMDB metadata`);
     } else if (userConfig.rpdbApiKey) {
       // Apply RPDB posters even when not enhancing with TMDB language
-      console.log(`[Search] Applying RPDB posters to search results (${uniqueResults.length} results)`);
       finalResults = await applyRpdbPostersToSearchResults(uniqueResults, userConfig);
     }
 
@@ -220,10 +217,7 @@ async function searchTMDBMulti(query, limit, userConfig) {
         if (item.media_type === 'movie' || item.media_type === 'tv') {
           // Direct movie/TV result
           processedItems.push(item);
-        } else if (item.media_type === 'person' && item.known_for && Array.isArray(item.known_for)) {
-          // Person result - extract their known_for items
-          console.log(`[TMDB Multi Search] Found person: ${item.name}, extracting ${item.known_for.length} known_for items`);
-          
+        } else if (item.media_type === 'person' && item.known_for && Array.isArray(item.known_for)) {          
           for (const knownForItem of item.known_for) {
             if (knownForItem.media_type === 'movie' || knownForItem.media_type === 'tv') {
               // Add person context to the item
@@ -752,8 +746,6 @@ async function applyRpdbPostersToSearchResults(results, userConfig) {
       console.log('[Search] No IMDB IDs found for RPDB poster fetching');
       return results;
     }
-
-    console.log(`[Search] Fetching RPDB posters for ${imdbIds.length} search results`);
     
     const { batchFetchPosters } = require('../utils/posters');
     
@@ -782,10 +774,7 @@ async function applyRpdbPostersToSearchResults(results, userConfig) {
         });
       }
     });
-    
-    const appliedPosters = Object.values(posterMap).filter(url => url).length;
-    console.log(`[Search] Applied ${appliedPosters} RPDB posters to search results`);
-    
+        
     return enhancedResults;
     
   } catch (error) {
@@ -874,16 +863,7 @@ async function enhanceSearchResultsWithTmdbLanguage(results, language, bearerTok
               runtime: enhancedMetadata.runtime || item.runtime,
               status: enhancedMetadata.status || item.status
             };
-            
-            console.log(`[Search] Enhanced "${enhanced.name}" with ${language} metadata:`);
-            console.log(`  - Description: ${enhanced.description ? enhanced.description.substring(0, 50) + '...' : 'N/A'}`);
-            console.log(`  - Genres: ${enhanced.genres?.length || 0} (${enhanced.genres?.join(', ') || 'N/A'})`);
-            console.log(`  - Cast: ${enhanced.cast?.length || 0} members`);
-            console.log(`  - ID format: ${finalId} (was: ${imdbId}, TMDB: ${enhancedMetadata.tmdbId})`);
-            if (usesTmdbId) {
-              console.log(`  - Using TMDB ID format for language-specific metadata serving`);
-            }
-            
+                        
             // Apply RPDB posters if configured and we have an IMDb ID
             if (userConfig.rpdbApiKey && imdbId && imdbId.startsWith('tt')) {
               try {
@@ -899,15 +879,12 @@ async function enhanceSearchResultsWithTmdbLanguage(results, language, bearerTok
                 // Check if using free t0 key which doesn't support language parameters
                 const isFreeT0Key = userConfig.rpdbApiKey === 't0-free-rpdb';
                 const effectiveLanguage = isFreeT0Key ? null : rpdbLanguage;
-                
-                console.log(`[Search] Fetching RPDB poster for ${imdbId} with language: ${effectiveLanguage || 'default'}`);
-                
+                                
                 const posterMap = await batchFetchPosters([imdbId], userConfig.rpdbApiKey, effectiveLanguage);
                 const rpdbPoster = posterMap[imdbId];
                 
                 if (rpdbPoster) {
                   enhanced.poster = rpdbPoster;
-                  console.log(`  - Applied RPDB poster: ${rpdbPoster.substring(0, 50)}...`);
                 }
               } catch (error) {
                 console.warn(`[Search] Failed to fetch RPDB poster for ${imdbId}:`, error.message);
@@ -954,8 +931,6 @@ async function searchTMDBMultiMerged(query, limit, userConfig) {
   }
 
   try {
-    console.log(`[TMDB Merged Search] Searching for "${query}" with language: ${language}`);
-    
     const response = await axios.get(`${TMDB_BASE_URL_V3}/search/multi`, {
       params: {
         query: query,
@@ -988,8 +963,6 @@ async function searchTMDBMultiMerged(query, limit, userConfig) {
         processedItems.push(item);
       } else if (item.media_type === 'person' && item.known_for && Array.isArray(item.known_for)) {
         // Person result - extract their known_for items
-        console.log(`[TMDB Merged Search] Found person: ${item.name}, extracting ${item.known_for.length} known_for items`);
-        
         for (const knownForItem of item.known_for) {
           if (knownForItem.media_type === 'movie' || knownForItem.media_type === 'tv') {
             // Add person context to the item
@@ -1065,9 +1038,6 @@ async function searchTMDBMultiMerged(query, limit, userConfig) {
               foundVia: resultItem.foundVia || 'merged-search' // Preserve person context
             });
             
-            if (usesTmdbId) {
-              console.log(`[TMDB Merged Search] Using TMDB ID format for ${language}: ${finalId}`);
-            }
           }
         } catch (error) {
           console.warn(`[TMDB Merged Search] Failed to get full metadata for TMDB:${item.id}:`, error.message);
@@ -1084,8 +1054,6 @@ async function searchTMDBMultiMerged(query, limit, userConfig) {
     if (userConfig.rpdbApiKey) {
       finalResults = await applyRpdbPostersToSearchResults(results, userConfig);
     }
-
-    console.log(`[TMDB Merged Search] Found ${finalResults.length} results for "${query}"`);
 
     return {
       results: finalResults,
@@ -1111,9 +1079,7 @@ async function searchAnime(query, limit, userConfig) {
     return { results: [], totalResults: 0, sources: ['anime'] };
   }
 
-  try {
-    console.log(`[Anime Search] Searching for "${query}"`);
-    
+  try {    
     const response = await axios.get(`https://anime-kitsu.strem.fun/catalog/anime/kitsu-anime-list/search=${encodeURIComponent(query)}.json`, {
       timeout: 15000,
       headers: {
@@ -1201,8 +1167,6 @@ async function searchAnime(query, limit, userConfig) {
     if (userConfig.rpdbApiKey) {
       finalResults = await applyRpdbPostersToSearchResults(results, userConfig);
     }
-
-    console.log(`[Anime Search] Found ${finalResults.length} anime results for "${query}"`);
 
     return {
       results: finalResults,

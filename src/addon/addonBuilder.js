@@ -1026,7 +1026,7 @@ async function createAddon(userConfig) {
             query: searchQuery.trim(),
             type: 'search', // Use search type for merged search
             sources: ['multi'], // Use multi source for merged search
-            limit: 50,
+            limit: 20,
             userConfig: userConfig
           });
         } else if (id === 'aiolists_anime_search') {
@@ -1036,7 +1036,7 @@ async function createAddon(userConfig) {
             query: searchQuery.trim(),
             type: 'anime', // Use anime type for anime search
             sources: ['anime'], // Use anime source for anime search
-            limit: 50,
+            limit: 20,
             userConfig: userConfig
           });
         } else {
@@ -1069,7 +1069,7 @@ async function createAddon(userConfig) {
             query: searchQuery.trim(),
             type: searchType,
             sources: sources,
-            limit: 50,
+            limit: 20,
             userConfig: userConfig
           });
         }
@@ -1183,7 +1183,6 @@ async function createAddon(userConfig) {
         if (isExternalAddon) {
           const itemsWithGenres = metas.filter(meta => meta.genres && meta.genres.length > 0);
           const itemsWithoutGenres = metas.filter(meta => !meta.genres || meta.genres.length === 0);
-          console.log(`[Genre Filter] External addon "${id}": ${itemsWithGenres.length}/${metas.length} items have genre data (metadata source: ${userConfig.metadataSource || 'cinemeta'})`);
           
           if (itemsWithGenres.length > 0) {
             console.log(`[Genre Filter] Sample genres found:`, itemsWithGenres.slice(0, 3).map(item => ({

@@ -746,8 +746,6 @@ async function extractListFromUrl(url, apiKey) {
         hasMovies = true;
         hasShows = true;
       }
-
-      console.log(`[MDBList] Successfully extracted public list info for ${usernameFromUrl}/${listSlug}`);
       
       // Convert slug to human-readable name
       const humanReadableName = listSlug
@@ -835,8 +833,6 @@ async function extractListFromUrl(url, apiKey) {
               hasMovies = true;
               hasShows = true;
             }
-
-            console.log(`[MDBList] Public JSON fallback successful for ${usernameFromUrl}/${listSlug}`);
             
             // Convert slug to human-readable name
             const humanReadableName = listSlug

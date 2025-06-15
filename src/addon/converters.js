@@ -183,9 +183,7 @@ async function convertToStremioFormat(listContent, rpdbApiKey = null, metadataCo
       // Check if using free t0 key which doesn't support language parameters
       const isFreeT0Key = rpdbApiKey === 't0-free-rpdb';
       const effectiveLanguage = isFreeT0Key ? null : rpdbLanguage;
-      
-      console.log(`[RPDB] Fetching posters for ${imdbIds.length} items with language: ${effectiveLanguage || 'default'}${isFreeT0Key ? ' (free t0 key - no language support)' : ''}`);
-      
+            
       const posterMap = await batchFetchPosters(imdbIds, rpdbApiKey, effectiveLanguage);
       
       // Apply RPDB posters to items (RPDB takes priority over metadata source posters)
