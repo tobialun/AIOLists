@@ -659,8 +659,8 @@ async function fetchTmdbMetadata(tmdbId, type, language = 'en-US', userBearerTok
       try {
     
         
-        // Fetch episode data for all seasons (limit to first 10 seasons for performance)
-        const maxSeasons = Math.min(data.number_of_seasons, 10);
+        // Fetch episode data for all seasons
+        const maxSeasons = data.number_of_seasons;
         const seasonPromises = [];
         
         for (let seasonNum = 0; seasonNum <= maxSeasons; seasonNum++) {
