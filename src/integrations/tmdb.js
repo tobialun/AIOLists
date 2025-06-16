@@ -632,7 +632,9 @@ async function batchConvertImdbToTmdbIds(imdbIds, userBearerToken = DEFAULT_TMDB
 async function fetchTmdbMetadata(tmdbId, type, language = 'en-US', userBearerToken = DEFAULT_TMDB_BEARER_TOKEN) {
   if (!tmdbId) return null;
   
-  const cacheKey = `tmdb_${type}_${tmdbId}_${language}`;
+  // Include version in cache key to invalidate old cached data with incorrect episode numbering
+  const EPISODE_NUMBERING_VERSION = 'v2'; 
+  const cacheKey = `tmdb_${type}_${tmdbId}_${language}_${EPISODE_NUMBERING_VERSION}`;
   const cachedResult = tmdbCache.get(cacheKey);
   if (cachedResult) {
     return cachedResult === 'null' ? null : cachedResult;
@@ -789,13 +791,85 @@ function convertTmdbToStremioFormat(tmdbData, type) {
   if (!isMovie && tmdbData.seasons_with_episodes) {
 
     
+    // Detect if this is likely an anime with absolute episode numbering
+    // This happens when TMDB uses continuous numbering across seasons
+    let isAnimeWithAbsoluteNumbering = false;
+    let totalEpisodesProcessed = 0;
+    
+    // Check if any season has episodes with numbers that seem to be absolute rather than season-relative
+    for (const season of tmdbData.seasons_with_episodes) {
+      if (season.episodes && season.episodes.length > 0) {
+        const firstEpisode = season.episodes[0];
+        const lastEpisode = season.episodes[season.episodes.length - 1];
+        
+        // If the first episode number is much higher than 1 and doesn't match the expected pattern
+        // for season-relative numbering, this is likely absolute numbering
+        if (firstEpisode.episode_number > season.episodes.length * 2) {
+          isAnimeWithAbsoluteNumbering = true;
+          console.log(`[TMDB] Absolute numbering detected: Season ${season.season_number} starts with episode ${firstEpisode.episode_number} but has ${season.episodes.length} episodes`);
+          break;
+        }
+        
+        // If we see episodes with numbers like 100+ in what should be early seasons
+        if (season.season_number <= 5 && firstEpisode.episode_number >= 100) {
+          isAnimeWithAbsoluteNumbering = true;
+          console.log(`[TMDB] Absolute numbering detected: Season ${season.season_number} has episodes starting from ${firstEpisode.episode_number}`);
+          break;
+        }
+        
+        // Additional check: if episode numbers don't reset between seasons
+        if (totalEpisodesProcessed > 0 && firstEpisode.episode_number > totalEpisodesProcessed + 10) {
+          // There's a gap, but if the gap is too large, it's probably absolute numbering
+          isAnimeWithAbsoluteNumbering = true;
+          console.log(`[TMDB] Absolute numbering detected: Episode numbering gap between seasons (expected ~${totalEpisodesProcessed + 1}, got ${firstEpisode.episode_number})`);
+          break;
+        } else if (totalEpisodesProcessed > 0 && firstEpisode.episode_number > totalEpisodesProcessed) {
+          // Episodes continue from previous season without resetting - clear sign of absolute numbering
+          isAnimeWithAbsoluteNumbering = true;
+          console.log(`[TMDB] Absolute numbering detected: Episodes continue from previous season (${totalEpisodesProcessed} -> ${firstEpisode.episode_number})`);
+          break;
+        }
+        
+        totalEpisodesProcessed += season.episodes.length;
+      }
+    }
+    
+    // Additional check for series with many episodes in later seasons starting with high numbers
+    // This catches cases like One Piece where early detection might miss it
+    if (!isAnimeWithAbsoluteNumbering) {
+      for (const season of tmdbData.seasons_with_episodes) {
+        if (season.episodes && season.episodes.length > 10) { // Only check seasons with substantial episode counts
+          const avgEpisodeNumber = season.episodes.reduce((sum, ep) => sum + ep.episode_number, 0) / season.episodes.length;
+          // If the average episode number is much higher than what we'd expect for season-relative numbering
+          if (avgEpisodeNumber > season.season_number * 50) { // Very conservative threshold
+            isAnimeWithAbsoluteNumbering = true;
+            console.log(`[TMDB] Absolute numbering detected: Season ${season.season_number} has average episode number ${avgEpisodeNumber.toFixed(1)}`);
+            break;
+          }
+        }
+      }
+    }
+    
+    console.log(`[TMDB] Processing ${tmdbData.name} - Anime absolute numbering detected: ${isAnimeWithAbsoluteNumbering}`);
+    
     tmdbData.seasons_with_episodes.forEach(season => {
       if (season.episodes && Array.isArray(season.episodes)) {
-        season.episodes.forEach(episode => {
+        season.episodes.forEach((episode, episodeIndex) => {
+          // Calculate proper episode number for the season
+          let seasonEpisodeNumber = episode.episode_number;
+          
+          if (isAnimeWithAbsoluteNumbering) {
+            // For anime with absolute numbering, use the position within the season
+            // rather than the absolute episode number
+            seasonEpisodeNumber = episodeIndex + 1;
+            
+            console.log(`[TMDB] Converted episode ${episode.episode_number} to season ${season.season_number} episode ${seasonEpisodeNumber} for ${tmdbData.name}`);
+          }
+          
           // Use IMDB ID for episode IDs if available, otherwise use TMDB format
           const episodeId = imdbId && imdbId.startsWith('tt') ? 
-            `${imdbId}:${season.season_number}:${episode.episode_number}` :
-            `${tmdbId}:${season.season_number}:${episode.episode_number}`;
+            `${imdbId}:${season.season_number}:${seasonEpisodeNumber}` :
+            `${tmdbId}:${season.season_number}:${seasonEpisodeNumber}`;
           
           // Format air date if available
           let airDateFormatted = null;
@@ -805,22 +879,24 @@ function convertTmdbToStremioFormat(tmdbData, type) {
           
           videos.push({
             id: episodeId,
-            name: episode.name || `Episode ${episode.episode_number}`,
+            name: episode.name || `Episode ${seasonEpisodeNumber}`,
             season: season.season_number,
-            number: episode.episode_number,
-            episode: episode.episode_number,
+            number: seasonEpisodeNumber, // Use season-relative number
+            episode: seasonEpisodeNumber, // Use season-relative number
             thumbnail: episode.still_path ? `https://image.tmdb.org/t/p/w500${episode.still_path}` : undefined,
             overview: episode.overview || "",
             description: episode.overview || "",
             rating: episode.vote_average ? parseFloat(episode.vote_average).toFixed(1) : "0",
             firstAired: airDateFormatted,
-            released: airDateFormatted
+            released: airDateFormatted,
+            // Keep absolute number as additional metadata for reference
+            absoluteNumber: isAnimeWithAbsoluteNumbering ? episode.episode_number : undefined
           });
         });
       }
     });
     
-    // Sort episodes by season and episode number
+    // Sort episodes by season and episode number (now using season-relative numbers)
     videos.sort((a, b) => {
       if (a.season !== b.season) {
         return a.season - b.season;
@@ -1099,16 +1175,62 @@ function clearTmdbCaches() {
   imdbToTmdbCache.clear();
 }
 
+// Test function to verify anime episode numbering fix (for development/debugging)
+async function testAnimeEpisodeNumbering(tmdbId = 37854, bearerToken = null) {
+  console.log(`[TMDB Test] Testing anime episode numbering for TMDB ID: ${tmdbId}`);
+  
+  try {
+    const metadata = await fetchTmdbMetadata(tmdbId, 'series', 'en-US', bearerToken);
+    
+    if (metadata && metadata.videos && metadata.videos.length > 0) {
+      console.log(`[TMDB Test] Found ${metadata.videos.length} episodes for ${metadata.name}`);
+      
+      // Show sample episodes from different seasons
+      const sampleEpisodes = metadata.videos.filter((ep, index) => 
+        index < 5 || // First 5 episodes
+        (ep.season === 22 && ep.episode <= 50) || // Season 22 episodes 1-50
+        ep.episode > 1000 // High numbered episodes
+      ).slice(0, 20);
+      
+      console.log(`[TMDB Test] Sample episodes:`);
+      sampleEpisodes.forEach(ep => {
+        console.log(`  Season ${ep.season} Episode ${ep.episode}: ${ep.name} (ID: ${ep.id})${ep.absoluteNumber ? ` [Absolute: ${ep.absoluteNumber}]` : ''}`);
+      });
+      
+      // Check for the specific case mentioned in the issue
+      const season22Episodes = metadata.videos.filter(ep => ep.season === 22 && ep.episode >= 45 && ep.episode <= 50);
+      if (season22Episodes.length > 0) {
+        console.log(`[TMDB Test] Season 22 episodes 45-50 for verification:`);
+        season22Episodes.forEach(ep => {
+          console.log(`  S22E${ep.episode}: ${ep.name} (ID: ${ep.id})${ep.absoluteNumber ? ` [Absolute: ${ep.absoluteNumber}]` : ''}`);
+        });
+      }
+      
+      return metadata;
+    } else {
+      console.log(`[TMDB Test] No episodes found for series ${tmdbId}`);
+      return null;
+    }
+  } catch (error) {
+    console.error(`[TMDB Test] Error testing anime episode numbering:`, error.message);
+    return null;
+  }
+}
+
 module.exports = {
-  validateTMDBKey,
+  createTmdbRequestToken,
+  createTmdbSession,
+  getTmdbAccountDetails,
   getTmdbAuthUrl,
   authenticateTmdb,
   fetchTmdbLists,
   fetchTmdbListItems,
+  validateTMDBKey,
   convertImdbToTmdbId,
   batchConvertImdbToTmdbIds,
   fetchTmdbMetadata,
   batchFetchTmdbMetadata,
   fetchTmdbGenres,
-  clearTmdbCaches
+  clearTmdbCaches,
+  testAnimeEpisodeNumbering // Export test function
 }; 
