@@ -1,5 +1,5 @@
 // src/config/index.js
-const ITEMS_PER_PAGE = const pageSize = Math.min(parseInt(req.query.limit || ITEMS_PER_PAGE), 100);
+const ITEMS_PER_PAGE = 100;
 const PORT = process.env.PORT || 7860;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
