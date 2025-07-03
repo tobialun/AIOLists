@@ -1,11 +1,11 @@
 // src/config/index.js
-const ITEMS_PER_PAGE = 40;
+const ITEMS_PER_PAGE = 24;
 const PORT = process.env.PORT || 7860;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 // Performance optimization constants
-const METADATA_BATCH_SIZE = 40; // Increased from default 10
-const POSTER_BATCH_SIZE = 40; // Increased from default 25
+const METADATA_BATCH_SIZE = 24; // Increased from default 10
+const POSTER_BATCH_SIZE = 24; // Increased from default 25
 const TRAKT_CONCURRENT_REQUESTS = 6; // Increased concurrency
 const TMDB_CONCURRENT_REQUESTS = 35; // Increased concurrency for better performance
 const MDB_LIST_CONCURRENT_REQUESTS = 5; // New batch setting
